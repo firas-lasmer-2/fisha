@@ -127,6 +127,7 @@ export async function registerRoutes(
     governorate: null,
     bio: null,
     isAnonymous: false,
+    displayName: null,
     onboardingCompleted: false,
     createdAt: null,
     updatedAt: null,
@@ -876,6 +877,7 @@ export async function registerRoutes(
       if (!Number.isInteger(slotId)) return res.status(400).json({ message: "Invalid slot id" });
 
       const clientId = req.user.id;
+      const paymentMethod: string = req.body.paymentMethod || "flouci";
       const result = await storage.createAppointmentFromSlot(
         slotId,
         clientId,
@@ -891,7 +893,23 @@ export async function registerRoutes(
         { type: "appointment", appointmentId: String(result.appointment.id) },
       );
 
-      res.status(201).json(result);
+      // Auto-initiate payment if price > 0
+      let paymentUrl: string | null = null;
+      if (result.slot.priceDinar > 0) {
+        const transaction = await storage.createPaymentTransaction({
+          clientId,
+          therapistId: result.appointment.therapistId,
+          appointmentId: result.appointment.id,
+          amountDinar: result.slot.priceDinar,
+          paymentMethod,
+          status: "pending",
+        });
+        paymentUrl = paymentMethod === "konnect"
+          ? `https://api.konnect.network/pay/${transaction.id}`
+          : `https://developers.flouci.com/pay/${transaction.id}`;
+      }
+
+      res.status(201).json({ ...result, paymentUrl });
     } catch (error) {
       res.status(500).json({ message: "Failed to create appointment from slot" });
     }
@@ -976,11 +994,37 @@ export async function registerRoutes(
 
   app.post("/api/ai/match-therapist", isAuthenticated, async (req: any, res) => {
     try {
+      const userId = req.user.id;
       const { concerns, language, gender, budget } = req.body;
       const allTherapists = await storage.getTherapistProfiles({});
 
       if (allTherapists.length === 0) {
         return res.json({ recommendations: [], message: "No therapists available yet" });
+      }
+
+      // Gather session history — previously booked/completed therapists
+      const pastAppointments = await storage.getAppointments(userId);
+      const now = new Date();
+      const in48h = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+
+      // Map therapist bonuses
+      const previousTherapistIds = new Set(
+        pastAppointments
+          .filter((a) => a.status === "completed" && a.therapistId !== userId)
+          .map((a) => a.therapistId),
+      );
+
+      // Therapists with open slots in next 48 hours
+      const availableSoonIds = new Set<string>();
+      for (const therapist of allTherapists) {
+        const slots = await storage.getTherapistSlots(
+          therapist.userId,
+          now.toISOString(),
+          in48h.toISOString(),
+        );
+        if (slots.some((s) => s.status === "open")) {
+          availableSoonIds.add(therapist.userId);
+        }
       }
 
       const therapistData = allTherapists.map((t) => ({
@@ -992,6 +1036,10 @@ export async function registerRoutes(
         rating: t.rating,
         gender: t.gender,
         experience: t.yearsExperience,
+        bonuses: {
+          previousSessionBonus: previousTherapistIds.has(t.userId) ? 15 : 0,
+          availabilitySoonBonus: availableSoonIds.has(t.userId) ? 10 : 0,
+        },
       }));
 
       const response = await openai.chat.completions.create({
@@ -1001,6 +1049,7 @@ export async function registerRoutes(
             role: "system",
             content: `You are a therapist matching assistant for a Tunisian mental health platform called Shifa.
 Given a user's needs and available therapists, rank the top 3 most suitable therapists with a brief explanation in the user's preferred language.
+Each therapist has optional bonuses: previousSessionBonus (user has had a session before, +15 pts) and availabilitySoonBonus (has open slots in next 48h, +10 pts). Factor these into your matchScore.
 Respond in JSON format: { "recommendations": [{ "therapistId": "...", "matchScore": 0-100, "reason": "..." }] }`,
           },
           {
@@ -1011,7 +1060,7 @@ Respond in JSON format: { "recommendations": [{ "therapistId": "...", "matchScor
 - Gender preference: ${gender || "any"}
 - Budget: ${budget || "any"} TND
 
-Available therapists:
+Available therapists (with context bonuses):
 ${JSON.stringify(therapistData, null, 2)}`,
           },
         ],
@@ -1065,10 +1114,39 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
   app.patch("/api/user/profile", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const user = await storage.updateUser(userId, req.body);
+      const { displayName, ...rest } = req.body;
+
+      // Validate displayName format if provided
+      if (displayName !== undefined && displayName !== null) {
+        const namePattern = /^[a-zA-Z0-9\u0600-\u06FF_]{3,30}$/;
+        if (!namePattern.test(displayName)) {
+          return res.status(400).json({ message: "Invalid display name format" });
+        }
+        // Check uniqueness
+        const available = await storage.isDisplayNameAvailable(displayName, userId);
+        if (!available) {
+          return res.status(409).json({ message: "Display name already taken" });
+        }
+      }
+
+      const user = await storage.updateUser(userId, { ...rest, displayName: displayName ?? undefined });
       res.json(user);
     } catch (error) {
       res.status(500).json({ message: "Failed to update profile" });
+    }
+  });
+
+  app.get("/api/user/display-name/check/:name", isAuthenticated, async (req: any, res) => {
+    try {
+      const { name } = req.params;
+      const namePattern = /^[a-zA-Z0-9\u0600-\u06FF_]{3,30}$/;
+      if (!namePattern.test(name)) {
+        return res.json({ available: false, reason: "invalid_format" });
+      }
+      const available = await storage.isDisplayNameAvailable(name, req.user.id);
+      res.json({ available });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to check display name" });
     }
   });
 
@@ -1139,6 +1217,29 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
       res.json({ ...profile, user });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch therapist by slug" });
+    }
+  });
+
+  // ---- Public therapist landing page ----
+
+  app.get("/api/therapist/page/:slug", async (req, res) => {
+    try {
+      const profile = await storage.getTherapistBySlug(req.params.slug);
+      if (!profile) return res.status(404).json({ message: "Not found" });
+      if (!profile.landingPageEnabled) return res.status(404).json({ message: "Landing page not enabled" });
+
+      const [user, reviews, slots] = await Promise.all([
+        storage.getUser(profile.userId),
+        storage.getReviewsByTherapist(profile.userId),
+        storage.getTherapistSlots(profile.userId),
+      ]);
+
+      const openSlots = slots.filter((s) => s.status === "open" && new Date(s.startsAt) > new Date());
+      const publishedReviews = reviews.filter((r) => r.comment).slice(0, 6);
+
+      res.json({ profile, user, reviews: publishedReviews, openSlots });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch landing page" });
     }
   });
 
@@ -1277,6 +1378,34 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
       res.json(payments);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch payments" });
+    }
+  });
+
+  app.get("/api/payments/:id/receipt", isAuthenticated, async (req: any, res) => {
+    try {
+      const paymentId = Number(req.params.id);
+      if (!Number.isInteger(paymentId)) return res.status(400).json({ message: "Invalid payment id" });
+
+      const userId = req.user.id;
+      const payments = await storage.getPaymentsByUser(userId);
+      const payment = payments.find((p) => p.id === paymentId);
+      if (!payment) return res.status(404).json({ message: "Payment not found" });
+
+      // Enrich with therapist name and appointment details
+      const therapist = await storage.getUser(payment.therapistId);
+      const appointment = payment.appointmentId
+        ? await storage.getAppointment(payment.appointmentId)
+        : null;
+
+      res.json({
+        payment,
+        therapistName: therapist
+          ? [therapist.firstName, therapist.lastName].filter(Boolean).join(" ")
+          : payment.therapistId,
+        appointment,
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch receipt" });
     }
   });
 
@@ -2090,6 +2219,82 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
       res.json({ report, listenerProgress });
     } catch (error) {
       res.status(500).json({ message: "Failed to resolve peer report" });
+    }
+  });
+
+  // ---- Therapist Verification ----
+
+  app.post("/api/therapist/verification/upload", isAuthenticated, async (req: any, res) => {
+    try {
+      const therapistId = req.user.id;
+      const { documentType, documentUrl } = req.body;
+      if (!documentType || !documentUrl) {
+        return res.status(400).json({ message: "documentType and documentUrl are required" });
+      }
+      const valid = ["license", "diploma", "id_card", "cv"];
+      if (!valid.includes(documentType)) {
+        return res.status(400).json({ message: "Invalid document type" });
+      }
+      const verification = await storage.upsertTherapistVerification({
+        therapistId,
+        documentType,
+        documentUrl,
+      });
+      res.json(verification);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to upload verification" });
+    }
+  });
+
+  app.get("/api/therapist/verification", isAuthenticated, async (req: any, res) => {
+    try {
+      const therapistId = req.user.id;
+      const verifications = await storage.getTherapistVerifications(therapistId);
+      res.json(verifications);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch verifications" });
+    }
+  });
+
+  app.get("/api/admin/verifications", isAuthenticated, requireRoles(["moderator", "admin"]), async (req, res) => {
+    try {
+      const status = typeof req.query.status === "string" ? req.query.status : undefined;
+      const verifications = await storage.getAllVerifications(status);
+      res.json(verifications);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch verifications" });
+    }
+  });
+
+  app.post("/api/admin/verifications/:id/review", isAuthenticated, requireRoles(["moderator", "admin"]), async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) return res.status(400).json({ message: "Invalid id" });
+      const { status, notes } = req.body;
+      if (!["approved", "rejected"].includes(status)) {
+        return res.status(400).json({ message: "Status must be approved or rejected" });
+      }
+      const reviewerId = req.user.id;
+      const verification = await storage.reviewTherapistVerification(id, status, reviewerId, notes);
+      if (!verification) return res.status(404).json({ message: "Not found" });
+
+      // If approved, mark therapist as verified
+      if (status === "approved") {
+        await storage.updateTherapistProfile(verification.therapistId, { verified: true });
+      }
+
+      res.json(verification);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to review verification" });
+    }
+  });
+
+  app.get("/api/admin/analytics", isAuthenticated, requireRoles(["moderator", "admin"]), async (req, res) => {
+    try {
+      const analytics = await storage.getAdminAnalytics();
+      res.json(analytics);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch analytics" });
     }
   });
 

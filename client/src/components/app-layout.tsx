@@ -8,7 +8,7 @@ import { Link, useLocation } from "wouter";
 import {
   Heart, LayoutDashboard, Users, MessageCircle, Smile, BookOpen,
   Calendar, Library, LogOut, Wind, UserCircle, AlertCircle,
-  HeartHandshake, ShieldCheck, UserPlus, Sparkles,
+  HeartHandshake, ShieldCheck, UserPlus, Sparkles, TrendingUp,
 } from "lucide-react";
 
 function homeHrefForRole(role: string | null | undefined): string {
@@ -53,10 +53,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       ? [{ href: "/listener/dashboard", icon: UserCircle, label: tr("nav.listener_dashboard", "Listener Dashboard") }]
       : []),
     ...(user?.role === "moderator" || user?.role === "admin"
-      ? [{ href: "/admin/listeners", icon: ShieldCheck, label: tr("nav.admin_listeners", "Listener Moderation") }]
+      ? [
+          { href: "/admin/listeners", icon: ShieldCheck, label: tr("nav.admin_listeners", "Listener Moderation") },
+          { href: "/admin/dashboard", icon: LayoutDashboard, label: tr("nav.admin_dashboard", "Admin Dashboard") },
+        ]
       : []),
     ...(user?.role === "client"
-      ? [{ href: "/listener/apply", icon: UserPlus, label: tr("nav.listener_apply", "Become a Listener") }]
+      ? [
+          { href: "/progress", icon: TrendingUp, label: tr("nav.progress", "Progress") },
+          { href: "/listener/apply", icon: UserPlus, label: tr("nav.listener_apply", "Become a Listener") },
+        ]
       : []),
   ];
 

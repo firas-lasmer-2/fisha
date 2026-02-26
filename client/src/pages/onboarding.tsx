@@ -1,14 +1,16 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useI18n } from "@/lib/i18n";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Heart, ArrowRight, ArrowLeft, Check, Loader2 } from "lucide-react";
+import { Heart, ArrowRight, ArrowLeft, Check, Loader2, AtSign, X } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
+import { getAccessToken } from "@/lib/supabase";
 import { motion } from "framer-motion";
 
 const CONCERNS = [
@@ -39,6 +41,8 @@ const CONCERN_EMOJI: Record<string, string> = {
 
 type StarterPath = "peer" | "therapist" | "wellness";
 
+const DISPLAY_NAME_REGEX = /^[a-zA-Z0-9\u0600-\u06FF_]{3,30}$/;
+
 export default function OnboardingPage() {
   const { t, isRTL } = useI18n();
   const { toast } = useToast();
@@ -48,6 +52,10 @@ export default function OnboardingPage() {
   const [genderPreference, setGenderPreference] = useState("");
   const [budgetRange, setBudgetRange] = useState("");
   const [starterPath, setStarterPath] = useState<StarterPath>("peer");
+  const [displayName, setDisplayName] = useState("");
+  const [displayNameAvailable, setDisplayNameAvailable] = useState<boolean | null>(null);
+  const [displayNameChecking, setDisplayNameChecking] = useState(false);
+  const displayNameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const tr = (key: string, fallback: string) => {
     const value = t(key);
@@ -56,8 +64,39 @@ export default function OnboardingPage() {
 
   const ArrowNext = isRTL ? ArrowLeft : ArrowRight;
   const ArrowBack = isRTL ? ArrowRight : ArrowLeft;
-  const totalSteps = 3;
+  const totalSteps = 4;
   const progressRatio = (step + 1) / totalSteps;
+
+  useEffect(() => {
+    if (displayNameTimerRef.current) clearTimeout(displayNameTimerRef.current);
+    if (!displayName) {
+      setDisplayNameAvailable(null);
+      setDisplayNameChecking(false);
+      return;
+    }
+    if (!DISPLAY_NAME_REGEX.test(displayName)) {
+      setDisplayNameAvailable(false);
+      setDisplayNameChecking(false);
+      return;
+    }
+    setDisplayNameChecking(true);
+    displayNameTimerRef.current = setTimeout(async () => {
+      try {
+        const token = await getAccessToken();
+        const res = await fetch(`/api/user/display-name/check/${encodeURIComponent(displayName)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setDisplayNameAvailable(data.available);
+        }
+      } catch {
+        setDisplayNameAvailable(null);
+      } finally {
+        setDisplayNameChecking(false);
+      }
+    }, 500);
+  }, [displayName]);
 
   const completeOnboardingMutation = useMutation({
     mutationFn: async (includeOptional: boolean) => {
@@ -72,6 +111,10 @@ export default function OnboardingPage() {
           genderPreference: genderPreference || null,
           budgetRange: budgetRange || null,
         });
+      }
+
+      if (displayName && displayNameAvailable) {
+        await apiRequest("PATCH", "/api/user/profile", { displayName });
       }
 
       localStorage.setItem("shifa-show-welcome", "1");
@@ -98,6 +141,7 @@ export default function OnboardingPage() {
   const canContinue = useMemo(() => {
     if (step === 0) return concerns.length > 0;
     if (step === 1) return preferredLanguage.length > 0;
+    // step 2 (display name) is optional — always allow continuing
     return true;
   }, [step, concerns.length, preferredLanguage]);
 
@@ -192,6 +236,52 @@ export default function OnboardingPage() {
           )}
 
           {step === 2 && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold">{tr("onboarding.display_name_title", "Choose a display name")}</h2>
+              <p className="text-sm text-muted-foreground">
+                {tr(
+                  "onboarding.display_name_desc",
+                  "This name is shown instead of your real name in peer support sessions and reviews. You can skip this and set it later in settings.",
+                )}
+              </p>
+              <div className="space-y-2">
+                <div className="relative">
+                  <AtSign className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="ps-9 pe-9"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value.replace(/\s/g, ""))}
+                    placeholder={tr("onboarding.display_name_placeholder", "e.g. calm_soul or أمل")}
+                    maxLength={30}
+                    data-testid="input-display-name-onboarding"
+                  />
+                  <div className="absolute end-3 top-1/2 -translate-y-1/2">
+                    {displayNameChecking && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                    {!displayNameChecking && displayName && displayNameAvailable === true && (
+                      <Check className="h-4 w-4 text-emerald-500" />
+                    )}
+                    {!displayNameChecking && displayName && displayNameAvailable === false && (
+                      <X className="h-4 w-4 text-destructive" />
+                    )}
+                  </div>
+                </div>
+                {displayName && displayNameAvailable === false && (
+                  <p className="text-xs text-destructive">
+                    {DISPLAY_NAME_REGEX.test(displayName)
+                      ? tr("onboarding.display_name_taken", "This name is already taken. Try another.")
+                      : tr("onboarding.display_name_invalid", "3–30 characters: letters, numbers, Arabic, or underscores only.")}
+                  </p>
+                )}
+                {displayName && displayNameAvailable === true && (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                    {tr("onboarding.display_name_available", "This name is available!")}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
             <div className="space-y-5">
               <div className="space-y-1">
                 <h2 className="text-lg font-semibold">{tr("onboarding.optional_title", "Optional suggestions (recommended)")}</h2>

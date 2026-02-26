@@ -93,40 +93,24 @@ export default function CrisisPage() {
           </Badge>
         </div>
 
-        <Card className="safe-surface" data-testid="section-emergency-numbers">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 text-destructive" />
-              {t("crisis.emergency_numbers")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-2 sm:grid-cols-2">
-            <a
-              href="tel:190"
-              className="rounded-lg border border-destructive/30 bg-destructive/10 hover:bg-destructive hover:text-destructive-foreground transition-colors p-3"
-              data-testid="link-call-samu"
-            >
-              <p className="font-semibold text-sm">{t("crisis.samu_label")}</p>
-              <p className="text-xs opacity-90">{t("crisis.samu_desc")}</p>
-              <div className="mt-2 text-xs flex items-center gap-1">
-                <Phone className="h-3.5 w-3.5" />
-                {tr("crisis.call_now", "Call now")}
-              </div>
-            </a>
-            <a
-              href="tel:197"
-              className="rounded-lg border border-blue-300/50 bg-blue-500/10 hover:bg-blue-500/20 transition-colors p-3"
-              data-testid="link-call-police"
-            >
-              <p className="font-semibold text-sm">{t("crisis.police_label")}</p>
-              <p className="text-xs text-muted-foreground">{t("crisis.police_desc")}</p>
-              <div className="mt-2 text-xs text-muted-foreground flex items-center gap-1">
-                <Phone className="h-3.5 w-3.5" />
-                {tr("crisis.call_now", "Call now")}
-              </div>
-            </a>
-          </CardContent>
-        </Card>
+        {/* "I'm safe" is the primary action — show it early */}
+        <div className="grid gap-2 sm:grid-cols-2" data-testid="section-safe-buttons-top">
+          <Button
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+            size="lg"
+            onClick={() => safeMutation.mutate()}
+            disabled={safeMutation.isPending}
+          >
+            <CheckCircle className="h-5 w-5 me-2" />
+            {t("crisis.im_safe")}
+          </Button>
+          <Link href="/dashboard">
+            <Button variant="outline" className="w-full" size="lg">
+              <ArrowLeft className="h-4 w-4 me-2" />
+              {t("crisis.back_to_app")}
+            </Button>
+          </Link>
+        </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
           <Card data-testid="section-grounding" className="h-full">
@@ -200,25 +184,41 @@ export default function CrisisPage() {
           </Card>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Button
-            className="w-full bg-emerald-600 hover:bg-emerald-700"
-            size="lg"
-            onClick={() => safeMutation.mutate()}
-            disabled={safeMutation.isPending}
-            data-testid="button-im-safe"
-          >
-            <CheckCircle className="h-5 w-5 me-2" />
-            {t("crisis.im_safe")}
-          </Button>
-
-          <Link href="/dashboard">
-            <Button variant="outline" className="w-full" size="lg" data-testid="button-back-dashboard">
-              <ArrowLeft className="h-4 w-4 me-2" />
-              {t("crisis.back_to_app")}
-            </Button>
-          </Link>
-        </div>
+        {/* Emergency numbers — after coping tools */}
+        <Card className="safe-surface" data-testid="section-emergency-numbers">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-destructive/70" />
+              {t("crisis.emergency_numbers")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-2 sm:grid-cols-2">
+            <a
+              href="tel:190"
+              className="rounded-lg border border-destructive/30 bg-destructive/10 hover:bg-destructive/20 transition-colors p-3"
+              data-testid="link-call-samu"
+            >
+              <p className="font-semibold text-sm">{t("crisis.samu_label")}</p>
+              <p className="text-xs text-muted-foreground">{t("crisis.samu_desc")}</p>
+              <div className="mt-2 text-xs flex items-center gap-1 text-muted-foreground">
+                <Phone className="h-3.5 w-3.5" />
+                {tr("crisis.call_now", "Call now")}
+              </div>
+            </a>
+            <a
+              href="tel:197"
+              className="rounded-lg border border-blue-300/50 bg-blue-500/10 hover:bg-blue-500/20 transition-colors p-3"
+              data-testid="link-call-police"
+            >
+              <p className="font-semibold text-sm">{t("crisis.police_label")}</p>
+              <p className="text-xs text-muted-foreground">{t("crisis.police_desc")}</p>
+              <div className="mt-2 text-xs text-muted-foreground flex items-center gap-1">
+                <Phone className="h-3.5 w-3.5" />
+                {tr("crisis.call_now", "Call now")}
+              </div>
+            </a>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

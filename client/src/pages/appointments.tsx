@@ -8,17 +8,39 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
-import { Calendar, Clock, CheckCircle, XCircle, AlertCircle, Loader2 } from "lucide-react";
+import { Calendar, Clock, CheckCircle, XCircle, AlertCircle, Loader2, CreditCard, Receipt } from "lucide-react";
 import { useEffect } from "react";
-import type { Appointment, User } from "@shared/schema";
+import { useLocation } from "wouter";
+import { useToast } from "@/hooks/use-toast";
+import type { Appointment, User, PaymentTransaction } from "@shared/schema";
 
 export default function AppointmentsPage() {
   const { t } = useI18n();
   const { user } = useAuth();
+  const { toast } = useToast();
+  const [location] = useLocation();
 
   const { data: appointments, isLoading } = useQuery<(Appointment & { otherUser: User })[]>({
     queryKey: ["/api/appointments"],
   });
+
+  const { data: payments = [] } = useQuery<PaymentTransaction[]>({
+    queryKey: ["/api/payments"],
+    enabled: user?.role === "client",
+  });
+
+  // Show toast for payment return
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const paymentStatus = params.get("payment");
+    if (paymentStatus === "success") {
+      toast({ title: "Payment successful", description: "Your session is confirmed." });
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (paymentStatus === "failed") {
+      toast({ title: "Payment failed", description: "Please try again.", variant: "destructive" });
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   const updateStatusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: number; status: string }) => {
@@ -92,6 +114,7 @@ export default function AppointmentsPage() {
             {appointments.map((apt) => {
               const status = statusConfig[apt.status] || statusConfig.pending;
               const StatusIcon = status.icon;
+              const aptPayment = payments.find((p) => p.appointmentId === apt.id);
               return (
                 <Card key={apt.id} data-testid={`appointment-card-${apt.id}`}>
                   <CardContent className="p-5">
@@ -100,7 +123,7 @@ export default function AppointmentsPage() {
                         {(apt.otherUser.firstName?.[0] || "?").toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <h3 className="font-semibold">
                             {apt.otherUser.firstName} {apt.otherUser.lastName}
                           </h3>
@@ -108,6 +131,15 @@ export default function AppointmentsPage() {
                             <StatusIcon className="h-3 w-3 me-1" />
                             {status.label}
                           </Badge>
+                          {aptPayment && (
+                            <Badge
+                              variant={aptPayment.status === "completed" || aptPayment.status === "paid" ? "default" : "secondary"}
+                              className="text-xs gap-1"
+                            >
+                              <CreditCard className="h-3 w-3" />
+                              {aptPayment.status === "completed" || aptPayment.status === "paid" ? "Paid" : aptPayment.status}
+                            </Badge>
+                          )}
                         </div>
                         <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
                           <span className="flex items-center gap-1">

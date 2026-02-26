@@ -37,6 +37,9 @@ import ListenerDashboardPage from "@/pages/listener-dashboard";
 import AdminListenersPage from "@/pages/admin-listeners";
 import WelcomePage from "@/pages/welcome";
 import NotFound from "@/pages/not-found";
+import TherapistLandingPage from "@/pages/therapist-landing";
+import AdminDashboardPage from "@/pages/admin-dashboard";
+import ProgressPage from "@/pages/progress";
 
 function homeRouteForRole(role: string | null | undefined) {
   if (role === "listener") return "/listener/dashboard";
@@ -189,6 +192,13 @@ function Router() {
           <Route path="/therapist/:userId" component={TherapistProfilePage} />
           <Route path="/therapist-dashboard">
             <AuthGuard><TherapistDashboardPage /></AuthGuard>
+          </Route>
+          <Route path="/p/:slug" component={TherapistLandingPage} />
+          <Route path="/admin/dashboard">
+            <AuthGuard><AdminDashboardPage /></AuthGuard>
+          </Route>
+          <Route path="/progress">
+            <AuthGuard><ProgressPage /></AuthGuard>
           </Route>
           <Route path="/dashboard">
             <AuthGuard><DashboardRoute /></AuthGuard>

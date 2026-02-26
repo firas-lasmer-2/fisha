@@ -33,9 +33,16 @@ import {
   CheckCircle,
   ChevronDown,
   ChevronUp,
+  Globe,
+  Copy,
+  ToggleLeft,
+  FileText,
+  ShieldCheck,
+  Upload,
+  UserCircle,
 } from "lucide-react";
 import { useState, useEffect } from "react";
-import type { TherapistProfile, TherapistReview, TherapistSlot } from "@shared/schema";
+import type { TherapistProfile, TherapistReview, TherapistSlot, TherapistVerification, Appointment, User } from "@shared/schema";
 
 interface DashboardData {
   profile: TherapistProfile;
@@ -83,6 +90,12 @@ export default function TherapistDashboardPage() {
   const [slotStartsAt, setSlotStartsAt] = useState("");
   const [slotDurationMinutes, setSlotDurationMinutes] = useState(50);
   const [slotPriceDinar, setSlotPriceDinar] = useState(20);
+  const [landingEnabled, setLandingEnabled] = useState(false);
+  const [landingCtaText, setLandingCtaText] = useState("");
+  const [landingCtaUrl, setLandingCtaUrl] = useState("");
+  const [landingFormLoaded, setLandingFormLoaded] = useState(false);
+  const [verificationDocUrl, setVerificationDocUrl] = useState("");
+  const [verificationDocType, setVerificationDocType] = useState<"license" | "diploma" | "id_card" | "cv">("license");
 
   const { data: dashboardData, isLoading } = useQuery<DashboardData>({
     queryKey: ["/api/therapist/dashboard"],
@@ -92,6 +105,43 @@ export default function TherapistDashboardPage() {
     queryKey: ["/api/therapists", user?.id, "slots"],
     enabled: !!user?.id,
   });
+
+  const { data: verifications = [] } = useQuery<TherapistVerification[]>({
+    queryKey: ["/api/therapist/verification"],
+  });
+
+  const { data: appointments = [] } = useQuery<(Appointment & { otherUser: User })[]>({
+    queryKey: ["/api/appointments"],
+    enabled: !!user?.id,
+  });
+
+  // Clients who have appointments with this therapist, grouped with session count
+  const clientSummaries = (() => {
+    const therapistAppointments = appointments.filter(
+      (a) => a.therapistId === user?.id,
+    );
+    const map = new Map<string, { user: User; count: number; lastDate: string | null; statuses: string[] }>();
+    for (const apt of therapistAppointments) {
+      const existing = map.get(apt.clientId);
+      if (existing) {
+        existing.count++;
+        existing.statuses.push(apt.status);
+        if (!existing.lastDate || (apt.scheduledAt && apt.scheduledAt > existing.lastDate)) {
+          existing.lastDate = apt.scheduledAt;
+        }
+      } else {
+        map.set(apt.clientId, {
+          user: apt.otherUser,
+          count: 1,
+          lastDate: apt.scheduledAt,
+          statuses: [apt.status],
+        });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      (b.lastDate || "") > (a.lastDate || "") ? 1 : -1,
+    );
+  })();
 
   useEffect(() => {
     if (dashboardData?.profile && !formLoaded) {
@@ -108,7 +158,14 @@ export default function TherapistDashboardPage() {
       setSlotPriceDinar(p.rateDinar || 20);
       setFormLoaded(true);
     }
-  }, [dashboardData, formLoaded]);
+    if (dashboardData?.profile && !landingFormLoaded) {
+      const p = dashboardData.profile;
+      setLandingEnabled(p.landingPageEnabled ?? false);
+      setLandingCtaText(p.landingPageCtaText || "");
+      setLandingCtaUrl(p.landingPageCtaUrl || "");
+      setLandingFormLoaded(true);
+    }
+  }, [dashboardData, formLoaded, landingFormLoaded]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -189,6 +246,40 @@ export default function TherapistDashboardPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/therapists", user?.id, "slots"] });
       toast({ title: t("slots.cancelled_success") });
+    },
+    onError: () => {
+      toast({ title: t("common.error"), variant: "destructive" });
+    },
+  });
+
+  const saveLandingMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("PATCH", "/api/therapists", {
+        landingPageEnabled: landingEnabled,
+        landingPageCtaText: landingCtaText || null,
+        landingPageCtaUrl: landingCtaUrl || null,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/therapist/dashboard"] });
+      toast({ title: tr("therapist_dash.landing_saved", "Landing page updated") });
+    },
+    onError: () => {
+      toast({ title: t("common.error"), variant: "destructive" });
+    },
+  });
+
+  const uploadVerificationMutation = useMutation({
+    mutationFn: async ({ docType, docUrl }: { docType: string; docUrl: string }) => {
+      await apiRequest("POST", "/api/therapist/verification/upload", {
+        documentType: docType,
+        documentUrl: docUrl,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/therapist/verification"] });
+      setVerificationDocUrl("");
+      toast({ title: tr("therapist_dash.verification_submitted", "Document submitted for review") });
     },
     onError: () => {
       toast({ title: t("common.error"), variant: "destructive" });
@@ -307,6 +398,18 @@ export default function TherapistDashboardPage() {
             <TabsTrigger value="reviews" data-testid="tab-reviews">
               <MessageCircle className="h-4 w-4 me-1.5" />
               {t("review.title")}
+            </TabsTrigger>
+            <TabsTrigger value="landing" data-testid="tab-landing">
+              <Globe className="h-4 w-4 me-1.5" />
+              {tr("therapist_dash.landing_tab", "Landing Page")}
+            </TabsTrigger>
+            <TabsTrigger value="verification" data-testid="tab-verification">
+              <ShieldCheck className="h-4 w-4 me-1.5" />
+              {tr("therapist_dash.verification_tab", "Verification")}
+            </TabsTrigger>
+            <TabsTrigger value="clients" data-testid="tab-clients">
+              <Users className="h-4 w-4 me-1.5" />
+              {tr("therapist_dash.clients_tab", "Clients")}
             </TabsTrigger>
           </TabsList>
 
@@ -766,6 +869,292 @@ export default function TherapistDashboardPage() {
                       )}
                     </div>
                   ))
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Landing Page Tab */}
+          <TabsContent value="landing" className="space-y-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
+                <CardTitle className="text-lg">{tr("therapist_dash.landing_tab", "Landing Page")}</CardTitle>
+                <Button
+                  onClick={() => saveLandingMutation.mutate()}
+                  disabled={saveLandingMutation.isPending}
+                  data-testid="button-save-landing"
+                >
+                  <Save className="h-4 w-4 me-2" />
+                  {saveLandingMutation.isPending ? t("common.loading") : t("profile.save_changes")}
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="flex items-center justify-between rounded-lg bg-muted/60 p-3">
+                  <div>
+                    <p className="text-sm font-medium">{tr("therapist_dash.enable_landing", "Enable public landing page")}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {tr("therapist_dash.enable_landing_hint", "Make your page accessible to anyone with the link")}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={landingEnabled}
+                    onCheckedChange={setLandingEnabled}
+                    data-testid="switch-landing-enabled"
+                  />
+                </div>
+
+                {profile?.slug && landingEnabled && (
+                  <div className="rounded-lg border p-3 space-y-2">
+                    <p className="text-xs text-muted-foreground font-medium">Your shareable link</p>
+                    <div className="flex items-center gap-2">
+                      <code className="text-sm bg-muted px-2 py-1 rounded flex-1 truncate">
+                        {window.location.origin}/p/{profile.slug}
+                      </code>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText(`${window.location.origin}/p/${profile?.slug}`);
+                          toast({ title: tr("common.copied", "Copied!") });
+                        }}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                      <a
+                        href={`/p/${profile.slug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Button variant="outline" size="sm">
+                          <ExternalLink className="h-4 w-4" />
+                        </Button>
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                {!profile?.slug && (
+                  <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+                    {tr("therapist_dash.slug_required", "Set a profile slug in the Profile tab to enable the landing page.")}
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    {tr("therapist_dash.cta_text", "CTA Button Text")}
+                  </label>
+                  <Input
+                    value={landingCtaText}
+                    onChange={(e) => setLandingCtaText(e.target.value)}
+                    placeholder={tr("therapist_dash.cta_text_placeholder", "e.g. Book a Session")}
+                    maxLength={80}
+                    data-testid="input-cta-text"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    {tr("therapist_dash.cta_url", "CTA Custom URL (optional)")}
+                  </label>
+                  <Input
+                    value={landingCtaUrl}
+                    onChange={(e) => setLandingCtaUrl(e.target.value)}
+                    placeholder="https://calendly.com/yourname"
+                    maxLength={255}
+                    data-testid="input-cta-url"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {tr("therapist_dash.cta_url_hint", "Leave blank to use the in-app booking flow.")}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+          {/* Verification Tab */}
+          <TabsContent value="verification" className="space-y-4">
+            <Card>
+              <CardHeader className="pb-4">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5" />
+                  {tr("therapist_dash.verification_tab", "Verification")}
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  {tr(
+                    "therapist_dash.verification_hint",
+                    "Upload official documents to get a verified badge on your profile. Documents are reviewed within 2 business days.",
+                  )}
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {(["license", "diploma", "id_card", "cv"] as const).map((docType) => {
+                  const existing = verifications.find((v) => v.documentType === docType);
+                  const labelMap: Record<string, string> = {
+                    license: tr("verification.license", "Professional License"),
+                    diploma: tr("verification.diploma", "Diploma / Degree"),
+                    id_card: tr("verification.id_card", "National ID Card"),
+                    cv: tr("verification.cv", "Curriculum Vitae (CV)"),
+                  };
+                  const isUploading =
+                    uploadVerificationMutation.isPending && verificationDocType === docType;
+
+                  return (
+                    <div
+                      key={docType}
+                      className="rounded-lg border p-4 space-y-3"
+                      data-testid={`verification-card-${docType}`}
+                    >
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm font-medium">{labelMap[docType]}</span>
+                        </div>
+                        {existing ? (
+                          <Badge
+                            variant={
+                              existing.status === "approved"
+                                ? "default"
+                                : existing.status === "rejected"
+                                  ? "destructive"
+                                  : "secondary"
+                            }
+                            data-testid={`badge-status-${docType}`}
+                          >
+                            {existing.status === "approved"
+                              ? tr("verification.approved", "Approved")
+                              : existing.status === "rejected"
+                                ? tr("verification.rejected", "Rejected")
+                                : tr("verification.pending", "Pending Review")}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline">{tr("verification.not_submitted", "Not submitted")}</Badge>
+                        )}
+                      </div>
+
+                      {existing?.reviewerNotes && (
+                        <div className="rounded-md bg-destructive/10 border border-destructive/20 p-2 text-sm text-destructive">
+                          <p className="font-medium text-xs mb-1">{tr("verification.reviewer_notes", "Reviewer notes:")}</p>
+                          {existing.reviewerNotes}
+                        </div>
+                      )}
+
+                      {existing?.status !== "approved" && (
+                        <div className="flex gap-2 flex-wrap items-end">
+                          <div className="flex-1 space-y-1 min-w-0">
+                            <label className="text-xs text-muted-foreground">
+                              {tr("verification.doc_url", "Document URL")}
+                            </label>
+                            <Input
+                              type="url"
+                              placeholder="https://drive.google.com/file/..."
+                              value={verificationDocType === docType ? verificationDocUrl : ""}
+                              onChange={(e) => {
+                                setVerificationDocType(docType);
+                                setVerificationDocUrl(e.target.value);
+                              }}
+                              onFocus={() => setVerificationDocType(docType)}
+                              data-testid={`input-doc-url-${docType}`}
+                            />
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={
+                              isUploading ||
+                              verificationDocType !== docType ||
+                              !verificationDocUrl.trim()
+                            }
+                            onClick={() =>
+                              uploadVerificationMutation.mutate({
+                                docType,
+                                docUrl: verificationDocUrl.trim(),
+                              })
+                            }
+                            data-testid={`button-upload-${docType}`}
+                          >
+                            <Upload className="h-4 w-4 me-1.5" />
+                            {isUploading
+                              ? t("common.loading")
+                              : existing
+                                ? tr("verification.resubmit", "Resubmit")
+                                : tr("verification.submit", "Submit")}
+                          </Button>
+                        </div>
+                      )}
+
+                      {existing?.status === "approved" && (
+                        <p className="text-xs text-muted-foreground">
+                          {tr("verification.approved_desc", "This document has been verified. No further action needed.")}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          </TabsContent>
+          {/* Clients Tab */}
+          <TabsContent value="clients" className="space-y-4">
+            <Card>
+              <CardHeader className="pb-4">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  {tr("therapist_dash.clients_tab", "Clients")}
+                  <Badge variant="secondary" className="ms-1">{clientSummaries.length}</Badge>
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  {tr("therapist_dash.clients_desc", "Clients who have booked sessions with you.")}
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {clientSummaries.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-8">
+                    {tr("therapist_dash.no_clients", "No clients yet. Once clients book sessions they'll appear here.")}
+                  </p>
+                ) : (
+                  clientSummaries.map((summary) => {
+                    const completedCount = summary.statuses.filter((s) => s === "completed").length;
+                    const upcomingCount = summary.statuses.filter((s) => s === "pending" || s === "confirmed").length;
+                    const clientName =
+                      `${summary.user.firstName || ""} ${summary.user.lastName || ""}`.trim() ||
+                      tr("common.client", "Client");
+
+                    return (
+                      <div
+                        key={summary.user.id}
+                        className="flex items-center justify-between gap-3 rounded-lg border p-3 flex-wrap"
+                        data-testid={`client-row-${summary.user.id}`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                            <UserCircle className="h-5 w-5 text-primary" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{clientName}</p>
+                            {summary.lastDate && (
+                              <p className="text-xs text-muted-foreground">
+                                {tr("therapist_dash.last_session", "Last session:")}{" "}
+                                {new Date(summary.lastDate).toLocaleDateString()}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {completedCount > 0 && (
+                            <Badge variant="secondary" className="text-xs">
+                              <CheckCircle className="h-3 w-3 me-1" />
+                              {completedCount} {tr("therapist_dash.completed", "completed")}
+                            </Badge>
+                          )}
+                          {upcomingCount > 0 && (
+                            <Badge variant="outline" className="text-xs">
+                              <Calendar className="h-3 w-3 me-1" />
+                              {upcomingCount} {tr("therapist_dash.upcoming", "upcoming")}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </CardContent>
             </Card>

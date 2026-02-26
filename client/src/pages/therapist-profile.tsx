@@ -50,6 +50,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { PaymentDialog } from "@/components/payment-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useOnlineTherapists } from "@/hooks/use-online-therapists";
 import { motion } from "framer-motion";
@@ -138,7 +139,9 @@ export default function TherapistProfilePage() {
   const [bookingNotes, setBookingNotes] = useState("");
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<"flouci" | "konnect" | null>(null);
   const [paymentRedirectUrl, setPaymentRedirectUrl] = useState<string | null>(null);
-  const [bookingResult, setBookingResult] = useState<{ appointment: Appointment; slot: TherapistSlot } | null>(null);
+  const [bookingResult, setBookingResult] = useState<{ appointment: Appointment; slot: TherapistSlot; paymentUrl?: string | null } | null>(null);
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [quickBookSlot, setQuickBookSlot] = useState<TherapistSlot | null>(null);
 
   const { data: profile, isLoading: profileLoading } = useQuery<
     TherapistProfile & { user: User }
@@ -158,19 +161,25 @@ export default function TherapistProfilePage() {
   });
 
   const confirmBookingMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (payMethod?: "flouci" | "konnect") => {
       if (!selectedSlotId) throw new Error("No slot selected");
       const res = await apiRequest("POST", `/api/appointments/from-slot/${selectedSlotId}`, {
         sessionType: selectedSessionType,
         notes: bookingNotes || null,
+        paymentMethod: payMethod || "flouci",
       });
-      return res.json() as Promise<{ appointment: Appointment; slot: TherapistSlot }>;
+      return res.json() as Promise<{ appointment: Appointment; slot: TherapistSlot; paymentUrl?: string | null }>;
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/therapists", userId, "slots"] });
       queryClient.invalidateQueries({ queryKey: ["/api/appointments"] });
       setBookingResult(result);
-      setBookingStep(2);
+      if (result.paymentUrl) {
+        setPaymentRedirectUrl(result.paymentUrl);
+        setBookingStep(2);
+      } else {
+        setBookingStep(2);
+      }
       toast({ title: t("slots.booked_success") });
     },
     onError: () => {
@@ -692,7 +701,12 @@ export default function TherapistProfilePage() {
                       </div>
                       <Button
                         size="sm"
-                        onClick={() => openBookingFlow(slot.id)}
+                        onClick={() => {
+                          if (!user) { window.location.href = "/login"; return; }
+                          setQuickBookSlot(slot);
+                          setSelectedSlotId(slot.id);
+                          setPaymentDialogOpen(true);
+                        }}
                         data-testid={`button-book-slot-${slot.id}`}
                       >
                         {t("profile.book_session")}
@@ -822,7 +836,7 @@ export default function TherapistProfilePage() {
                     {t("common.back")}
                   </Button>
                   <Button
-                    onClick={() => confirmBookingMutation.mutate()}
+                    onClick={() => confirmBookingMutation.mutate("flouci")}
                     disabled={confirmBookingMutation.isPending}
                     data-testid="button-booking-confirm"
                   >
@@ -1223,6 +1237,26 @@ export default function TherapistProfilePage() {
           </Button>
         </div>
       </div>
+      {/* Quick-book payment dialog */}
+      <PaymentDialog
+        open={paymentDialogOpen}
+        onClose={() => { setPaymentDialogOpen(false); setQuickBookSlot(null); }}
+        slot={quickBookSlot}
+        therapistName={
+          profile
+            ? [profile.user?.firstName, profile.user?.lastName].filter(Boolean).join(" ") || "Therapist"
+            : "Therapist"
+        }
+        isPending={confirmBookingMutation.isPending}
+        onConfirm={async (method) => {
+          const result = await confirmBookingMutation.mutateAsync(method);
+          setPaymentDialogOpen(false);
+          setQuickBookSlot(null);
+          if (result.paymentUrl) {
+            window.location.href = result.paymentUrl;
+          }
+        }}
+      />
     </AppLayout>
   );
 }

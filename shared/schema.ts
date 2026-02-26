@@ -15,6 +15,7 @@ export interface User {
   governorate: string | null;
   bio: string | null;
   isAnonymous: boolean | null;
+  displayName: string | null;
   onboardingCompleted: boolean | null;
   createdAt: string | null;
   updatedAt: string | null;
@@ -54,6 +55,10 @@ export interface TherapistProfile {
   tier: TherapistTier;
   tierApprovedBy: string | null;
   tierApprovedAt: string | null;
+  landingPageEnabled: boolean | null;
+  landingPageSections: any;
+  landingPageCtaText: string | null;
+  landingPageCtaUrl: string | null;
   createdAt: string | null;
 }
 
@@ -325,6 +330,7 @@ export const insertUserSchema = z.object({
   governorate: z.string().optional().nullable(),
   bio: z.string().optional().nullable(),
   isAnonymous: z.boolean().default(false).optional(),
+  displayName: z.string().min(3).max(30).regex(/^[a-zA-Z0-9\u0600-\u06FF_]+$/).optional().nullable(),
 });
 
 export const insertTherapistProfileSchema = z.object({
@@ -356,6 +362,10 @@ export const insertTherapistProfileSchema = z.object({
   tier: z.enum(["student", "professional"]).default("professional").optional(),
   tierApprovedBy: z.string().optional().nullable(),
   tierApprovedAt: z.string().optional().nullable(),
+  landingPageEnabled: z.boolean().default(false).optional(),
+  landingPageSections: z.any().optional().nullable(),
+  landingPageCtaText: z.string().max(80).optional().nullable(),
+  landingPageCtaUrl: z.string().max(255).optional().nullable(),
 });
 
 export const insertAppointmentSchema = z.object({
@@ -553,6 +563,42 @@ export const insertPeerReportSchema = z.object({
   resolvedAt: z.string().optional().nullable(),
 });
 
+// ---- Therapist Verification ----
+
+export interface TherapistVerification {
+  id: number;
+  therapistId: string;
+  documentType: string;
+  documentUrl: string;
+  status: "pending" | "approved" | "rejected";
+  reviewerId: string | null;
+  reviewerNotes: string | null;
+  submittedAt: string | null;
+  reviewedAt: string | null;
+}
+
+export const insertTherapistVerificationSchema = z.object({
+  therapistId: z.string(),
+  documentType: z.enum(["license", "diploma", "id_card", "cv"]),
+  documentUrl: z.string().url(),
+});
+
+export type InsertTherapistVerification = z.infer<typeof insertTherapistVerificationSchema>;
+
+export function mapTherapistVerification(row: any): TherapistVerification {
+  return {
+    id: row.id,
+    therapistId: row.therapist_id,
+    documentType: row.document_type,
+    documentUrl: row.document_url,
+    status: row.status,
+    reviewerId: row.reviewer_id,
+    reviewerNotes: row.reviewer_notes,
+    submittedAt: row.submitted_at,
+    reviewedAt: row.reviewed_at,
+  };
+}
+
 // ---- Insert types ----
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -594,6 +640,7 @@ export function mapProfile(row: any): User {
     governorate: row.governorate,
     bio: row.bio,
     isAnonymous: row.is_anonymous,
+    displayName: row.display_name ?? null,
     onboardingCompleted: row.onboarding_completed,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -633,6 +680,10 @@ export function mapTherapistProfile(row: any): TherapistProfile {
     tier: row.tier || "professional",
     tierApprovedBy: row.tier_approved_by,
     tierApprovedAt: row.tier_approved_at,
+    landingPageEnabled: row.landing_page_enabled ?? null,
+    landingPageSections: row.landing_page_sections ?? [],
+    landingPageCtaText: row.landing_page_cta_text ?? null,
+    landingPageCtaUrl: row.landing_page_cta_url ?? null,
     createdAt: row.created_at,
   };
 }

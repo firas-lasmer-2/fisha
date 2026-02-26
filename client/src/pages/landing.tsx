@@ -52,7 +52,8 @@ export default function LandingPage() {
         window.location.href = "/therapists";
       }
     } else {
-      window.location.href = "/login";
+      // Guests go to self-care (breathing exercise) — no login wall for exploration
+      window.location.href = "/self-care";
     }
   };
 
@@ -300,11 +301,17 @@ export default function LandingPage() {
                   </div>
                   <h3 className="font-semibold text-lg mb-2">{t("selfcare.breathing")}</h3>
                   <p className="text-muted-foreground text-sm mb-4">{t("selfcare.breathing.desc")}</p>
-                  <div className="flex gap-4 text-sm text-muted-foreground">
+                  <div className="flex gap-4 text-sm text-muted-foreground mb-4">
                     <span>{t("selfcare.inhale")} 4s</span>
                     <span>{t("selfcare.hold")} 7s</span>
                     <span>{t("selfcare.exhale")} 8s</span>
                   </div>
+                  <Link href="/self-care">
+                    <Button size="sm" variant="outline" className="gap-1.5">
+                      <Wind className="h-4 w-4" />
+                      Try a breathing exercise
+                    </Button>
+                  </Link>
                 </CardContent>
               </Card>
             </motion.div>

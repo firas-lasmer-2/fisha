@@ -23,6 +23,7 @@ import {
   type PeerSessionFeedback, type InsertPeerSessionFeedback,
   type PeerReport, type InsertPeerReport,
   type FcmToken,
+  type TherapistVerification, type InsertTherapistVerification,
   mapProfile, mapTherapistProfile, mapTherapistReview,
   mapConversation, mapMessage, mapAppointment, mapTherapistSlot,
   mapMoodEntry, mapJournalEntry, mapResource,
@@ -30,6 +31,7 @@ import {
   mapListenerProfile, mapListenerProgress, mapListenerPointsLedger,
   mapListenerApplication, mapListenerQueueEntry,
   mapPeerSession, mapPeerMessage, mapPeerSessionFeedback, mapPeerReport,
+  mapTherapistVerification,
   toSnakeCase,
 } from "@shared/schema";
 
@@ -124,6 +126,7 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: InsertUser & { id?: string }): Promise<User>;
   updateUser(id: string, data: Partial<InsertUser>): Promise<User | undefined>;
+  isDisplayNameAvailable(name: string, excludeUserId?: string): Promise<boolean>;
 
   getTherapistProfile(userId: string): Promise<TherapistProfile | undefined>;
   getTherapistProfiles(filters?: {
@@ -157,6 +160,7 @@ export interface IStorage {
   getUnreadCount(userId: string): Promise<number>;
 
   getAppointments(userId: string): Promise<(Appointment & { otherUser: User })[]>;
+  getAppointment(id: number): Promise<Appointment | undefined>;
   createAppointment(apt: InsertAppointment): Promise<Appointment>;
   createAppointmentFromSlot(
     slotId: number,
@@ -271,6 +275,22 @@ export interface IStorage {
   createPeerReport(data: InsertPeerReport): Promise<PeerReport>;
   listOpenPeerReports(): Promise<PeerReport[]>;
   resolvePeerReport(reportId: number, moderatorId: string): Promise<PeerReport | undefined>;
+
+  // Verification
+  upsertTherapistVerification(data: InsertTherapistVerification): Promise<TherapistVerification>;
+  getTherapistVerifications(therapistId: string): Promise<TherapistVerification[]>;
+  getAllVerifications(status?: string): Promise<(TherapistVerification & { therapistName?: string })[]>;
+  reviewTherapistVerification(id: number, status: "approved" | "rejected", reviewerId: string, notes?: string): Promise<TherapistVerification | undefined>;
+
+  // Admin analytics
+  getAdminAnalytics(): Promise<{
+    totalUsers: number;
+    activeTherapists: number;
+    sessionsThisWeek: number;
+    revenueThisMonth: number;
+    newUsersThisWeek: number;
+    pendingVerifications: number;
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -314,6 +334,19 @@ export class DatabaseStorage implements IStorage {
       .single();
     if (error) return undefined;
     return mapProfile(result);
+  }
+
+  async isDisplayNameAvailable(name: string, excludeUserId?: string): Promise<boolean> {
+    let query = supabase
+      .from("profiles")
+      .select("id")
+      .eq("display_name", name);
+    if (excludeUserId) {
+      query = query.neq("id", excludeUserId);
+    }
+    const { data, error } = await query.maybeSingle();
+    if (error) return false;
+    return data === null;
   }
 
   // ---- Therapist Profiles ----
@@ -573,6 +606,16 @@ export class DatabaseStorage implements IStorage {
       }
     }
     return result;
+  }
+
+  async getAppointment(id: number): Promise<Appointment | undefined> {
+    const { data, error } = await supabase
+      .from("appointments")
+      .select("*")
+      .eq("id", id)
+      .single();
+    if (error || !data) return undefined;
+    return mapAppointment(data);
   }
 
   async createAppointment(apt: InsertAppointment): Promise<Appointment> {
@@ -1762,6 +1805,131 @@ export class DatabaseStorage implements IStorage {
       .single();
     if (error || !data) return undefined;
     return mapPeerReport(data);
+  }
+
+  // ---- Therapist Verification ----
+
+  async upsertTherapistVerification(data: InsertTherapistVerification): Promise<TherapistVerification> {
+    const row = {
+      therapist_id: data.therapistId,
+      document_type: data.documentType,
+      document_url: data.documentUrl,
+      status: "pending",
+      submitted_at: new Date().toISOString(),
+    };
+    const { data: result, error } = await supabase
+      .from("therapist_verifications")
+      .upsert(row, { onConflict: "therapist_id,document_type" })
+      .select("*")
+      .single();
+    if (error) throw error;
+    return mapTherapistVerification(result);
+  }
+
+  async getTherapistVerifications(therapistId: string): Promise<TherapistVerification[]> {
+    const { data, error } = await supabase
+      .from("therapist_verifications")
+      .select("*")
+      .eq("therapist_id", therapistId)
+      .order("submitted_at", { ascending: false });
+    if (error || !data) return [];
+    return data.map(mapTherapistVerification);
+  }
+
+  async getAllVerifications(status?: string): Promise<(TherapistVerification & { therapistName?: string })[]> {
+    let query = supabase
+      .from("therapist_verifications")
+      .select("*")
+      .order("submitted_at", { ascending: false });
+    if (status) query = query.eq("status", status);
+    const { data, error } = await query;
+    if (error || !data) return [];
+
+    const verifications = data.map(mapTherapistVerification);
+
+    // Enrich with therapist names
+    const therapistIds = Array.from(new Set(verifications.map((v) => v.therapistId)));
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, first_name, last_name")
+      .in("id", therapistIds);
+
+    const nameMap = new Map<string, string>();
+    if (profiles) {
+      for (const p of profiles) {
+        const name = [p.first_name, p.last_name].filter(Boolean).join(" ");
+        nameMap.set(p.id, name || p.id.slice(0, 8));
+      }
+    }
+
+    return verifications.map((v) => ({ ...v, therapistName: nameMap.get(v.therapistId) }));
+  }
+
+  async reviewTherapistVerification(
+    id: number,
+    status: "approved" | "rejected",
+    reviewerId: string,
+    notes?: string,
+  ): Promise<TherapistVerification | undefined> {
+    const { data, error } = await supabase
+      .from("therapist_verifications")
+      .update({
+        status,
+        reviewer_id: reviewerId,
+        reviewer_notes: notes || null,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error || !data) return undefined;
+    return mapTherapistVerification(data);
+  }
+
+  // ---- Admin Analytics ----
+
+  async getAdminAnalytics(): Promise<{
+    totalUsers: number;
+    activeTherapists: number;
+    sessionsThisWeek: number;
+    revenueThisMonth: number;
+    newUsersThisWeek: number;
+    pendingVerifications: number;
+  }> {
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const [
+      { count: totalUsers },
+      { count: activeTherapists },
+      { count: sessionsThisWeek },
+      { data: revenueData },
+      { count: newUsersThisWeek },
+      { count: pendingVerifications },
+    ] = await Promise.all([
+      supabase.from("profiles").select("id", { count: "exact", head: true }),
+      supabase.from("therapist_profiles").select("id", { count: "exact", head: true }).eq("verified", true),
+      supabase.from("appointments").select("id", { count: "exact", head: true })
+        .eq("status", "completed").gte("scheduled_at", weekAgo),
+      supabase.from("payment_transactions").select("amount_dinar")
+        .eq("status", "paid").gte("created_at", monthAgo),
+      supabase.from("profiles").select("id", { count: "exact", head: true }).gte("created_at", weekAgo),
+      supabase.from("therapist_verifications").select("id", { count: "exact", head: true }).eq("status", "pending"),
+    ]);
+
+    const revenueThisMonth = (revenueData || []).reduce(
+      (sum: number, row: any) => sum + (row.amount_dinar || 0),
+      0,
+    );
+
+    return {
+      totalUsers: totalUsers || 0,
+      activeTherapists: activeTherapists || 0,
+      sessionsThisWeek: sessionsThisWeek || 0,
+      revenueThisMonth,
+      newUsersThisWeek: newUsersThisWeek || 0,
+      pendingVerifications: pendingVerifications || 0,
+    };
   }
 
 }
