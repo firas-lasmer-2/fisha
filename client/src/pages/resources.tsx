@@ -1,0 +1,119 @@
+import { useI18n } from "@/lib/i18n";
+import { AppLayout } from "@/components/app-layout";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { useQuery } from "@tanstack/react-query";
+import { Library, Clock, BookOpen, Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { useState } from "react";
+import type { Resource } from "@shared/schema";
+
+export default function ResourcesPage() {
+  const { t, isRTL, language } = useI18n();
+  const [category, setCategory] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const queryStr = category ? `?category=${category}` : "";
+  const { data: resourceList, isLoading } = useQuery<Resource[]>({
+    queryKey: ["/api/resources", queryStr],
+  });
+
+  const categories = [
+    { value: "anxiety", label: t("specialization.anxiety") },
+    { value: "depression", label: t("specialization.depression") },
+    { value: "stress", label: t("specialization.stress") },
+    { value: "relationships", label: t("specialization.relationships") },
+    { value: "self_esteem", label: t("specialization.self_esteem") },
+    { value: "grief", label: t("specialization.grief") },
+  ];
+
+  const getTitle = (r: Resource) => {
+    if (language === "fr") return r.titleFr;
+    if (language === "darija") return r.titleDarija || r.titleAr;
+    return r.titleAr;
+  };
+
+  const getContent = (r: Resource) => {
+    if (language === "fr") return r.contentFr;
+    if (language === "darija") return r.contentDarija || r.contentAr;
+    return r.contentAr;
+  };
+
+  return (
+    <AppLayout>
+      <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
+        <h1 className="text-2xl font-bold" data-testid="text-resources-title">{t("nav.resources")}</h1>
+
+        <div className="relative">
+          <Search className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t("common.search")}
+            className="ps-9"
+            data-testid="input-search-resources"
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant={!category ? "default" : "outline"}
+            size="sm"
+            onClick={() => setCategory("")}
+            data-testid="button-category-all"
+          >
+            {t("resources.all")}
+          </Button>
+          {categories.map((cat) => (
+            <Button
+              key={cat.value}
+              variant={category === cat.value ? "default" : "outline"}
+              size="sm"
+              onClick={() => setCategory(cat.value)}
+              data-testid={`button-category-${cat.value}`}
+            >
+              {cat.label}
+            </Button>
+          ))}
+        </div>
+
+        {isLoading ? (
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-32 w-full" />)}
+          </div>
+        ) : resourceList && resourceList.length > 0 ? (
+          <div className="grid sm:grid-cols-2 gap-4">
+            {resourceList.filter((resource) => {
+              if (!searchQuery.trim()) return true;
+              const title = getTitle(resource).toLowerCase();
+              return title.includes(searchQuery.toLowerCase());
+            }).map((resource) => (
+              <Card key={resource.id} className="hover-elevate" data-testid={`resource-card-${resource.id}`}>
+                <CardContent className="p-5">
+                  <Badge variant="secondary" className="mb-3 text-xs">
+                    {categories.find((c) => c.value === resource.category)?.label || resource.category}
+                  </Badge>
+                  <h3 className="font-semibold mb-2">{getTitle(resource)}</h3>
+                  <p className="text-sm text-muted-foreground line-clamp-3 leading-relaxed">
+                    {getContent(resource)}
+                  </p>
+                  <div className="flex items-center gap-1.5 mt-3 text-xs text-muted-foreground">
+                    <Clock className="h-3 w-3" />
+                    {resource.readTimeMinutes} {t("resources.min_read")}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-16 text-muted-foreground">
+            <Library className="h-12 w-12 mx-auto mb-3 opacity-30" />
+            <p className="text-sm">{t("resources.no_resources")}</p>
+          </div>
+        )}
+      </div>
+    </AppLayout>
+  );
+}

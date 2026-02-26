@@ -1,0 +1,891 @@
+import { useI18n } from "@/lib/i18n";
+import { useAuth } from "@/hooks/use-auth";
+import { AppLayout } from "@/components/app-layout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useParams } from "wouter";
+import { Link } from "wouter";
+import {
+  Star,
+  MapPin,
+  Globe,
+  CheckCircle,
+  Video,
+  Calendar,
+  Clock,
+  MessageCircle,
+  Shield,
+  Brain,
+  Users,
+  Sparkles,
+  GraduationCap,
+  Heart,
+  Send,
+  Play,
+  Image,
+  ExternalLink,
+  Share2,
+  Loader2,
+} from "lucide-react";
+import { useState } from "react";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { motion } from "framer-motion";
+import type { TherapistProfile, User, TherapistReview } from "@shared/schema";
+
+const sectionVariants = {
+  hidden: { opacity: 0, y: 30 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
+};
+
+const staggerContainer = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.1 } },
+};
+
+const DAYS_MAP: Record<string, { ar: string; fr: string }> = {
+  monday: { ar: "الإثنين", fr: "Lundi" },
+  tuesday: { ar: "الثلاثاء", fr: "Mardi" },
+  wednesday: { ar: "الأربعاء", fr: "Mercredi" },
+  thursday: { ar: "الخميس", fr: "Jeudi" },
+  friday: { ar: "الجمعة", fr: "Vendredi" },
+  saturday: { ar: "السبت", fr: "Samedi" },
+  sunday: { ar: "الأحد", fr: "Dimanche" },
+};
+
+const ALL_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+
+function StarRating({
+  value,
+  onChange,
+  readonly = false,
+  size = "md",
+}: {
+  value: number;
+  onChange?: (v: number) => void;
+  readonly?: boolean;
+  size?: "sm" | "md" | "lg";
+}) {
+  const sizeClass = size === "sm" ? "h-3.5 w-3.5" : size === "lg" ? "h-6 w-6" : "h-5 w-5";
+  return (
+    <div className="flex items-center gap-0.5">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          type="button"
+          disabled={readonly}
+          className={readonly ? "cursor-default" : "cursor-pointer"}
+          onClick={() => onChange?.(star)}
+          data-testid={readonly ? undefined : `star-${star}`}
+        >
+          <Star
+            className={`${sizeClass} ${
+              star <= value
+                ? "fill-chart-4 text-chart-4"
+                : "text-muted-foreground/30"
+            } transition-colors`}
+          />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export default function TherapistProfilePage() {
+  const { t, isRTL, language } = useI18n();
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const params = useParams<{ userId: string }>();
+  const userId = params.userId;
+
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
+  const [overallRating, setOverallRating] = useState(0);
+  const [helpfulnessRating, setHelpfulnessRating] = useState(0);
+  const [communicationRating, setCommunicationRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState("");
+  const [isAnonymous, setIsAnonymous] = useState(true);
+
+  const { data: profile, isLoading: profileLoading } = useQuery<
+    TherapistProfile & { user: User }
+  >({
+    queryKey: ["/api/therapists", userId],
+  });
+
+  const { data: reviews, isLoading: reviewsLoading } = useQuery<
+    (TherapistReview & { client?: User })[]
+  >({
+    queryKey: ["/api/therapists", userId, "reviews"],
+  });
+
+  const { data: onlineIds } = useQuery<string[]>({
+    queryKey: ["/api/therapists/online"],
+    refetchInterval: 30000,
+  });
+  const isTherapistOnline = onlineIds?.includes(userId!) ?? false;
+
+  const reviewMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/therapists/${userId}/reviews`, {
+        therapistId: userId,
+        overallRating,
+        helpfulnessRating,
+        communicationRating,
+        comment: reviewComment || undefined,
+        isAnonymous,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/therapists", userId, "reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/therapists", userId] });
+      setReviewDialogOpen(false);
+      setOverallRating(0);
+      setHelpfulnessRating(0);
+      setCommunicationRating(0);
+      setReviewComment("");
+      setIsAnonymous(true);
+      toast({
+        title: t("review.thank_you"),
+      });
+    },
+    onError: () => {
+      toast({
+        title: t("common.error"),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const specializations = [
+    { value: "anxiety", label: t("specialization.anxiety"), icon: Brain },
+    { value: "depression", label: t("specialization.depression"), icon: Brain },
+    { value: "relationships", label: t("specialization.relationships"), icon: Users },
+    { value: "trauma", label: t("specialization.trauma"), icon: Shield },
+    { value: "stress", label: t("specialization.stress"), icon: Brain },
+    { value: "self_esteem", label: t("specialization.self_esteem"), icon: Sparkles },
+    { value: "grief", label: t("specialization.grief"), icon: Brain },
+    { value: "family", label: t("specialization.family"), icon: Users },
+    { value: "couples", label: t("specialization.couples"), icon: Users },
+    { value: "addiction", label: t("specialization.addiction"), icon: Shield },
+  ];
+
+  const getSpecLabel = (val: string) =>
+    specializations.find((s) => s.value === val)?.label || val;
+
+  const getDayLabel = (day: string) => {
+    const d = DAYS_MAP[day.toLowerCase()];
+    if (!d) return day;
+    return language === "fr" ? d.fr : d.ar;
+  };
+
+  const faqItems = (profile?.faqItems as { question: string; answer: string }[] | null) || [];
+
+  if (profileLoading) {
+    return (
+      <AppLayout>
+        <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
+          <div className="flex items-start gap-4">
+            <Skeleton className="w-20 h-20 rounded-xl" />
+            <div className="flex-1 space-y-3">
+              <Skeleton className="h-6 w-48" />
+              <Skeleton className="h-4 w-64" />
+              <Skeleton className="h-4 w-32" />
+            </div>
+          </div>
+          <Skeleton className="h-32 w-full" />
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-48 w-full" />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <AppLayout>
+        <div className="max-w-4xl mx-auto p-4 sm:p-6 text-center py-20">
+          <p className="text-muted-foreground" data-testid="text-profile-not-found">
+            {t("profile.not_found")}
+          </p>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const fullName = `${profile.user.firstName || ""} ${profile.user.lastName || ""}`.trim();
+  const avgRating = profile.rating || 0;
+
+  return (
+    <AppLayout>
+      <div className="max-w-4xl mx-auto p-4 sm:p-6 pb-28 sm:pb-6 space-y-8">
+        <motion.div
+          variants={sectionVariants}
+          initial="hidden"
+          animate="visible"
+          className="relative"
+        >
+          <Card data-testid="section-hero">
+            <CardContent className="p-6">
+              <div className="flex flex-col sm:flex-row items-start gap-5">
+                <Avatar className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl">
+                  {profile.user.profileImageUrl && (
+                    <AvatarImage src={profile.user.profileImageUrl} alt={fullName} />
+                  )}
+                  <AvatarFallback className="rounded-xl gradient-calm text-white text-2xl font-bold">
+                    {(profile.user.firstName?.[0] || "?").toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+
+                <div className="flex-1 min-w-0 space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h1
+                      className="text-2xl sm:text-3xl font-bold"
+                      data-testid="text-therapist-name"
+                    >
+                      {fullName}
+                    </h1>
+                    {profile.verified && (
+                      <Badge
+                        variant="secondary"
+                        className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                        data-testid="badge-verified"
+                      >
+                        <CheckCircle className="h-3 w-3 me-0.5" />
+                        {t("therapist.verified")}
+                      </Badge>
+                    )}
+                  </div>
+
+                  {profile.headline && (
+                    <p
+                      className="text-muted-foreground"
+                      data-testid="text-headline"
+                    >
+                      {profile.headline}
+                    </p>
+                  )}
+
+                  <div className="flex items-center gap-4 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <StarRating value={Math.round(avgRating)} readonly size="sm" />
+                      <span className="text-sm font-medium">{avgRating.toFixed(1)}</span>
+                      <span className="text-xs text-muted-foreground">
+                        ({profile.reviewCount || 0} {t("therapist.reviews")})
+                      </span>
+                    </div>
+
+                    {profile.yearsExperience && profile.yearsExperience > 0 && (
+                      <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                        <Clock className="h-3.5 w-3.5" />
+                        {profile.yearsExperience} {t("profile.years_exp")}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {isTherapistOnline && (
+                      <Badge
+                        variant="secondary"
+                        className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 gap-1.5"
+                        data-testid="badge-online-now"
+                      >
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                        </span>
+                        {t("therapist.online_now")}
+                      </Badge>
+                    )}
+
+                    {profile.acceptingNewClients ? (
+                      <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" data-testid="badge-accepting">
+                        <CheckCircle className="h-3 w-3 me-1" />
+                        {t("profile.accepting_new")}
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary" className="text-muted-foreground" data-testid="badge-not-accepting">
+                        {t("profile.not_accepting")}
+                      </Badge>
+                    )}
+
+                    {profile.acceptsOnline && (
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Video className="h-3 w-3 text-primary" />
+                        {t("therapist.online")}
+                      </span>
+                    )}
+                    {profile.acceptsInPerson && (
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <MapPin className="h-3 w-3 text-primary" />
+                        {t("therapist.in_person")}
+                      </span>
+                    )}
+                  </div>
+
+                  {profile.rateDinar && (
+                    <div className="flex items-center gap-1" data-testid="text-rate">
+                      <span className="text-xl font-bold text-primary">{profile.rateDinar}</span>
+                      <span className="text-sm text-muted-foreground">
+                        {t("common.dinar")} / {t("therapist.per_session")}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 flex-wrap pt-1">
+                    <Link href="/appointments">
+                      <Button size="sm" className="gap-1.5" data-testid="button-book-session-hero">
+                        <Calendar className="h-3.5 w-3.5" />
+                        {t("profile.book_session")}
+                      </Button>
+                    </Link>
+                    <Link href="/messages">
+                      <Button size="sm" variant="outline" className="gap-1.5" data-testid="button-message-hero">
+                        <MessageCircle className="h-3.5 w-3.5" />
+                        {t("profile.send_message")}
+                      </Button>
+                    </Link>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5"
+                      data-testid="button-share-profile"
+                      onClick={() => {
+                        navigator.clipboard.writeText(window.location.href).then(() => {
+                          toast({
+                            title: t("profile.link_copied"),
+                          });
+                        });
+                      }}
+                    >
+                      <Share2 className="h-3.5 w-3.5" />
+                      {t("profile.share_profile")}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {(profile.aboutMe || profile.approach || profile.education) && (
+          <motion.div
+            variants={sectionVariants}
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-50px" }}
+          >
+            <Card data-testid="section-about">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Heart className="h-5 w-5 text-primary" />
+                  {t("profile.about_me")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {profile.aboutMe && (
+                  <div data-testid="text-about-me">
+                    <p className="text-sm leading-relaxed whitespace-pre-line">
+                      {profile.aboutMe}
+                    </p>
+                  </div>
+                )}
+
+                {profile.approach && (
+                  <>
+                    <Separator />
+                    <div data-testid="text-approach">
+                      <h3 className="font-semibold mb-2 flex items-center gap-2">
+                        <Brain className="h-4 w-4 text-primary" />
+                        {t("profile.my_approach")}
+                      </h3>
+                      <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">
+                        {profile.approach}
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {profile.education && (
+                  <>
+                    <Separator />
+                    <div data-testid="text-education">
+                      <h3 className="font-semibold mb-2 flex items-center gap-2">
+                        <GraduationCap className="h-4 w-4 text-primary" />
+                        {t("profile.education_cert")}
+                      </h3>
+                      <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">
+                        {profile.education}
+                      </p>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        {profile.specializations && profile.specializations.length > 0 && (
+          <motion.div
+            variants={sectionVariants}
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-50px" }}
+          >
+            <Card data-testid="section-specializations">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-primary" />
+                  {t("therapist.specialization")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <motion.div
+                  variants={staggerContainer}
+                  initial="hidden"
+                  whileInView="visible"
+                  viewport={{ once: true }}
+                  className="flex flex-wrap gap-2"
+                >
+                  {profile.specializations.map((spec, i) => {
+                    const specInfo = specializations.find((s) => s.value === spec);
+                    const Icon = specInfo?.icon || Brain;
+                    return (
+                      <motion.div
+                        key={spec}
+                        variants={{
+                          hidden: { opacity: 0, scale: 0.8 },
+                          visible: { opacity: 1, scale: 1 },
+                        }}
+                      >
+                        <Badge
+                          variant="secondary"
+                          className="gap-1.5 text-sm"
+                          data-testid={`badge-specialization-${spec}`}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                          {getSpecLabel(spec)}
+                        </Badge>
+                      </motion.div>
+                    );
+                  })}
+                </motion.div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        {profile.availableDays && profile.availableDays.length > 0 && (
+          <motion.div
+            variants={sectionVariants}
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-50px" }}
+          >
+            <Card data-testid="section-availability">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Calendar className="h-5 w-5 text-primary" />
+                  {t("profile.availability")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-3 flex-wrap">
+                  {profile.acceptsOnline && (
+                    <Badge variant="secondary" data-testid="badge-online">
+                      <Video className="h-3 w-3 me-1" />
+                      {t("therapist.online")}
+                    </Badge>
+                  )}
+                  {profile.acceptsInPerson && (
+                    <Badge variant="secondary" data-testid="badge-in-person">
+                      <MapPin className="h-3 w-3 me-1" />
+                      {t("therapist.in_person")}
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+                  {ALL_DAYS.map((day) => {
+                    const isAvailable = profile.availableDays?.includes(day);
+                    return (
+                      <div
+                        key={day}
+                        className={`text-center p-2 sm:p-3 rounded-md text-xs sm:text-sm transition-colors ${
+                          isAvailable
+                            ? "bg-primary/10 text-primary font-medium border border-primary/20"
+                            : "bg-muted/50 text-muted-foreground/50"
+                        }`}
+                        data-testid={`day-${day}`}
+                      >
+                        <div className="font-medium truncate">{getDayLabel(day)}</div>
+                        {isAvailable && (
+                          <div className="text-[10px] sm:text-xs mt-1 text-muted-foreground">
+                            {profile.availableHoursStart} - {profile.availableHoursEnd}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {profile.officeAddress && (
+                  <div className="flex items-start gap-2 text-sm text-muted-foreground mt-2">
+                    <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span data-testid="text-office-address">{profile.officeAddress}</span>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        {profile.officePhotos && profile.officePhotos.length > 0 && (
+          <motion.div
+            variants={sectionVariants}
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-50px" }}
+          >
+            <Card data-testid="section-gallery">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Image className="h-5 w-5 text-primary" />
+                  {t("profile.office_gallery")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {profile.officePhotos.map((photo, i) => (
+                    <div
+                      key={i}
+                      className="aspect-video rounded-md overflow-hidden bg-muted"
+                      data-testid={`img-gallery-${i}`}
+                    >
+                      <img
+                        src={photo}
+                        alt={`${fullName} office ${i + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        {profile.videoIntroUrl && (
+          <motion.div
+            variants={sectionVariants}
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-50px" }}
+          >
+            <Card data-testid="section-video">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Play className="h-5 w-5 text-primary" />
+                  {t("profile.video_intro")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="aspect-video rounded-md overflow-hidden bg-muted">
+                  <iframe
+                    src={profile.videoIntroUrl}
+                    title={`${fullName} intro`}
+                    className="w-full h-full"
+                    allowFullScreen
+                    data-testid="video-intro"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        {faqItems.length > 0 && (
+          <motion.div
+            variants={sectionVariants}
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-50px" }}
+          >
+            <Card data-testid="section-faq">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <MessageCircle className="h-5 w-5 text-primary" />
+                  {t("profile.faq")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Accordion type="multiple">
+                  {faqItems.map((item, i) => (
+                    <AccordionItem key={i} value={`faq-${i}`}>
+                      <AccordionTrigger
+                        className="text-sm text-start"
+                        data-testid={`faq-trigger-${i}`}
+                      >
+                        {item.question}
+                      </AccordionTrigger>
+                      <AccordionContent data-testid={`faq-content-${i}`}>
+                        <p className="text-sm text-muted-foreground">{item.answer}</p>
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        <motion.div
+          variants={sectionVariants}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-50px" }}
+        >
+          <Card data-testid="section-reviews">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 flex-wrap">
+              <CardTitle className="flex items-center gap-2">
+                <Star className="h-5 w-5 text-primary" />
+                {t("review.all_reviews")}
+                {profile.reviewCount ? (
+                  <span className="text-sm font-normal text-muted-foreground">
+                    ({profile.reviewCount})
+                  </span>
+                ) : null}
+              </CardTitle>
+
+              {user && (
+                <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" data-testid="button-write-review">
+                      <Send className="h-3.5 w-3.5 me-1.5" />
+                      {t("review.write_review")}
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent data-testid="dialog-review">
+                    <DialogHeader>
+                      <DialogTitle>{t("review.write_review")}</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-5 pt-2">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-sm font-medium">{t("review.overall")}</label>
+                          <StarRating value={overallRating} onChange={setOverallRating} />
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-sm font-medium">{t("review.helpfulness")}</label>
+                          <StarRating value={helpfulnessRating} onChange={setHelpfulnessRating} />
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-sm font-medium">{t("review.communication")}</label>
+                          <StarRating value={communicationRating} onChange={setCommunicationRating} />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">{t("review.comment")}</label>
+                        <Textarea
+                          value={reviewComment}
+                          onChange={(e) => setReviewComment(e.target.value)}
+                          placeholder={t("review.comment_placeholder")}
+                          rows={4}
+                          data-testid="textarea-review-comment"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium">{t("review.anonymous")}</p>
+                          <p className="text-xs text-muted-foreground">{t("review.anonymous_desc")}</p>
+                        </div>
+                        <Switch
+                          checked={isAnonymous}
+                          onCheckedChange={setIsAnonymous}
+                          data-testid="switch-anonymous"
+                        />
+                      </div>
+
+                      <Button
+                        className="w-full"
+                        disabled={overallRating === 0 || reviewMutation.isPending}
+                        onClick={() => reviewMutation.mutate()}
+                        data-testid="button-submit-review"
+                      >
+                        {reviewMutation.isPending ? (
+                          <span className="animate-spin me-2">
+                            <Star className="h-4 w-4" />
+                          </span>
+                        ) : (
+                          <Send className="h-4 w-4 me-2" />
+                        )}
+                        {t("review.submit")}
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              )}
+            </CardHeader>
+            <CardContent>
+              {reviewsLoading ? (
+                <div className="space-y-4">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="space-y-2">
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-3 w-full" />
+                      <Skeleton className="h-3 w-2/3" />
+                    </div>
+                  ))}
+                </div>
+              ) : reviews && reviews.length > 0 ? (
+                <div className="space-y-4">
+                  {reviews.map((review) => (
+                    <div
+                      key={review.id}
+                      className="space-y-2"
+                      data-testid={`review-${review.id}`}
+                    >
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <Avatar className="w-8 h-8">
+                            <AvatarFallback className="text-xs">
+                              {review.isAnonymous
+                                ? "?"
+                                : (review.client?.firstName?.[0] || "?").toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="text-sm font-medium" data-testid={`text-reviewer-name-${review.id}`}>
+                              {review.isAnonymous
+                                ? t("common.anonymous")
+                                : `${review.client?.firstName || ""} ${review.client?.lastName || ""}`.trim() || t("common.user")}
+                            </p>
+                            {review.createdAt && (
+                              <p className="text-xs text-muted-foreground">
+                                {new Date(review.createdAt).toLocaleDateString(
+                                  isRTL ? "ar-TN" : "fr-TN"
+                                )}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <StarRating value={review.overallRating} readonly size="sm" />
+                      </div>
+
+                      {(review.helpfulnessRating || review.communicationRating) && (
+                        <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+                          {review.helpfulnessRating && (
+                            <span>
+                              {t("review.helpfulness")}: {review.helpfulnessRating}/5
+                            </span>
+                          )}
+                          {review.communicationRating && (
+                            <span>
+                              {t("review.communication")}: {review.communicationRating}/5
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {review.comment && (
+                        <p className="text-sm text-muted-foreground" data-testid={`text-review-comment-${review.id}`}>
+                          {review.comment}
+                        </p>
+                      )}
+
+                      {review.therapistResponse && (
+                        <div className="ms-6 p-3 rounded-md bg-muted/50 border-s-2 border-primary/30" data-testid={`text-therapist-response-${review.id}`}>
+                          <p className="text-xs font-medium text-primary mb-1">
+                            {t("review.response")}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {review.therapistResponse}
+                          </p>
+                        </div>
+                      )}
+
+                      <Separator />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-6" data-testid="text-no-reviews">
+                  {t("review.no_reviews")}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
+      </div>
+
+      <div className="fixed bottom-0 left-0 right-0 sm:hidden z-40 glass-effect border-t p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]" data-testid="sticky-cta-bar">
+        <div className="flex items-center gap-2 max-w-4xl mx-auto">
+          <Link href={`/messages`} className="flex-1">
+            <Button
+              variant="outline"
+              className="w-full gap-1.5"
+              data-testid="button-cta-message"
+            >
+              <MessageCircle className="h-4 w-4" />
+              {t("profile.send_message")}
+            </Button>
+          </Link>
+          <Link href={`/appointments`} className="flex-1">
+            <Button
+              className="w-full gap-1.5"
+              data-testid="button-cta-book"
+            >
+              <Calendar className="h-4 w-4" />
+              {t("profile.book_session")}
+            </Button>
+          </Link>
+        </div>
+      </div>
+
+      <div className="hidden sm:block fixed bottom-6 end-6 z-40" data-testid="desktop-cta-buttons">
+        <div className="flex items-center gap-2">
+          <Link href={`/messages`}>
+            <Button
+              variant="outline"
+              className="gap-1.5 shadow-lg"
+              data-testid="button-desktop-message"
+            >
+              <MessageCircle className="h-4 w-4" />
+              {t("profile.send_message")}
+            </Button>
+          </Link>
+          <Link href={`/appointments`}>
+            <Button
+              className="gap-1.5 shadow-lg"
+              data-testid="button-desktop-book"
+            >
+              <Calendar className="h-4 w-4" />
+              {t("profile.book_session")}
+            </Button>
+          </Link>
+        </div>
+      </div>
+    </AppLayout>
+  );
+}

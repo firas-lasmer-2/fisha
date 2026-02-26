@@ -1,0 +1,169 @@
+import { useI18n } from "@/lib/i18n";
+import { AppLayout } from "@/components/app-layout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { BookOpen, Plus, Trash2, Calendar, Loader2 } from "lucide-react";
+import { useState } from "react";
+import type { JournalEntry } from "@shared/schema";
+
+export default function JournalPage() {
+  const { t, isRTL } = useI18n();
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  const { data: entries, isLoading } = useQuery<JournalEntry[]>({
+    queryKey: ["/api/journal"],
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/journal", { title, content });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/journal"] });
+      setTitle("");
+      setContent("");
+      setDialogOpen(false);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/journal/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/journal"] });
+    },
+  });
+
+  const prompts = isRTL
+    ? [
+        "ما الذي أنا ممتن له اليوم؟",
+        "كيف أشعر في هذه اللحظة ولماذا؟",
+        "ما هو الشيء الذي تعلمته اليوم عن نفسي؟",
+        "ما الذي يقلقني الآن وكيف يمكنني التعامل معه؟",
+        "اكتب رسالة لنفسك في المستقبل",
+      ]
+    : [
+        "What am I grateful for today?",
+        "How am I feeling right now and why?",
+        "What is something I learned about myself today?",
+        "What is worrying me right now and how can I cope?",
+        "Write a letter to your future self",
+      ];
+
+  return (
+    <AppLayout>
+      <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold" data-testid="text-journal-title">{t("nav.journal")}</h1>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="gap-2" data-testid="button-new-journal">
+                <Plus className="h-4 w-4" />
+                {t("journal.new")}
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>{t("journal.new")}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-xs text-muted-foreground mb-2">{t("common.prompts")}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {prompts.map((prompt, i) => (
+                      <Button
+                        key={i}
+                        variant="outline"
+                        size="sm"
+                        className="text-xs h-7"
+                        onClick={() => { setTitle(prompt); setContent(""); }}
+                      >
+                        {prompt.slice(0, 30)}...
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <Input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder={t("journal.title")}
+                  data-testid="input-journal-title"
+                />
+                <Textarea
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder={t("journal.write")}
+                  rows={8}
+                  data-testid="textarea-journal-content"
+                />
+                <Button
+                  onClick={() => createMutation.mutate()}
+                  disabled={!content.trim() || createMutation.isPending}
+                  className="w-full"
+                  data-testid="button-save-journal"
+                >
+                  {createMutation.isPending && <Loader2 className="h-4 w-4 me-2 animate-spin" />}
+                  {t("journal.save")}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        {isLoading ? (
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-24 w-full" />)}
+          </div>
+        ) : entries && entries.length > 0 ? (
+          <div className="space-y-4">
+            {entries.map((entry) => (
+              <Card key={entry.id} className="hover-elevate" data-testid={`journal-entry-${entry.id}`}>
+                <CardContent className="p-5">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      {entry.title && (
+                        <h3 className="font-semibold mb-1">{entry.title}</h3>
+                      )}
+                      <p className="text-sm text-muted-foreground line-clamp-3 leading-relaxed">
+                        {entry.content}
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-3 text-xs text-muted-foreground">
+                        <Calendar className="h-3 w-3" />
+                        {new Date(entry.createdAt!).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0 text-muted-foreground hover:text-destructive"
+                      onClick={() => deleteMutation.mutate(entry.id)}
+                      data-testid={`button-delete-journal-${entry.id}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-16 text-muted-foreground">
+            <BookOpen className="h-12 w-12 mx-auto mb-3 opacity-30" />
+            <p className="text-sm">{t("journal.no_entries")}</p>
+            <p className="text-xs mt-1">{t("journal.start_writing")}</p>
+          </div>
+        )}
+      </div>
+    </AppLayout>
+  );
+}
