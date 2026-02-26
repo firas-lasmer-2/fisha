@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { MessageCircle, Send, ArrowLeft, ArrowRight, ShieldAlert } from "lucide-react";
+import { MessageCircle, Send, ArrowLeft, ArrowRight, ShieldAlert, Lock, Users } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
@@ -48,6 +48,7 @@ export default function MessagesPage() {
 
   const urlParams = new URLSearchParams(window.location.search);
   const convParam = urlParams.get("conv");
+  const therapistParam = urlParams.get("therapist");
   useEffect(() => {
     if (convParam) setSelectedConv(parseInt(convParam, 10));
   }, [convParam]);
@@ -57,6 +58,25 @@ export default function MessagesPage() {
   >({
     queryKey: ["/api/conversations"],
   });
+
+  // Auto-select or create conversation when ?therapist=<userId> param is present
+  useEffect(() => {
+    if (!therapistParam || !conversations || convParam) return;
+    const existing = conversations.find(
+      (c) => c.otherUser.id === therapistParam
+    );
+    if (existing) {
+      setSelectedConv(existing.id);
+    } else {
+      apiRequest("POST", "/api/conversations", { therapistId: therapistParam })
+        .then((r) => r.json())
+        .then((conv) => {
+          queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+          setSelectedConv(conv.id);
+        })
+        .catch(() => {});
+    }
+  }, [therapistParam, conversations, convParam]);
 
   const { data: messages, isLoading: msgsLoading } = useQuery<TherapyMessage[]>({
     queryKey: ["/api/conversations", selectedConv, "messages"],
@@ -260,9 +280,23 @@ export default function MessagesPage() {
                 ))}
               </div>
             ) : (
-              <div className="text-center py-12 px-4 text-muted-foreground text-sm">
-                <MessageCircle className="h-10 w-10 mx-auto mb-2 opacity-30" />
-                {t("messages.no_conversations")}
+              <div className="text-center py-10 px-4 space-y-3">
+                <div className="mx-auto h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Lock className="h-5 w-5 text-primary" />
+                </div>
+                <p className="text-sm font-medium">Your messages are private</p>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Every conversation is end-to-end encrypted — only you and your therapist can read them.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 mt-1"
+                  onClick={() => { window.location.href = "/therapists"; }}
+                >
+                  <Users className="h-3.5 w-3.5" />
+                  Find a therapist to message
+                </Button>
               </div>
             )}
           </ScrollArea>

@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { apiLimiter } from "./middleware/rate-limit";
 
 const app = express();
 const httpServer = createServer(app);
@@ -21,6 +22,9 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+// Apply general rate limiting to all /api routes
+app.use("/api", apiLimiter);
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

@@ -453,21 +453,22 @@ export default function TherapistProfilePage() {
                   )}
 
                   <div className="flex items-center gap-2 flex-wrap pt-1">
+                    <Link href={`/messages?therapist=${userId}`}>
+                      <Button size="sm" className="gap-1.5" data-testid="button-message-hero">
+                        <MessageCircle className="h-3.5 w-3.5" />
+                        Send a free message
+                      </Button>
+                    </Link>
                     <Button
                       size="sm"
+                      variant="outline"
                       className="gap-1.5"
                       onClick={() => openBookingFlow()}
                       data-testid="button-book-session-hero"
                     >
                       <Calendar className="h-3.5 w-3.5" />
-                      {t("profile.book_session")}
+                      Book a 20 TND session
                     </Button>
-                    <Link href="/messages">
-                      <Button size="sm" variant="outline" className="gap-1.5" data-testid="button-message-hero">
-                        <MessageCircle className="h-3.5 w-3.5" />
-                        {t("profile.send_message")}
-                      </Button>
-                    </Link>
                     <Button
                       size="sm"
                       variant="outline"
@@ -484,6 +485,15 @@ export default function TherapistProfilePage() {
                       <Share2 className="h-3.5 w-3.5" />
                       {t("profile.share_profile")}
                     </Button>
+                  </div>
+
+                  {/* Ecosystem value strip */}
+                  <div className="flex items-center gap-3 pt-2 text-xs text-muted-foreground flex-wrap">
+                    <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" /> Free messages</span>
+                    <span className="text-muted-foreground/40">→</span>
+                    <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> Book when ready</span>
+                    <span className="text-muted-foreground/40">→</span>
+                    <span className="flex items-center gap-1"><Star className="h-3 w-3" /> Leave a review</span>
                   </div>
                 </div>
               </div>
@@ -597,6 +607,41 @@ export default function TherapistProfilePage() {
             </Card>
           </motion.div>
         )}
+
+        {/* How it works — ecosystem strip */}
+        <motion.div
+          variants={sectionVariants}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-50px" }}
+        >
+          <div className="safe-surface rounded-xl p-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">How it works</p>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div className="space-y-1">
+                <div className="mx-auto h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
+                  <MessageCircle className="h-4 w-4 text-primary" />
+                </div>
+                <p className="text-xs font-medium">Message for free</p>
+                <p className="text-xs text-muted-foreground">Start a conversation, no commitment</p>
+              </div>
+              <div className="space-y-1">
+                <div className="mx-auto h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Calendar className="h-4 w-4 text-primary" />
+                </div>
+                <p className="text-xs font-medium">Book a live session</p>
+                <p className="text-xs text-muted-foreground">20 TND Google Meet, when you're ready</p>
+              </div>
+              <div className="space-y-1">
+                <div className="mx-auto h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Star className="h-4 w-4 text-primary" />
+                </div>
+                <p className="text-xs font-medium">Share feedback</p>
+                <p className="text-xs text-muted-foreground">Help others find the right therapist</p>
+              </div>
+            </div>
+          </div>
+        </motion.div>
 
         {profile.availableDays && profile.availableDays.length > 0 && (
           <motion.div

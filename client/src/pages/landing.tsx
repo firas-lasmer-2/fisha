@@ -12,6 +12,7 @@ import {
   Users, Star, Phone, ArrowRight, ArrowLeft, Smile,
   Calendar, Bot, Lock, HandHeart, Moon, ChevronDown,
   UserPlus, TrendingUp, Wind, CheckCircle, Clock, Zap,
+  GraduationCap, HeartHandshake,
 } from "lucide-react";
 
 const fadeIn = {
@@ -184,10 +185,10 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             {[
-              { icon: Lock, label: t("landing.trust.encrypted") },
-              { icon: CheckCircle, label: t("landing.trust.verified") },
-              { icon: Clock, label: t("landing.trust.support") },
-              { icon: Zap, label: t("landing.trust.free_start") },
+              { icon: Shield, label: "Private & secure" },
+              { icon: GraduationCap, label: "Verified therapists" },
+              { icon: HeartHandshake, label: "Always here for you" },
+              { icon: Sparkles, label: "AI-powered matching" },
             ].map((item, i) => (
               <motion.div
                 key={i}

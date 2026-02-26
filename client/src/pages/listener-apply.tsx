@@ -22,7 +22,7 @@ export default function ListenerApplyPage() {
   const { toast } = useToast();
   const [displayAlias, setDisplayAlias] = useState("");
   const [timezone, setTimezone] = useState("Africa/Tunis");
-  const [languages, setLanguages] = useState("ar, fr, darija");
+  const [languages, setLanguages] = useState("ar, fr");
   const [topics, setTopics] = useState("anxiety, stress");
   const [weeklyHours, setWeeklyHours] = useState("5");
   const [motivation, setMotivation] = useState("");

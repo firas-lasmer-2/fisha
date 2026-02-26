@@ -12,8 +12,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { getAccessToken } from "@/lib/supabase";
-import { Calendar, CreditCard, Receipt, UserCircle, Wallet, AtSign, Check, X, Loader2 } from "lucide-react";
+import { Calendar, CreditCard, Receipt, UserCircle, Wallet, AtSign, Check, X, Loader2, KeyRound, ShieldCheck } from "lucide-react";
 import type { PaymentTransaction } from "@shared/schema";
+import { wrapPrivateKeyWithPassword, unwrapPrivateKeyWithPassword } from "@/lib/e2e";
 
 function formatStatus(value: string): string {
   return value
@@ -104,6 +105,52 @@ export default function SettingsPage() {
   const canSaveDisplayName =
     displayNameInput !== (user?.displayName || "") &&
     (displayNameInput === "" || available === true);
+
+  // ---- E2E Key Backup / Recovery ----
+  const [backupPassphrase, setBackupPassphrase] = useState("");
+  const [recoveryPassphrase, setRecoveryPassphrase] = useState("");
+  const [backupMode, setBackupMode] = useState<"backup" | "restore">("backup");
+
+  const { data: existingBackup } = useQuery<{ wrappedPrivateKey: string; salt: string; iterations: number } | null>({
+    queryKey: ["/api/user/key-backup"],
+    retry: false,
+  });
+
+  const saveKeyBackup = useMutation({
+    mutationFn: async () => {
+      if (!user?.id) throw new Error("Not authenticated");
+      const { wrappedPrivateKey, salt, iterations } = await wrapPrivateKeyWithPassword(user.id, backupPassphrase);
+      await apiRequest("POST", "/api/user/key-backup", { wrappedPrivateKey, salt, iterations });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/user/key-backup"] });
+      setBackupPassphrase("");
+      toast({ title: "Recovery passphrase saved — keep it somewhere safe!" });
+    },
+    onError: (err: Error) => {
+      toast({ title: err.message, variant: "destructive" });
+    },
+  });
+
+  const restoreKeyBackup = useMutation({
+    mutationFn: async () => {
+      if (!user?.id || !existingBackup) throw new Error("No backup found");
+      await unwrapPrivateKeyWithPassword(
+        user.id,
+        recoveryPassphrase,
+        existingBackup.wrappedPrivateKey,
+        existingBackup.salt,
+        existingBackup.iterations,
+      );
+    },
+    onSuccess: () => {
+      setRecoveryPassphrase("");
+      toast({ title: "Private key restored successfully!" });
+    },
+    onError: () => {
+      toast({ title: "Wrong passphrase or corrupted backup.", variant: "destructive" });
+    },
+  });
 
   return (
     <AppLayout>
@@ -302,6 +349,87 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* E2E Key Backup / Recovery */}
+        <Card data-testid="card-settings-key-backup">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-primary" />
+              Encryption Key Backup
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Your messages are end-to-end encrypted. Set a recovery passphrase to back up your private key
+              so you can restore access on a new device. Without this, clearing your browser data will
+              permanently lose your message history.
+            </p>
+
+            {existingBackup && (
+              <div className="flex items-center gap-2 text-xs text-green-600 font-medium">
+                <ShieldCheck className="h-4 w-4" />
+                A key backup exists. You can update your passphrase or restore from it below.
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant={backupMode === "backup" ? "default" : "outline"}
+                onClick={() => setBackupMode("backup")}
+              >
+                Set / Update Passphrase
+              </Button>
+              <Button
+                size="sm"
+                variant={backupMode === "restore" ? "default" : "outline"}
+                onClick={() => setBackupMode("restore")}
+                disabled={!existingBackup}
+              >
+                Restore Key
+              </Button>
+            </div>
+
+            {backupMode === "backup" && (
+              <div className="space-y-2">
+                <Input
+                  type="password"
+                  placeholder="Choose a strong recovery passphrase"
+                  value={backupPassphrase}
+                  onChange={(e) => setBackupPassphrase(e.target.value)}
+                  minLength={12}
+                />
+                <Button
+                  size="sm"
+                  className="w-full"
+                  disabled={backupPassphrase.length < 12 || saveKeyBackup.isPending}
+                  onClick={() => saveKeyBackup.mutate()}
+                >
+                  {saveKeyBackup.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save Key Backup"}
+                </Button>
+              </div>
+            )}
+
+            {backupMode === "restore" && (
+              <div className="space-y-2">
+                <Input
+                  type="password"
+                  placeholder="Enter your recovery passphrase"
+                  value={recoveryPassphrase}
+                  onChange={(e) => setRecoveryPassphrase(e.target.value)}
+                />
+                <Button
+                  size="sm"
+                  className="w-full"
+                  disabled={!recoveryPassphrase || restoreKeyBackup.isPending}
+                  onClick={() => restoreKeyBackup.mutate()}
+                >
+                  {restoreKeyBackup.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Restore Private Key"}
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </AppLayout>
   );

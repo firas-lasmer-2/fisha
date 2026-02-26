@@ -52,7 +52,6 @@ const peerQuickTopics = ["anxiety", "stress", "relationships", "self_esteem", "g
 const languageOptions = [
   { value: "ar", label: "العربية" },
   { value: "fr", label: "Francais" },
-  { value: "darija", label: "Darija" },
 ] as const;
 
 function readableQueueStatus(status: string, fallback: string): string {
@@ -86,7 +85,7 @@ export default function PeerSupportPage() {
   const [justEndedSessionId, setJustEndedSessionId] = useState<number | null>(null);
 
   useEffect(() => {
-    if (user?.languagePreference && ["ar", "fr", "darija"].includes(user.languagePreference)) {
+    if (user?.languagePreference && ["ar", "fr"].includes(user.languagePreference)) {
       setPreferredLanguage(user.languagePreference);
     }
   }, [user?.languagePreference]);
@@ -358,8 +357,9 @@ export default function PeerSupportPage() {
             {isWaitingInQueue && (
               <div className="grid gap-2 sm:grid-cols-3" data-testid="peer-queue-insights">
                 <div className="rounded-lg bg-muted/60 p-3">
-                  <p className="text-xs text-muted-foreground">{tr("peer.queue_position", "Queue position")}</p>
+                  <p className="text-xs text-muted-foreground">Your place in line</p>
                   <p className="text-lg font-semibold">{queuePosition || "-"}</p>
+                  {queuePosition && <p className="text-xs text-primary">A listener will be with you shortly 💙</p>}
                 </div>
                 <div className="rounded-lg bg-muted/60 p-3">
                   <p className="text-xs text-muted-foreground">{tr("peer.eta", "Estimated wait")}</p>
@@ -384,7 +384,7 @@ export default function PeerSupportPage() {
                 disabled={isJoinDisabled}
                 data-testid="button-peer-join-queue"
               >
-                {tr("peer.join_safe", "Join queue")}
+                {tr("peer.join_safe", "Talk to someone")}
               </Button>
               <Button
                 variant="outline"
@@ -392,7 +392,7 @@ export default function PeerSupportPage() {
                 disabled={leaveQueueMutation.isPending || !queueEntry}
                 data-testid="button-peer-leave-queue"
               >
-                {t("peer.leave_queue")}
+                {t("peer.leave_queue") === "peer.leave_queue" ? "Never mind, I'm okay" : t("peer.leave_queue")}
               </Button>
             </div>
           </CardContent>
@@ -568,31 +568,35 @@ export default function PeerSupportPage() {
                   </div>
 
                   {isClientViewingEndedSession && (
-                    <Card className={`border-dashed ${shouldHighlightClosingCard ? "ring-1 ring-primary/40" : ""}`} data-testid="peer-closing-card">
+                    <Card className={`safe-surface border-0 ${shouldHighlightClosingCard ? "ring-1 ring-primary/40" : ""}`} data-testid="peer-closing-card">
                       <CardHeader className="pb-2">
                         <CardTitle className="text-sm flex items-center gap-2">
-                          <Sparkles className="h-4 w-4 text-primary" />
+                          <HeartHandshake className="h-4 w-4 text-primary" />
                           {tr("peer.not_alone_title", "You are not alone")}
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-3">
                         <p className="text-sm text-muted-foreground">
-                          {tr("peer.not_alone_desc", "If you still need support, you can reconnect with another listener or use self-care tools now.")}
+                          You did something brave today. If you'd like more structured support, therapists are here.
                         </p>
-                        <div className="grid gap-2 sm:grid-cols-3">
+                        <div className="grid gap-2 sm:grid-cols-2">
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => setExpectationsOpen(true)}
                             disabled={isJoinDisabled}
                           >
-                            {tr("peer.rejoin_queue", "Join queue again")}
+                            {tr("peer.rejoin_queue", "Talk to someone again")}
                           </Button>
                           <Button size="sm" variant="outline" onClick={() => { window.location.href = "/self-care"; }}>
                             {tr("peer.open_selfcare", "Open self-care")}
                           </Button>
                           <Button size="sm" variant="outline" onClick={() => { window.location.href = "/crisis"; }}>
                             {tr("peer.crisis_support", "Crisis support")}
+                          </Button>
+                          <Button size="sm" className="gap-1.5" onClick={() => { window.location.href = "/therapists"; }}>
+                            <HeartHandshake className="h-3.5 w-3.5" />
+                            Talk to a therapist
                           </Button>
                         </div>
                       </CardContent>

@@ -146,6 +146,7 @@
   [dir="rtl"] body,
   [dir="rtl"] {
     font-family: var(--font-arabic);
+    line-height: 1.7;
   }
 }
 

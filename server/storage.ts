@@ -24,6 +24,9 @@ import {
   type PeerReport, type InsertPeerReport,
   type FcmToken,
   type TherapistVerification, type InsertTherapistVerification,
+  type AuditLog,
+  type TreatmentGoal, type InsertTreatmentGoal, type UpdateTreatmentGoal,
+  type SessionSummary, type UpsertSessionSummary,
   mapProfile, mapTherapistProfile, mapTherapistReview,
   mapConversation, mapMessage, mapAppointment, mapTherapistSlot,
   mapMoodEntry, mapJournalEntry, mapResource,
@@ -31,7 +34,7 @@ import {
   mapListenerProfile, mapListenerProgress, mapListenerPointsLedger,
   mapListenerApplication, mapListenerQueueEntry,
   mapPeerSession, mapPeerMessage, mapPeerSessionFeedback, mapPeerReport,
-  mapTherapistVerification,
+  mapTherapistVerification, mapAuditLog, mapTreatmentGoal, mapSessionSummary,
   toSnakeCase,
 } from "@shared/schema";
 
@@ -169,6 +172,7 @@ export interface IStorage {
     sessionType?: string,
   ): Promise<{ appointment: Appointment; slot: TherapistSlot } | undefined>;
   updateAppointmentStatus(id: number, status: string): Promise<Appointment | undefined>;
+  updateAppointment(id: number, data: Partial<{ meetLink: string | null; notes: string | null; status: string }>): Promise<Appointment | undefined>;
   getTherapistSlots(
     therapistId: string,
     from?: string,
@@ -291,6 +295,30 @@ export interface IStorage {
     newUsersThisWeek: number;
     pendingVerifications: number;
   }>;
+
+  // Audit log
+  getAuditLog(limit?: number, offset?: number): Promise<AuditLog[]>;
+
+  // E2E key backup
+  upsertUserKeyBackup(userId: string, wrappedPrivateKey: string, salt: string, iterations: number): Promise<void>;
+  getUserKeyBackup(userId: string): Promise<{ wrappedPrivateKey: string; salt: string; iterations: number } | null>;
+
+  // Treatment goals (Phase 3.3)
+  getTreatmentGoals(userId: string): Promise<TreatmentGoal[]>;
+  createTreatmentGoal(userId: string, data: InsertTreatmentGoal): Promise<TreatmentGoal>;
+  updateTreatmentGoal(id: number, userId: string, data: UpdateTreatmentGoal): Promise<TreatmentGoal | undefined>;
+  deleteTreatmentGoal(id: number, userId: string): Promise<void>;
+
+  // Session summaries (Phase 3.3)
+  getSessionSummary(appointmentId: number): Promise<SessionSummary | undefined>;
+  upsertSessionSummary(appointmentId: number, therapistId: string, clientId: string, data: UpsertSessionSummary): Promise<SessionSummary>;
+
+  // Progress analytics (Phase 3.3)
+  getMoodAnalytics(userId: string, days: number): Promise<{ date: string; avgMood: number }[]>;
+
+  // Admin user management (Phase 3.1)
+  getUsersPaginated(page: number, limit: number, search?: string): Promise<{ users: User[]; total: number }>;
+  getRevenueAnalytics(days: number): Promise<{ date: string; amount: number }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -390,6 +418,17 @@ export class DatabaseStorage implements IStorage {
       ...mapTherapistProfile(p),
       user: usersMap.get(p.user_id)!,
     })).filter((p) => p.user);
+
+    // Compute hasOpenSlots via a single query
+    const profileUserIds = profileRows.map((p: any) => p.user_id);
+    const { data: openSlotRows } = await supabase
+      .from("therapist_slots")
+      .select("therapist_id")
+      .in("therapist_id", profileUserIds)
+      .eq("status", "open")
+      .gt("starts_at", new Date().toISOString());
+    const therapistsWithOpenSlots = new Set((openSlotRows || []).map((r: any) => r.therapist_id));
+    profiles = profiles.map((p) => ({ ...p, hasOpenSlots: therapistsWithOpenSlots.has(p.userId) })) as typeof profiles;
 
     if (filters?.specialization) {
       profiles = profiles.filter((p) => p.specializations?.includes(filters.specialization!));
@@ -691,6 +730,21 @@ export class DatabaseStorage implements IStorage {
       .single();
     if (error) return undefined;
     return mapAppointment(data);
+  }
+
+  async updateAppointment(id: number, data: Partial<{ meetLink: string | null; notes: string | null; status: string }>): Promise<Appointment | undefined> {
+    const update: Record<string, unknown> = {};
+    if ("meetLink" in data) update.meet_link = data.meetLink;
+    if ("notes" in data) update.notes = data.notes;
+    if ("status" in data) update.status = data.status;
+    const { data: row, error } = await supabase
+      .from("appointments")
+      .update(update)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) return undefined;
+    return mapAppointment(row);
   }
 
   async getTherapistSlots(
@@ -1930,6 +1984,202 @@ export class DatabaseStorage implements IStorage {
       newUsersThisWeek: newUsersThisWeek || 0,
       pendingVerifications: pendingVerifications || 0,
     };
+  }
+
+  // ---- Audit Log ----
+
+  async getAuditLog(limit = 100, offset = 0): Promise<AuditLog[]> {
+    const { data, error } = await supabase
+      .from("audit_log")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (error || !data) return [];
+    return data.map(mapAuditLog);
+  }
+
+  // ---- E2E Key Backup ----
+
+  async upsertUserKeyBackup(userId: string, wrappedPrivateKey: string, salt: string, iterations: number): Promise<void> {
+    await supabase.from("user_key_backups").upsert(
+      { user_id: userId, wrapped_private_key: wrappedPrivateKey, salt, iterations },
+      { onConflict: "user_id" },
+    );
+  }
+
+  async getUserKeyBackup(userId: string): Promise<{ wrappedPrivateKey: string; salt: string; iterations: number } | null> {
+    const { data, error } = await supabase
+      .from("user_key_backups")
+      .select("wrapped_private_key, salt, iterations")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return {
+      wrappedPrivateKey: data.wrapped_private_key as string,
+      salt: data.salt as string,
+      iterations: data.iterations as number,
+    };
+  }
+
+  // ---- Treatment Goals (Phase 3.3) ----
+
+  async getTreatmentGoals(userId: string): Promise<TreatmentGoal[]> {
+    const { data, error } = await supabase
+      .from("treatment_goals")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+    if (error || !data) return [];
+    return data.map(mapTreatmentGoal);
+  }
+
+  async createTreatmentGoal(userId: string, goalData: InsertTreatmentGoal): Promise<TreatmentGoal> {
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from("treatment_goals")
+      .insert({
+        user_id: userId,
+        title: goalData.title,
+        description: goalData.description ?? null,
+        target_date: goalData.targetDate ?? null,
+        progress_pct: goalData.progressPct ?? 0,
+        created_at: now,
+        updated_at: now,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return mapTreatmentGoal(data);
+  }
+
+  async updateTreatmentGoal(id: number, userId: string, goalData: UpdateTreatmentGoal): Promise<TreatmentGoal | undefined> {
+    const row: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (goalData.title !== undefined) row.title = goalData.title;
+    if (goalData.description !== undefined) row.description = goalData.description;
+    if (goalData.targetDate !== undefined) row.target_date = goalData.targetDate;
+    if (goalData.status !== undefined) row.status = goalData.status;
+    if (goalData.progressPct !== undefined) row.progress_pct = goalData.progressPct;
+
+    const { data, error } = await supabase
+      .from("treatment_goals")
+      .update(row)
+      .eq("id", id)
+      .eq("user_id", userId)
+      .select()
+      .single();
+    if (error || !data) return undefined;
+    return mapTreatmentGoal(data);
+  }
+
+  async deleteTreatmentGoal(id: number, userId: string): Promise<void> {
+    await supabase
+      .from("treatment_goals")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", userId);
+  }
+
+  // ---- Session Summaries (Phase 3.3) ----
+
+  async getSessionSummary(appointmentId: number): Promise<SessionSummary | undefined> {
+    const { data, error } = await supabase
+      .from("session_summaries")
+      .select("*")
+      .eq("appointment_id", appointmentId)
+      .maybeSingle();
+    if (error || !data) return undefined;
+    return mapSessionSummary(data);
+  }
+
+  async upsertSessionSummary(
+    appointmentId: number,
+    therapistId: string,
+    clientId: string,
+    summaryData: UpsertSessionSummary,
+  ): Promise<SessionSummary> {
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from("session_summaries")
+      .upsert(
+        {
+          appointment_id: appointmentId,
+          therapist_id: therapistId,
+          client_id: clientId,
+          key_topics: summaryData.keyTopics ?? null,
+          homework: summaryData.homework ?? null,
+          therapist_notes: summaryData.therapistNotes ?? null,
+          client_visible: summaryData.clientVisible ?? false,
+          updated_at: now,
+        },
+        { onConflict: "appointment_id" },
+      )
+      .select()
+      .single();
+    if (error) throw error;
+    return mapSessionSummary(data);
+  }
+
+  // ---- Progress Analytics (Phase 3.3) ----
+
+  async getMoodAnalytics(userId: string, days: number): Promise<{ date: string; avgMood: number }[]> {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const { data, error } = await supabase
+      .from("mood_entries")
+      .select("mood_score, created_at")
+      .eq("user_id", userId)
+      .gte("created_at", since.toISOString())
+      .order("created_at", { ascending: true });
+    if (error || !data) return [];
+
+    // Group by day
+    const byDay: Record<string, number[]> = {};
+    for (const row of data) {
+      const date = (row.created_at as string).slice(0, 10);
+      if (!byDay[date]) byDay[date] = [];
+      byDay[date].push(row.mood_score as number);
+    }
+    return Object.entries(byDay).map(([date, scores]) => ({
+      date,
+      avgMood: Math.round((scores.reduce((s, v) => s + v, 0) / scores.length) * 10) / 10,
+    }));
+  }
+
+  // ---- Admin User Management (Phase 3.1) ----
+
+  async getUsersPaginated(page: number, limit: number, search?: string): Promise<{ users: User[]; total: number }> {
+    let query = supabase
+      .from("profiles")
+      .select("*", { count: "exact" })
+      .order("created_at", { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
+
+    if (search) {
+      query = query.or(`email.ilike.%${search}%,first_name.ilike.%${search}%,last_name.ilike.%${search}%`);
+    }
+
+    const { data, error, count } = await query;
+    if (error || !data) return { users: [], total: 0 };
+    return { users: data.map(mapProfile), total: count ?? 0 };
+  }
+
+  async getRevenueAnalytics(days: number): Promise<{ date: string; amount: number }[]> {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const { data, error } = await supabase
+      .from("payment_transactions")
+      .select("amount_dinar, created_at")
+      .eq("status", "completed")
+      .gte("created_at", since.toISOString())
+      .order("created_at", { ascending: true });
+    if (error || !data) return [];
+
+    const byDay: Record<string, number> = {};
+    for (const row of data) {
+      const date = (row.created_at as string).slice(0, 10);
+      byDay[date] = (byDay[date] ?? 0) + (row.amount_dinar as number);
+    }
+    return Object.entries(byDay).map(([date, amount]) => ({ date, amount }));
   }
 
 }

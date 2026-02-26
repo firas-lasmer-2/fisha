@@ -121,6 +121,98 @@ export async function unwrapConversationKey(
   );
 }
 
+/**
+ * Wrap (encrypt) the user's private key JWK using a password-derived AES-KW key.
+ * Uses PBKDF2 (200,000 iterations, SHA-256) to derive a 256-bit AES-KW key from the passphrase.
+ * Returns { wrappedPrivateKey, salt } both as base64 strings.
+ */
+export async function wrapPrivateKeyWithPassword(
+  userId: string,
+  passphrase: string,
+): Promise<{ wrappedPrivateKey: string; salt: string; iterations: number }> {
+  const privateKeyStorageKey = `${KEYPAIR_PRIVATE_PREFIX}${userId}`;
+  const privateKeyJson = localStorage.getItem(privateKeyStorageKey);
+  if (!privateKeyJson) {
+    throw new Error("No private key found in local storage");
+  }
+
+  const iterations = 200_000;
+  const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+  const salt = arrayBufferToBase64(saltBytes.buffer);
+
+  // Import the passphrase as a raw key material for PBKDF2
+  const passphraseKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveKey"],
+  );
+
+  // Derive a 256-bit AES-KW key from the passphrase + salt
+  const aesKwKey = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: saltBytes, iterations, hash: "SHA-256" },
+    passphraseKey,
+    { name: "AES-KW", length: 256 },
+    false,
+    ["wrapKey"],
+  );
+
+  // Import the private key JWK so we can wrap it with AES-KW
+  const privateKey = await importPrivateKey(privateKeyJson);
+
+  // Wrap the private key using AES-KW
+  const wrappedBuffer = await crypto.subtle.wrapKey("jwk", privateKey, aesKwKey, "AES-KW");
+  const wrappedPrivateKey = arrayBufferToBase64(wrappedBuffer);
+
+  return { wrappedPrivateKey, salt, iterations };
+}
+
+/**
+ * Unwrap a previously wrapped private key using the correct passphrase.
+ * On success, restores the private key to localStorage.
+ */
+export async function unwrapPrivateKeyWithPassword(
+  userId: string,
+  passphrase: string,
+  wrappedPrivateKey: string,
+  salt: string,
+  iterations: number,
+): Promise<void> {
+  const saltBytes = new Uint8Array(base64ToArrayBuffer(salt));
+
+  const passphraseKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveKey"],
+  );
+
+  const aesKwKey = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: saltBytes, iterations, hash: "SHA-256" },
+    passphraseKey,
+    { name: "AES-KW", length: 256 },
+    false,
+    ["unwrapKey"],
+  );
+
+  // Unwrap and re-import the private key
+  const privateKey = await crypto.subtle.unwrapKey(
+    "jwk",
+    base64ToArrayBuffer(wrappedPrivateKey),
+    aesKwKey,
+    "AES-KW",
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    true,
+    ["decrypt"],
+  );
+
+  // Export back to JWK and store in localStorage
+  const restoredJwk = await crypto.subtle.exportKey("jwk", privateKey);
+  localStorage.setItem(`${KEYPAIR_PRIVATE_PREFIX}${userId}`, JSON.stringify(restoredJwk));
+}
+
 export function isEncryptedPayload(content: string): boolean {
   try {
     const parsed = JSON.parse(content) as Partial<EncryptedPayload>;
@@ -162,4 +254,3 @@ export async function decryptMessageContent(content: string, conversationKey: Cr
 
   return new TextDecoder().decode(plaintext);
 }
-

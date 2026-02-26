@@ -14,7 +14,6 @@ export function LanguageSwitcher({ variant = "default" }: { variant?: "default" 
   const languages: { code: Language; name: string; label: string }[] = [
     { code: "ar", name: "العربية", label: "ع" },
     { code: "fr", name: "Français", label: "Fr" },
-    { code: "darija", name: "تونسي", label: "تو" },
   ];
 
   return (

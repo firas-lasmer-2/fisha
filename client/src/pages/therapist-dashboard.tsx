@@ -15,6 +15,9 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
+import { SlotCalendar } from "@/components/slot-calendar";
+import { FileUpload } from "@/components/file-upload";
+import { LandingPageBuilder } from "@/components/landing-page-builder";
 import {
   Star,
   Save,
@@ -40,6 +43,7 @@ import {
   ShieldCheck,
   Upload,
   UserCircle,
+  GraduationCap,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import type { TherapistProfile, TherapistReview, TherapistSlot, TherapistVerification, Appointment, User } from "@shared/schema";
@@ -94,6 +98,7 @@ export default function TherapistDashboardPage() {
   const [landingCtaText, setLandingCtaText] = useState("");
   const [landingCtaUrl, setLandingCtaUrl] = useState("");
   const [landingFormLoaded, setLandingFormLoaded] = useState(false);
+  const [landingSections, setLandingSections] = useState<import("@shared/schema").LandingSection[]>([]);
   const [verificationDocUrl, setVerificationDocUrl] = useState("");
   const [verificationDocType, setVerificationDocType] = useState<"license" | "diploma" | "id_card" | "cv">("license");
 
@@ -163,6 +168,16 @@ export default function TherapistDashboardPage() {
       setLandingEnabled(p.landingPageEnabled ?? false);
       setLandingCtaText(p.landingPageCtaText || "");
       setLandingCtaUrl(p.landingPageCtaUrl || "");
+      const secs = Array.isArray(p.landingPageSections) && p.landingPageSections.length > 0
+        ? p.landingPageSections
+        : [
+            { type: "hero", enabled: true },
+            { type: "about", enabled: true },
+            { type: "specializations", enabled: true },
+            { type: "slots", enabled: true },
+            { type: "testimonials", enabled: true, maxCount: 3 },
+          ];
+      setLandingSections(secs as import("@shared/schema").LandingSection[]);
       setLandingFormLoaded(true);
     }
   }, [dashboardData, formLoaded, landingFormLoaded]);
@@ -258,6 +273,7 @@ export default function TherapistDashboardPage() {
         landingPageEnabled: landingEnabled,
         landingPageCtaText: landingCtaText || null,
         landingPageCtaUrl: landingCtaUrl || null,
+        landingPageSections: landingSections,
       });
     },
     onSuccess: () => {
@@ -347,6 +363,29 @@ export default function TherapistDashboardPage() {
           )}
         </div>
 
+        {/* Portfolio banner — motivational framing for new graduates */}
+        {totalSessions === 0 ? (
+          <div className="safe-surface rounded-xl p-4 flex items-start gap-3">
+            <div className="h-9 w-9 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+              <GraduationCap className="h-4 w-4 text-primary" />
+            </div>
+            <div>
+              <p className="text-sm font-medium">Welcome to your Shifa dashboard!</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Your first messages and sessions will start building your portfolio. Every review helps clients find you.</p>
+            </div>
+          </div>
+        ) : (profile?.reviewCount || 0) < 5 ? (
+          <div className="safe-surface rounded-xl p-4 flex items-start gap-3">
+            <div className="h-9 w-9 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+              <GraduationCap className="h-4 w-4 text-primary" />
+            </div>
+            <div>
+              <p className="text-sm font-medium">You have {totalSessions} session{totalSessions !== 1 ? "s" : ""} — keep going!</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{5 - (profile?.reviewCount || 0)} more review{5 - (profile?.reviewCount || 0) !== 1 ? "s" : ""} and your profile will really stand out.</p>
+            </div>
+          </div>
+        ) : null}
+
         <div className="grid sm:grid-cols-3 gap-4">
           <Card data-testid="card-stat-reviews">
             <CardContent className="p-4 flex items-center gap-3">
@@ -406,6 +445,10 @@ export default function TherapistDashboardPage() {
             <TabsTrigger value="verification" data-testid="tab-verification">
               <ShieldCheck className="h-4 w-4 me-1.5" />
               {tr("therapist_dash.verification_tab", "Verification")}
+            </TabsTrigger>
+            <TabsTrigger value="slots" data-testid="tab-slots">
+              <Calendar className="h-4 w-4 me-1.5" />
+              {tr("therapist_dash.slots_tab", "Slots")}
             </TabsTrigger>
             <TabsTrigger value="clients" data-testid="tab-clients">
               <Users className="h-4 w-4 me-1.5" />
@@ -967,6 +1010,19 @@ export default function TherapistDashboardPage() {
                     {tr("therapist_dash.cta_url_hint", "Leave blank to use the in-app booking flow.")}
                   </p>
                 </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Page Sections
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Choose which sections appear on your public page and reorder them.
+                  </p>
+                  <LandingPageBuilder
+                    sections={landingSections}
+                    onChange={setLandingSections}
+                  />
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -1038,46 +1094,17 @@ export default function TherapistDashboardPage() {
                       )}
 
                       {existing?.status !== "approved" && (
-                        <div className="flex gap-2 flex-wrap items-end">
-                          <div className="flex-1 space-y-1 min-w-0">
-                            <label className="text-xs text-muted-foreground">
-                              {tr("verification.doc_url", "Document URL")}
-                            </label>
-                            <Input
-                              type="url"
-                              placeholder="https://drive.google.com/file/..."
-                              value={verificationDocType === docType ? verificationDocUrl : ""}
-                              onChange={(e) => {
-                                setVerificationDocType(docType);
-                                setVerificationDocUrl(e.target.value);
-                              }}
-                              onFocus={() => setVerificationDocType(docType)}
-                              data-testid={`input-doc-url-${docType}`}
-                            />
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={
-                              isUploading ||
-                              verificationDocType !== docType ||
-                              !verificationDocUrl.trim()
-                            }
-                            onClick={() =>
-                              uploadVerificationMutation.mutate({
-                                docType,
-                                docUrl: verificationDocUrl.trim(),
-                              })
-                            }
-                            data-testid={`button-upload-${docType}`}
-                          >
-                            <Upload className="h-4 w-4 me-1.5" />
-                            {isUploading
-                              ? t("common.loading")
-                              : existing
-                                ? tr("verification.resubmit", "Resubmit")
-                                : tr("verification.submit", "Submit")}
-                          </Button>
+                        <div className="space-y-2">
+                          <FileUpload
+                            bucket="verification-documents"
+                            folder="docs"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            maxSizeMB={10}
+                            onUploadComplete={(url) => {
+                              uploadVerificationMutation.mutate({ docType, docUrl: url });
+                            }}
+                            onError={(msg) => toast({ title: msg, variant: "destructive" })}
+                          />
                         </div>
                       )}
 
@@ -1089,6 +1116,28 @@ export default function TherapistDashboardPage() {
                     </div>
                   );
                 })}
+              </CardContent>
+            </Card>
+          </TabsContent>
+          {/* Slots Tab (Phase 3.2) */}
+          <TabsContent value="slots" className="space-y-4">
+            <Card>
+              <CardHeader className="pb-4">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Calendar className="h-5 w-5" />
+                  {tr("therapist_dash.slots_tab", "Availability Calendar")}
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Click any empty cell to create a slot. Check the recurring option to repeat weekly.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <SlotCalendar
+                  slots={slots}
+                  therapistId={user?.id ?? ""}
+                  defaultPriceDinar={slotPriceDinar}
+                  defaultDurationMinutes={slotDurationMinutes}
+                />
               </CardContent>
             </Card>
           </TabsContent>

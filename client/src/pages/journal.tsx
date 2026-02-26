@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { BookOpen, Plus, Trash2, Calendar, Loader2 } from "lucide-react";
+import { BookOpen, Plus, Trash2, Calendar, Loader2, Sparkles } from "lucide-react";
 import { useState } from "react";
 import type { JournalEntry } from "@shared/schema";
 
@@ -51,6 +51,17 @@ export default function JournalPage() {
     t("journal.prompt_4"),
     t("journal.prompt_5"),
   ];
+
+  const FALLBACK_PROMPTS = [
+    "What made you feel safe today?",
+    "Describe one thing you're grateful for right now.",
+    "What emotion are you carrying, and where do you feel it in your body?",
+    "What would you tell a friend going through what you're facing?",
+    "What's one small thing that brought you comfort this week?",
+  ];
+
+  const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000);
+  const todayPrompt = prompts[dayOfYear % prompts.length] || FALLBACK_PROMPTS[dayOfYear % FALLBACK_PROMPTS.length];
 
   return (
     <AppLayout>
@@ -111,6 +122,21 @@ export default function JournalPage() {
             </DialogContent>
           </Dialog>
         </div>
+
+        {/* Today's prompt — inline, visible without clicking */}
+        <button
+          type="button"
+          className="w-full text-start safe-surface rounded-xl p-4 space-y-1 hover:opacity-90 transition-opacity"
+          onClick={() => { setTitle(todayPrompt); setDialogOpen(true); }}
+          data-testid="card-daily-prompt"
+        >
+          <p className="text-xs font-semibold flex items-center gap-1.5 text-primary">
+            <Sparkles className="h-3.5 w-3.5" />
+            Today's prompt
+          </p>
+          <p className="text-sm text-muted-foreground leading-relaxed">{todayPrompt}</p>
+          <p className="text-xs text-primary/70 mt-1">Tap to start writing →</p>
+        </button>
 
         {isLoading ? (
           <div className="space-y-4">

@@ -119,7 +119,10 @@ export default function TherapistLandingPage() {
               <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap">
                 <h1 className="text-2xl sm:text-3xl font-bold">{therapistName}</h1>
                 {profile.verified && (
-                  <CheckCircle className="h-5 w-5 text-blue-500" aria-label="Verified therapist" />
+                  <Badge className="gap-1 bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300/50">
+                    <CheckCircle className="h-3.5 w-3.5 fill-blue-500/20" />
+                    Verified
+                  </Badge>
                 )}
                 {profile.tier === "student" && (
                   <Badge variant="secondary">Student Therapist</Badge>

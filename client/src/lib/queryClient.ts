@@ -1,10 +1,20 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
-import { getAccessToken } from "@/lib/supabase";
+import { getAccessToken, supabase } from "@/lib/supabase";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
     throw new Error(`${res.status}: ${text}`);
+  }
+}
+
+async function getFreshToken(): Promise<string | null> {
+  // Attempt a silent refresh; if it fails, return whatever we have
+  try {
+    const { data } = await supabase.auth.refreshSession();
+    return data.session?.access_token ?? null;
+  } catch {
+    return getAccessToken();
   }
 }
 
@@ -23,6 +33,21 @@ export async function apiRequest(
     headers,
     body: data ? JSON.stringify(data) : undefined,
   });
+
+  // On 401, attempt one token refresh and retry
+  if (res.status === 401) {
+    const freshToken = await getFreshToken();
+    if (freshToken && freshToken !== token) {
+      const retryHeaders: Record<string, string> = { ...headers, Authorization: `Bearer ${freshToken}` };
+      const retryRes = await fetch(url, {
+        method,
+        headers: retryHeaders,
+        body: data ? JSON.stringify(data) : undefined,
+      });
+      await throwIfResNotOk(retryRes);
+      return retryRes;
+    }
+  }
 
   await throwIfResNotOk(res);
   return res;

@@ -2,17 +2,28 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { supabaseAdmin } from "./supabase";
-import OpenAI from "openai";
 import crypto from "crypto";
 import { sendPushToTokens } from "./notifications";
-import { mapProfile, type User } from "@shared/schema";
+import { mapProfile, type User,
+  signupRequestSchema, loginRequestSchema, otpRequestSchema, verifyOtpRequestSchema,
+  sendMessageRequestSchema, moodEntryRequestSchema, journalEntryRequestSchema,
+  onboardingRequestSchema, reviewRequestSchema, slotCreateRequestSchema,
+  paymentInitiateRequestSchema, queueJoinRequestSchema, peerMessageRequestSchema,
+} from "@shared/schema";
+import { authLimiter, webhookLimiter } from "./middleware/rate-limit";
+import { validateBody } from "./middleware/validate";
+import { logAudit } from "./audit";
+import { createFlouciPayment } from "./payments/flouci";
+import { createKonnectPayment } from "./payments/konnect";
+import {
+  sendAppointmentConfirmation,
+  sendVerificationStatusUpdate,
+  sendListenerApplicationUpdate,
+  sendWelcome,
+} from "./email";
+import { moderateContent } from "./moderation";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL || undefined,
-});
-
-// Crisis keywords for auto-detection (Arabic, French, Darija)
+// Crisis keywords for auto-detection (Arabic, French, Tunisian dialect)
 const CRISIS_KEYWORDS = [
   // Arabic
   "انتحار", "أقتل نفسي", "أريد الموت", "لا أريد العيش", "أنهي حياتي",
@@ -169,7 +180,7 @@ export async function registerRoutes(
       updated_at: new Date().toISOString(),
     };
 
-    if (preferredLanguage && ["ar", "fr", "darija"].includes(preferredLanguage)) {
+    if (preferredLanguage && ["ar", "fr"].includes(preferredLanguage)) {
       updatePayload.language_preference = preferredLanguage;
     }
 
@@ -302,8 +313,9 @@ export async function registerRoutes(
   });
 
   // ---- Auth routes ----
+  app.use("/api/auth", authLimiter);
 
-  app.post("/api/auth/signup", async (req, res) => {
+  app.post("/api/auth/signup", validateBody(signupRequestSchema), async (req, res) => {
     try {
       const { email, password, role, firstName, lastName, phone } = req.body;
       const { data, error } = await supabaseAdmin.auth.admin.createUser({
@@ -336,6 +348,10 @@ export async function registerRoutes(
         id: data.user!.id,
         email: data.user?.email || email,
       });
+
+      // Fire-and-forget welcome email
+      sendWelcome(email, firstName || email.split("@")[0]);
+
       res.json({
         user: profile || fallbackProfile({ id: data.user!.id, email: data.user?.email || email }, normalizeRole(role)),
         session: session.session,
@@ -346,7 +362,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", validateBody(loginRequestSchema), async (req, res) => {
     try {
       const { email, password } = req.body;
       const { data, error } = await supabaseAdmin.auth.signInWithPassword({
@@ -368,7 +384,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/auth/login/otp", async (req, res) => {
+  app.post("/api/auth/login/otp", validateBody(otpRequestSchema), async (req, res) => {
     try {
       const { phone } = req.body;
       const { error } = await supabaseAdmin.auth.signInWithOtp({ phone });
@@ -379,7 +395,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/auth/verify-otp", async (req, res) => {
+  app.post("/api/auth/verify-otp", validateBody(verifyOtpRequestSchema), async (req, res) => {
     try {
       const { phone, token } = req.body;
       const { data, error } = await supabaseAdmin.auth.verifyOtp({
@@ -534,6 +550,12 @@ export async function registerRoutes(
           reviewerId,
         );
         if (!updated) return res.status(500).json({ message: "Failed to update therapist tier" });
+
+        logAudit(reviewerId, "therapist.tier_change", "therapist_profile", therapistUserId, {
+          previousTier: existingProfile.tier,
+          newTier: tier,
+        }, req);
+
         res.json(updated);
       } catch (error) {
         res.status(500).json({ message: "Failed to update therapist tier" });
@@ -605,7 +627,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/conversations/:id/messages", isAuthenticated, async (req: any, res) => {
+  app.post("/api/conversations/:id/messages", isAuthenticated, validateBody(sendMessageRequestSchema), async (req: any, res) => {
     try {
       const convId = parseInt(req.params.id);
       const userId = req.user.id;
@@ -638,6 +660,14 @@ export async function registerRoutes(
         content,
         messageType: req.body.messageType || "text",
       });
+
+      // Content moderation (only on plaintext messages)
+      if (req.body.encrypted !== true) {
+        const modResult = moderateContent(content);
+        if (modResult.flagged) {
+          ;(async () => { try { await supabaseAdmin.from('content_flags').insert({ message_type: 'therapy_message', message_id: msg.id, flag_reason: modResult.reason, severity: modResult.severity, status: 'pending' }); } catch {} })();
+        }
+      }
 
       const conversation = await storage.getConversation(convId);
       if (conversation) {
@@ -731,6 +761,25 @@ export async function registerRoutes(
           `Appointment status changed to ${apt.status}.`,
           { type: "appointment", appointmentId: String(apt.id), status: apt.status },
         );
+
+        // Send email confirmation when therapist confirms an appointment
+        if (apt.status === "confirmed") {
+          const [clientProfile, therapistProfile] = await Promise.all([
+            storage.getUser(apt.clientId),
+            storage.getUser(apt.therapistId),
+          ]);
+          if (clientProfile?.email) {
+            sendAppointmentConfirmation(clientProfile.email, {
+              clientName: [clientProfile.firstName, clientProfile.lastName].filter(Boolean).join(" ") || clientProfile.email,
+              therapistName: [therapistProfile?.firstName, therapistProfile?.lastName].filter(Boolean).join(" ") || "Therapist",
+              scheduledAt: apt.scheduledAt,
+              durationMinutes: apt.durationMinutes ?? 50,
+              sessionType: apt.sessionType,
+              priceDinar: apt.priceDinar,
+              meetLink: apt.meetLink,
+            });
+          }
+        }
       }
       res.json(apt);
     } catch (error) {
@@ -762,7 +811,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/therapist/slots", isAuthenticated, async (req: any, res) => {
+  app.post("/api/therapist/slots", isAuthenticated, validateBody(slotCreateRequestSchema), async (req: any, res) => {
     try {
       const callerId = req.user.id;
       const caller = await storage.getUser(callerId);
@@ -796,6 +845,7 @@ export async function registerRoutes(
         durationMinutes,
         priceDinar,
         status: "open",
+        meetLink: req.body.meetLink ?? null,
       });
 
       res.status(201).json(slot);
@@ -893,6 +943,12 @@ export async function registerRoutes(
         { type: "appointment", appointmentId: String(result.appointment.id) },
       );
 
+      // Inherit meet link from slot if appointment doesn't have one
+      if (result.slot.meetLink && !result.appointment.meetLink) {
+        await storage.updateAppointment(result.appointment.id, { meetLink: result.slot.meetLink });
+        result.appointment.meetLink = result.slot.meetLink;
+      }
+
       // Auto-initiate payment if price > 0
       let paymentUrl: string | null = null;
       if (result.slot.priceDinar > 0) {
@@ -904,9 +960,23 @@ export async function registerRoutes(
           paymentMethod,
           status: "pending",
         });
-        paymentUrl = paymentMethod === "konnect"
-          ? `https://api.konnect.network/pay/${transaction.id}`
-          : `https://developers.flouci.com/pay/${transaction.id}`;
+
+        try {
+          const origin = req.headers.origin || `${req.protocol}://${req.headers.host}`;
+          const successUrl = `${origin}/appointments?payment=success&txn=${transaction.id}`;
+          const failUrl = `${origin}/appointments?payment=failed&txn=${transaction.id}`;
+          const amountMillimes = Math.round(result.slot.priceDinar * 1000);
+          if (paymentMethod === "konnect") {
+            const r = await createKonnectPayment(amountMillimes, transaction.id, successUrl, failUrl);
+            paymentUrl = r.redirectUrl;
+          } else {
+            const r = await createFlouciPayment(amountMillimes, transaction.id, successUrl, failUrl);
+            paymentUrl = r.redirectUrl;
+          }
+        } catch (payErr) {
+          console.error("[payment] Auto-initiate failed:", payErr);
+          // Don't fail the booking; client can pay manually
+        }
       }
 
       res.status(201).json({ ...result, paymentUrl });
@@ -928,7 +998,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/mood", isAuthenticated, async (req: any, res) => {
+  app.post("/api/mood", isAuthenticated, validateBody(moodEntryRequestSchema), async (req: any, res) => {
     try {
       const userId = req.user.id;
       const entry = await storage.createMoodEntry({ ...req.body, userId });
@@ -950,7 +1020,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/journal", isAuthenticated, async (req: any, res) => {
+  app.post("/api/journal", isAuthenticated, validateBody(journalEntryRequestSchema), async (req: any, res) => {
     try {
       const userId = req.user.id;
       const entry = await storage.createJournalEntry({ ...req.body, userId });
@@ -989,126 +1059,6 @@ export async function registerRoutes(
       res.status(500).json({ message: "Failed to fetch resources" });
     }
   });
-
-  // ---- AI routes ----
-
-  app.post("/api/ai/match-therapist", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.id;
-      const { concerns, language, gender, budget } = req.body;
-      const allTherapists = await storage.getTherapistProfiles({});
-
-      if (allTherapists.length === 0) {
-        return res.json({ recommendations: [], message: "No therapists available yet" });
-      }
-
-      // Gather session history — previously booked/completed therapists
-      const pastAppointments = await storage.getAppointments(userId);
-      const now = new Date();
-      const in48h = new Date(now.getTime() + 48 * 60 * 60 * 1000);
-
-      // Map therapist bonuses
-      const previousTherapistIds = new Set(
-        pastAppointments
-          .filter((a) => a.status === "completed" && a.therapistId !== userId)
-          .map((a) => a.therapistId),
-      );
-
-      // Therapists with open slots in next 48 hours
-      const availableSoonIds = new Set<string>();
-      for (const therapist of allTherapists) {
-        const slots = await storage.getTherapistSlots(
-          therapist.userId,
-          now.toISOString(),
-          in48h.toISOString(),
-        );
-        if (slots.some((s) => s.status === "open")) {
-          availableSoonIds.add(therapist.userId);
-        }
-      }
-
-      const therapistData = allTherapists.map((t) => ({
-        id: t.userId,
-        name: `${t.user.firstName || ""} ${t.user.lastName || ""}`.trim(),
-        specializations: t.specializations || [],
-        languages: t.languages || [],
-        rate: t.rateDinar,
-        rating: t.rating,
-        gender: t.gender,
-        experience: t.yearsExperience,
-        bonuses: {
-          previousSessionBonus: previousTherapistIds.has(t.userId) ? 15 : 0,
-          availabilitySoonBonus: availableSoonIds.has(t.userId) ? 10 : 0,
-        },
-      }));
-
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `You are a therapist matching assistant for a Tunisian mental health platform called Shifa.
-Given a user's needs and available therapists, rank the top 3 most suitable therapists with a brief explanation in the user's preferred language.
-Each therapist has optional bonuses: previousSessionBonus (user has had a session before, +15 pts) and availabilitySoonBonus (has open slots in next 48h, +10 pts). Factor these into your matchScore.
-Respond in JSON format: { "recommendations": [{ "therapistId": "...", "matchScore": 0-100, "reason": "..." }] }`,
-          },
-          {
-            role: "user",
-            content: `User needs:
-- Concerns: ${concerns}
-- Preferred language: ${language}
-- Gender preference: ${gender || "any"}
-- Budget: ${budget || "any"} TND
-
-Available therapists (with context bonuses):
-${JSON.stringify(therapistData, null, 2)}`,
-          },
-        ],
-        response_format: { type: "json_object" },
-      });
-
-      const result = JSON.parse(response.choices[0]?.message?.content || "{}");
-      res.json(result);
-    } catch (error) {
-      console.error("AI matching error:", error);
-      res.status(500).json({ message: "Failed to match therapist" });
-    }
-  });
-
-  app.post("/api/ai/wellness-insight", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.id;
-      const moods = await storage.getMoodEntries(userId, 14);
-      const { language = "ar" } = req.body;
-
-      const langMap: Record<string, string> = {
-        ar: "Arabic",
-        fr: "French",
-        darija: "Tunisian Arabic dialect (Darija)",
-      };
-
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `You are a compassionate wellness assistant for a Tunisian mental health platform. Provide brief, culturally sensitive mood insights. Respond in ${langMap[language] || "Arabic"}.`,
-          },
-          {
-            role: "user",
-            content: `Analyze this mood data and provide a brief insight (2-3 sentences):
-${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emotions: m.emotions, notes: m.notes })))}`,
-          },
-        ],
-      });
-
-      res.json({ insight: response.choices[0]?.message?.content || "" });
-    } catch (error) {
-      console.error("AI insight error:", error);
-      res.status(500).json({ message: "Failed to generate insight" });
-    }
-  });
-
   // ---- User profile ----
 
   app.patch("/api/user/profile", isAuthenticated, async (req: any, res) => {
@@ -1150,6 +1100,36 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
     }
   });
 
+  // ---- E2E Key Backup ----
+
+  app.post("/api/user/key-backup", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const { wrappedPrivateKey, salt, iterations } = req.body;
+      if (!wrappedPrivateKey || !salt || !iterations) {
+        return res.status(400).json({ message: "wrappedPrivateKey, salt, and iterations are required" });
+      }
+      if (typeof iterations !== "number" || iterations < 100_000) {
+        return res.status(400).json({ message: "iterations must be a number >= 100000" });
+      }
+      await storage.upsertUserKeyBackup(userId, wrappedPrivateKey, salt, iterations);
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to save key backup" });
+    }
+  });
+
+  app.get("/api/user/key-backup", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const backup = await storage.getUserKeyBackup(userId);
+      if (!backup) return res.status(404).json({ message: "No key backup found" });
+      res.json(backup);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch key backup" });
+    }
+  });
+
   // ---- Reviews ----
 
   app.get("/api/therapists/:userId/reviews", async (req, res) => {
@@ -1161,7 +1141,7 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
     }
   });
 
-  app.post("/api/therapists/:userId/reviews", isAuthenticated, async (req: any, res) => {
+  app.post("/api/therapists/:userId/reviews", isAuthenticated, validateBody(reviewRequestSchema), async (req: any, res) => {
     try {
       const clientId = req.user.id;
       const therapistId = req.params.userId;
@@ -1268,7 +1248,7 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
 
   // ---- Payment routes (MVP) ----
 
-  app.post("/api/payments/flouci/initiate", isAuthenticated, async (req: any, res) => {
+  app.post("/api/payments/flouci/initiate", isAuthenticated, validateBody(paymentInitiateRequestSchema), async (req: any, res) => {
     try {
       const userId = req.user.id;
       const { appointmentId, therapistId, amount } = req.body;
@@ -1282,18 +1262,22 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
         status: "pending",
       });
 
-      // TODO: Integrate with Flouci API to create payment session
-      // For now, return the transaction with a placeholder redirect URL
-      res.json({
-        transaction,
-        redirectUrl: `https://developers.flouci.com/pay/${transaction.id}`,
-      });
+      const origin = req.headers.origin || `${req.protocol}://${req.headers.host}`;
+      const { redirectUrl } = await createFlouciPayment(
+        Math.round(amount * 1000),  // TND → millimes
+        transaction.id,
+        `${origin}/appointments?payment=success&txn=${transaction.id}`,
+        `${origin}/appointments?payment=failed&txn=${transaction.id}`,
+      );
+
+      res.json({ transaction, redirectUrl });
     } catch (error) {
+      console.error("[flouci] initiate error:", error);
       res.status(500).json({ message: "Failed to initiate payment" });
     }
   });
 
-  app.post("/api/payments/flouci/webhook", async (req, res) => {
+  app.post("/api/payments/flouci/webhook", webhookLimiter, async (req, res) => {
     try {
       if (!verifyWebhookSignature(req, process.env.FLOUCI_WEBHOOK_SECRET, "x-flouci-signature")) {
         return res.status(401).json({ message: "Invalid webhook signature" });
@@ -1320,7 +1304,7 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
     }
   });
 
-  app.post("/api/payments/konnect/initiate", isAuthenticated, async (req: any, res) => {
+  app.post("/api/payments/konnect/initiate", isAuthenticated, validateBody(paymentInitiateRequestSchema), async (req: any, res) => {
     try {
       const userId = req.user.id;
       const { appointmentId, therapistId, amount } = req.body;
@@ -1334,17 +1318,22 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
         status: "pending",
       });
 
-      // TODO: Integrate with Konnect/D17 API
-      res.json({
-        transaction,
-        redirectUrl: `https://api.konnect.network/pay/${transaction.id}`,
-      });
+      const origin = req.headers.origin || `${req.protocol}://${req.headers.host}`;
+      const { redirectUrl } = await createKonnectPayment(
+        Math.round(amount * 1000),  // TND → millimes
+        transaction.id,
+        `${origin}/appointments?payment=success&txn=${transaction.id}`,
+        `${origin}/appointments?payment=failed&txn=${transaction.id}`,
+      );
+
+      res.json({ transaction, redirectUrl });
     } catch (error) {
+      console.error("[konnect] initiate error:", error);
       res.status(500).json({ message: "Failed to initiate payment" });
     }
   });
 
-  app.post("/api/payments/konnect/webhook", async (req, res) => {
+  app.post("/api/payments/konnect/webhook", webhookLimiter, async (req, res) => {
     try {
       if (!verifyWebhookSignature(req, process.env.KONNECT_WEBHOOK_SECRET, "x-konnect-signature")) {
         return res.status(401).json({ message: "Invalid webhook signature" });
@@ -1464,7 +1453,7 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
 
   // ---- Onboarding (MVP) ----
 
-  app.post("/api/onboarding", isAuthenticated, async (req: any, res) => {
+  app.post("/api/onboarding", isAuthenticated, validateBody(onboardingRequestSchema), async (req: any, res) => {
     try {
       const userId = req.user.id;
       const response = await storage.saveOnboardingResponse({
@@ -1682,7 +1671,7 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
 
   // ---- Peer Support ----
 
-  app.post("/api/peer/queue/join", isAuthenticated, async (req: any, res) => {
+  app.post("/api/peer/queue/join", isAuthenticated, validateBody(queueJoinRequestSchema), async (req: any, res) => {
     try {
       const clientId = req.user.id;
       const preferredLanguage = typeof req.body.preferredLanguage === "string"
@@ -1926,7 +1915,7 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
     }
   });
 
-  app.post("/api/peer/session/:id/messages", isAuthenticated, async (req: any, res) => {
+  app.post("/api/peer/session/:id/messages", isAuthenticated, validateBody(peerMessageRequestSchema), async (req: any, res) => {
     try {
       const sessionId = Number(req.params.id);
       if (!Number.isInteger(sessionId)) return res.status(400).json({ message: "Invalid session id" });
@@ -1952,6 +1941,15 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
         content,
         encrypted,
       });
+
+      // Content moderation on plaintext peer messages
+      if (!encrypted) {
+        const modResult = moderateContent(content);
+        if (modResult.flagged && modResult.reason !== "crisis_content") {
+          // Crisis content is already handled by crisisDetected below
+          ;(async () => { try { await supabaseAdmin.from('content_flags').insert({ message_type: 'peer_message', message_id: message.id, flag_reason: modResult.reason, severity: modResult.severity, status: 'pending' }); } catch {} })();
+        }
+      }
 
       if (crisisDetected) {
         const targetUserId = senderId === session.clientId ? session.listenerId : session.clientId;
@@ -2147,6 +2145,24 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
         { type: "listener_application", status },
       );
 
+      const auditAction =
+        status === "approved" ? "listener.approve" :
+        status === "rejected" ? "listener.reject" :
+        "listener.changes_requested";
+      logAudit(reviewerId, auditAction, "listener_application", applicationId, {
+        status,
+        activationStatus: req.body.activationStatus,
+        moderationNotes: req.body.moderationNotes,
+        targetUserId: application.userId,
+      }, req);
+
+      // Send email notification to the applicant
+      const applicantProfile = await storage.getUser(application.userId);
+      if (applicantProfile?.email) {
+        const name = [applicantProfile.firstName, applicantProfile.lastName].filter(Boolean).join(" ") || applicantProfile.email;
+        sendListenerApplicationUpdate(applicantProfile.email, name, status as "approved" | "rejected" | "changes_requested");
+      }
+
       res.json({ application, profile: profile || null });
     } catch (error) {
       res.status(500).json({ message: "Failed to review listener application" });
@@ -2168,6 +2184,8 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
         { type: "listener_activation", activationStatus: "trial" },
       );
 
+      logAudit(reviewerId, "listener.activate_trial", "listener_profile", listenerUserId, null, req);
+
       res.json(profile);
     } catch (error) {
       res.status(500).json({ message: "Failed to activate listener trial mode" });
@@ -2188,6 +2206,8 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
         "Your listener account is now active in live mode.",
         { type: "listener_activation", activationStatus: "live" },
       );
+
+      logAudit(reviewerId, "listener.activate_live", "listener_profile", listenerUserId, null, req);
 
       res.json(profile);
     } catch (error) {
@@ -2217,6 +2237,11 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
       }
 
       res.json({ report, listenerProgress });
+
+      logAudit(moderatorId, "report.resolve", "peer_report", reportId, {
+        targetUserId: report.targetUserId,
+        penaltyApplied: listenerProgress !== null,
+      }, req);
     } catch (error) {
       res.status(500).json({ message: "Failed to resolve peer report" });
     }
@@ -2283,18 +2308,262 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
         await storage.updateTherapistProfile(verification.therapistId, { verified: true });
       }
 
+      logAudit(reviewerId, status === "approved" ? "verification.approve" : "verification.reject", "therapist_verification", id, {
+        therapistId: verification.therapistId,
+        notes,
+      }, req);
+
+      // Send email to the therapist
+      const therapistUser = await storage.getUser(verification.therapistId);
+      if (therapistUser?.email) {
+        const name = [therapistUser.firstName, therapistUser.lastName].filter(Boolean).join(" ") || therapistUser.email;
+        sendVerificationStatusUpdate(therapistUser.email, name, status as "approved" | "rejected", notes);
+      }
+
       res.json(verification);
     } catch (error) {
       res.status(500).json({ message: "Failed to review verification" });
     }
   });
 
-  app.get("/api/admin/analytics", isAuthenticated, requireRoles(["moderator", "admin"]), async (req, res) => {
+  // ---- Content Moderation Admin ----
+
+  app.get("/api/admin/content-flags", isAuthenticated, requireRoles(["moderator", "admin"]), async (req: any, res) => {
+    try {
+      const status = typeof req.query.status === "string" ? req.query.status : "pending";
+      const limit = Math.min(Number(req.query.limit) || 50, 200);
+      const offset = Number(req.query.offset) || 0;
+      const { data, error } = await supabaseAdmin
+        .from("content_flags")
+        .select("*")
+        .eq("status", status)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + limit - 1);
+      if (error) throw error;
+      res.json(data ?? []);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch content flags" });
+    }
+  });
+
+  app.post("/api/admin/content-flags/:id/review", isAuthenticated, requireRoles(["moderator", "admin"]), async (req: any, res) => {
+    try {
+      const flagId = Number(req.params.id);
+      if (!Number.isInteger(flagId)) return res.status(400).json({ message: "Invalid flag id" });
+      const { action } = req.body; // "dismiss" | "escalate" | "reviewed"
+      if (!["dismiss", "escalate", "reviewed"].includes(action)) {
+        return res.status(400).json({ message: "action must be dismiss, escalate, or reviewed" });
+      }
+      const reviewerId = req.user.id;
+      const { data, error } = await supabaseAdmin
+        .from("content_flags")
+        .update({
+          status: action === "dismiss" ? "dismissed" : "reviewed",
+          reviewer_id: reviewerId,
+          reviewed_at: new Date().toISOString(),
+          severity: action === "escalate" ? "critical" : undefined,
+        })
+        .eq("id", flagId)
+        .select()
+        .single();
+      if (error || !data) return res.status(404).json({ message: "Flag not found" });
+      logAudit(reviewerId, "report.resolve", "content_flag", flagId, { action }, req);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to review content flag" });
+    }
+  });
+
+  app.get("/api/admin/audit-log", isAuthenticated, requireRoles(["moderator", "admin"]), async (req: any, res) => {
+    try {
+      const limit = Math.min(Number(req.query.limit) || 100, 500);
+      const offset = Number(req.query.offset) || 0;
+      const logs = await storage.getAuditLog(limit, offset);
+      logAudit(req.user?.id ?? null, "admin.analytics_view", "audit_log", null, { limit, offset }, req);
+      res.json(logs);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch audit log" });
+    }
+  });
+
+  app.get("/api/admin/analytics", isAuthenticated, requireRoles(["moderator", "admin"]), async (req: any, res) => {
     try {
       const analytics = await storage.getAdminAnalytics();
+      logAudit(req.user?.id ?? null, "admin.analytics_view", "analytics", null, null, req);
       res.json(analytics);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch analytics" });
+    }
+  });
+
+  // ---- Admin: User Management (Phase 3.1) ----
+
+  app.get("/api/admin/users", isAuthenticated, requireRoles(["admin"]), async (req: any, res) => {
+    try {
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const limit = Math.min(Number(req.query.limit) || 20, 100);
+      const search = req.query.search as string | undefined;
+      const result = await storage.getUsersPaginated(page, limit, search);
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
+  app.patch("/api/admin/users/:id", isAuthenticated, requireRoles(["admin"]), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { role } = req.body as { role?: string };
+      if (!role) return res.status(400).json({ message: "role required" });
+      const allowed = ["user", "client", "therapist", "moderator", "admin"];
+      if (!allowed.includes(role)) return res.status(400).json({ message: "Invalid role" });
+      const updated = await storage.updateUser(id, { role });
+      if (!updated) return res.status(404).json({ message: "User not found" });
+      logAudit(req.user.id, "admin.user_role_change", "user", id, { newRole: role }, req);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update user" });
+    }
+  });
+
+  app.get("/api/admin/revenue", isAuthenticated, requireRoles(["admin"]), async (req: any, res) => {
+    try {
+      const days = Math.min(Number(req.query.days) || 30, 365);
+      const data = await storage.getRevenueAnalytics(days);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch revenue analytics" });
+    }
+  });
+
+  // ---- Treatment Goals (Phase 3.3) ----
+
+  app.get("/api/goals", isAuthenticated, async (req: any, res) => {
+    try {
+      const goals = await storage.getTreatmentGoals(req.user.id);
+      res.json(goals);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch goals" });
+    }
+  });
+
+  app.post("/api/goals", isAuthenticated, async (req: any, res) => {
+    try {
+      const { insertTreatmentGoalSchema } = await import("@shared/schema");
+      const parsed = insertTreatmentGoalSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid goal data", errors: parsed.error.issues });
+      const goal = await storage.createTreatmentGoal(req.user.id, parsed.data);
+      res.status(201).json(goal);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create goal" });
+    }
+  });
+
+  app.patch("/api/goals/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const { updateTreatmentGoalSchema } = await import("@shared/schema");
+      const parsed = updateTreatmentGoalSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid goal data", errors: parsed.error.issues });
+      const goal = await storage.updateTreatmentGoal(Number(req.params.id), req.user.id, parsed.data);
+      if (!goal) return res.status(404).json({ message: "Goal not found" });
+      res.json(goal);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update goal" });
+    }
+  });
+
+  app.delete("/api/goals/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      await storage.deleteTreatmentGoal(Number(req.params.id), req.user.id);
+      res.status(204).end();
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete goal" });
+    }
+  });
+
+  // ---- Session Summaries (Phase 3.3) ----
+
+  app.get("/api/session-summaries/:appointmentId", isAuthenticated, async (req: any, res) => {
+    try {
+      const appointmentId = Number(req.params.appointmentId);
+      const appointment = await storage.getAppointment(appointmentId);
+      if (!appointment) return res.status(404).json({ message: "Appointment not found" });
+      // Allow therapist or client
+      if (appointment.therapistId !== req.user.id && appointment.clientId !== req.user.id) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const summary = await storage.getSessionSummary(appointmentId);
+      if (!summary) return res.status(404).json({ message: "No summary yet" });
+      // Clients only see client_visible summaries
+      if (appointment.clientId === req.user.id && !summary.clientVisible) {
+        return res.status(404).json({ message: "No summary yet" });
+      }
+      res.json(summary);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch session summary" });
+    }
+  });
+
+  app.post("/api/session-summaries/:appointmentId", isAuthenticated, async (req: any, res) => {
+    try {
+      const { upsertSessionSummarySchema } = await import("@shared/schema");
+      const parsed = upsertSessionSummarySchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid data", errors: parsed.error.issues });
+
+      const appointmentId = Number(req.params.appointmentId);
+      const appointment = await storage.getAppointment(appointmentId);
+      if (!appointment) return res.status(404).json({ message: "Appointment not found" });
+      if (appointment.therapistId !== req.user.id) return res.status(403).json({ message: "Only therapist can write summaries" });
+
+      const summary = await storage.upsertSessionSummary(
+        appointmentId,
+        req.user.id,
+        appointment.clientId,
+        parsed.data,
+      );
+      res.status(201).json(summary);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to save session summary" });
+    }
+  });
+
+  // ---- Progress Analytics (Phase 3.3) ----
+
+  app.get("/api/progress/analytics", isAuthenticated, async (req: any, res) => {
+    try {
+      const days = Math.min(Number(req.query.days) || 30, 90);
+      const moodTrend = await storage.getMoodAnalytics(req.user.id, days);
+      res.json({ moodTrend });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch analytics" });
+    }
+  });
+
+  // ---- Batch Slot Creation (Phase 3.2) ----
+
+  app.post("/api/therapist/slots/batch", isAuthenticated, requireRoles(["therapist"]), async (req: any, res) => {
+    try {
+      const { slots } = req.body as { slots: Array<{ startsAt: string; durationMinutes: number; priceDinar: number; meetLink?: string | null }> };
+      if (!Array.isArray(slots) || slots.length === 0) return res.status(400).json({ message: "slots array required" });
+      if (slots.length > 50) return res.status(400).json({ message: "Max 50 slots per batch" });
+
+      const { slotCreateRequestSchema } = await import("@shared/schema");
+      const created = [];
+      for (const slotData of slots) {
+        const parsed = slotCreateRequestSchema.safeParse(slotData);
+        if (!parsed.success) continue;
+        const slot = await storage.createTherapistSlot({
+          therapistId: req.user.id,
+          startsAt: parsed.data.startsAt,
+          durationMinutes: parsed.data.durationMinutes,
+          priceDinar: parsed.data.priceDinar,
+          meetLink: parsed.data.meetLink,
+        });
+        created.push(slot);
+      }
+      res.status(201).json({ created, count: created.length });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create slots" });
     }
   });
 

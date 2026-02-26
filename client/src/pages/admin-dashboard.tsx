@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
@@ -21,8 +22,20 @@ import {
   FileText,
   ShieldCheck,
   Loader2,
+  Search,
+  Flag,
+  Activity,
 } from "lucide-react";
-import type { TherapistVerification } from "@shared/schema";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
+import type { TherapistVerification, AuditLog } from "@shared/schema";
 
 interface AdminAnalytics {
   totalUsers: number;
@@ -33,11 +46,32 @@ interface AdminAnalytics {
   pendingVerifications: number;
 }
 
+interface UserRow {
+  id: string;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  role: string;
+  createdAt: string | null;
+}
+
+interface ContentFlag {
+  id: number;
+  messageType: string;
+  messageId: number;
+  flagReason: string;
+  severity: string;
+  status: string;
+  createdAt: string;
+}
+
 export default function AdminDashboardPage() {
   const { t } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
   const [reviewNotes, setReviewNotes] = useState<Record<number, string>>({});
+  const [userSearch, setUserSearch] = useState("");
+  const [userPage, setUserPage] = useState(1);
 
   const tr = (key: string, fallback: string) => {
     const val = t(key);
@@ -64,6 +98,42 @@ export default function AdminDashboardPage() {
     queryKey: ["/api/admin/verifications"],
   });
 
+  const { data: auditLogs = [], isLoading: auditLoading } = useQuery<AuditLog[]>({
+    queryKey: ["/api/admin/audit-log"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/admin/audit-log?limit=50");
+      return res.json();
+    },
+  });
+
+  const { data: contentFlags = [], isLoading: flagsLoading } = useQuery<ContentFlag[]>({
+    queryKey: ["/api/admin/content-flags"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/admin/content-flags?status=pending&limit=50");
+      return res.json();
+    },
+  });
+
+  const { data: revenueData = [], isLoading: revenueLoading } = useQuery<{ date: string; amount: number }[]>({
+    queryKey: ["/api/admin/revenue"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/admin/revenue?days=30");
+      return res.json();
+    },
+    enabled: user?.role === "admin",
+  });
+
+  const { data: usersData, isLoading: usersLoading } = useQuery<{ users: UserRow[]; total: number }>({
+    queryKey: ["/api/admin/users", userPage, userSearch],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: String(userPage), limit: "20" });
+      if (userSearch) params.set("search", userSearch);
+      const res = await apiRequest("GET", `/api/admin/users?${params}`);
+      return res.json();
+    },
+    enabled: user?.role === "admin",
+  });
+
   const reviewMutation = useMutation({
     mutationFn: async ({
       id,
@@ -86,6 +156,29 @@ export default function AdminDashboardPage() {
     },
   });
 
+  const flagReviewMutation = useMutation({
+    mutationFn: async ({ id, action }: { id: number; action: "dismiss" | "escalate" }) => {
+      await apiRequest("POST", `/api/admin/content-flags/${id}/review`, { action });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/content-flags"] });
+      toast({ title: "Flag reviewed" });
+    },
+  });
+
+  const userRoleMutation = useMutation({
+    mutationFn: async ({ id, role }: { id: string; role: string }) => {
+      await apiRequest("PATCH", `/api/admin/users/${id}`, { role });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users", userPage, userSearch] });
+      toast({ title: "User role updated" });
+    },
+    onError: () => {
+      toast({ title: t("common.error"), variant: "destructive" });
+    },
+  });
+
   const pendingVerifications = verifications.filter((v) => v.status === "pending");
 
   return (
@@ -94,7 +187,7 @@ export default function AdminDashboardPage() {
         <div>
           <h1 className="text-2xl font-bold">{tr("admin.dashboard_title", "Admin Dashboard")}</h1>
           <p className="text-sm text-muted-foreground">
-            {tr("admin.dashboard_subtitle", "Platform overview and verification management")}
+            {tr("admin.dashboard_subtitle", "Platform overview and management")}
           </p>
         </div>
 
@@ -129,20 +222,42 @@ export default function AdminDashboardPage() {
         )}
 
         <Tabs defaultValue="verifications">
-          <TabsList>
+          <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="verifications">
               <ShieldCheck className="h-4 w-4 me-1.5" />
-              {tr("admin.verifications", "Verifications")}
+              Verifications
               {pendingVerifications.length > 0 && (
                 <Badge className="ms-2" variant="destructive">{pendingVerifications.length}</Badge>
               )}
             </TabsTrigger>
-            <TabsTrigger value="all">
-              <BarChart3 className="h-4 w-4 me-1.5" />
-              {tr("admin.all_verifications", "All")}
+            {user?.role === "admin" && (
+              <>
+                <TabsTrigger value="users">
+                  <Users className="h-4 w-4 me-1.5" />
+                  Users
+                </TabsTrigger>
+                <TabsTrigger value="revenue">
+                  <BarChart3 className="h-4 w-4 me-1.5" />
+                  Revenue
+                </TabsTrigger>
+              </>
+            )}
+            <TabsTrigger value="moderation">
+              <Flag className="h-4 w-4 me-1.5" />
+              Moderation
+              {contentFlags.filter((f) => f.status === "pending").length > 0 && (
+                <Badge className="ms-2" variant="destructive">
+                  {contentFlags.filter((f) => f.status === "pending").length}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="audit">
+              <Activity className="h-4 w-4 me-1.5" />
+              Audit Log
             </TabsTrigger>
           </TabsList>
 
+          {/* Verifications Tab */}
           <TabsContent value="verifications" className="space-y-3 mt-4">
             {verificationsLoading ? (
               <div className="space-y-3">
@@ -225,40 +340,226 @@ export default function AdminDashboardPage() {
             )}
           </TabsContent>
 
-          <TabsContent value="all" className="space-y-3 mt-4">
-            {verificationsLoading ? (
-              <Skeleton className="h-48 w-full" />
-            ) : verifications.length === 0 ? (
+          {/* Users Tab (admin only) */}
+          {user?.role === "admin" && (
+            <TabsContent value="users" className="space-y-4 mt-4">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Search by name or email..."
+                    value={userSearch}
+                    onChange={(e) => { setUserSearch(e.target.value); setUserPage(1); }}
+                  />
+                </div>
+              </div>
+
+              {usersLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : (
+                <>
+                  <div className="rounded-lg border overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="text-left p-3 font-medium">User</th>
+                          <th className="text-left p-3 font-medium">Role</th>
+                          <th className="text-left p-3 font-medium">Joined</th>
+                          <th className="text-left p-3 font-medium">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(usersData?.users ?? []).map((u) => (
+                          <tr key={u.id} className="border-t">
+                            <td className="p-3">
+                              <p className="font-medium">{u.firstName} {u.lastName}</p>
+                              <p className="text-xs text-muted-foreground">{u.email}</p>
+                            </td>
+                            <td className="p-3">
+                              <Badge variant={u.role === "admin" ? "destructive" : u.role === "therapist" ? "default" : "secondary"} className="capitalize">
+                                {u.role}
+                              </Badge>
+                            </td>
+                            <td className="p-3 text-muted-foreground">
+                              {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"}
+                            </td>
+                            <td className="p-3">
+                              {u.id !== user.id && (
+                                <select
+                                  className="text-xs border rounded px-1 py-0.5 bg-background"
+                                  value={u.role}
+                                  onChange={(e) => userRoleMutation.mutate({ id: u.id, role: e.target.value })}
+                                  disabled={userRoleMutation.isPending}
+                                >
+                                  {["user", "client", "therapist", "moderator", "admin"].map((r) => (
+                                    <option key={r} value={r}>{r}</option>
+                                  ))}
+                                </select>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex items-center justify-between text-sm text-muted-foreground">
+                    <span>{usersData?.total ?? 0} total users</span>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" disabled={userPage === 1} onClick={() => setUserPage((p) => p - 1)}>
+                        Previous
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={(usersData?.total ?? 0) <= userPage * 20}
+                        onClick={() => setUserPage((p) => p + 1)}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </TabsContent>
+          )}
+
+          {/* Revenue Tab (admin only) */}
+          {user?.role === "admin" && (
+            <TabsContent value="revenue" className="mt-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Revenue (Last 30 Days)</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {revenueLoading ? (
+                    <Skeleton className="h-48 w-full" />
+                  ) : revenueData.length === 0 ? (
+                    <p className="text-muted-foreground text-center py-8">No revenue data yet.</p>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <LineChart data={revenueData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                        <XAxis
+                          dataKey="date"
+                          tick={{ fontSize: 11 }}
+                          tickFormatter={(d) => d.slice(5)}
+                        />
+                        <YAxis tick={{ fontSize: 11 }} unit=" د.ت" />
+                        <Tooltip
+                          formatter={(value: number) => [`${value} د.ت`, "Revenue"]}
+                          labelFormatter={(l) => `Date: ${l}`}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="amount"
+                          stroke="hsl(var(--primary))"
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
+
+          {/* Moderation Tab */}
+          <TabsContent value="moderation" className="space-y-3 mt-4">
+            {flagsLoading ? (
+              <Skeleton className="h-32 w-full" />
+            ) : contentFlags.filter((f) => f.status === "pending").length === 0 ? (
               <div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground">
-                {tr("admin.no_verifications", "No verification submissions yet.")}
+                No pending content flags.
               </div>
             ) : (
-              verifications.map((v) => (
-                <div
-                  key={v.id}
-                  className="rounded-lg border p-3 flex items-center justify-between gap-3"
-                >
-                  <div>
-                    <p className="text-sm font-medium capitalize">{v.documentType.replace("_", " ")}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {v.therapistName || v.therapistId.slice(0, 8)} ·{" "}
-                      {v.submittedAt ? new Date(v.submittedAt).toLocaleDateString() : "—"}
-                    </p>
-                  </div>
-                  <Badge
-                    variant={
-                      v.status === "approved"
-                        ? "default"
-                        : v.status === "rejected"
-                        ? "destructive"
-                        : "secondary"
-                    }
-                    className="capitalize"
-                  >
-                    {v.status}
-                  </Badge>
-                </div>
-              ))
+              contentFlags
+                .filter((f) => f.status === "pending")
+                .map((flag) => (
+                  <Card key={flag.id}>
+                    <CardContent className="p-4 flex items-start justify-between gap-3 flex-wrap">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant={
+                              flag.severity === "critical" || flag.severity === "high"
+                                ? "destructive"
+                                : "secondary"
+                            }
+                            className="capitalize"
+                          >
+                            {flag.severity}
+                          </Badge>
+                          <span className="text-sm font-medium capitalize">{flag.flagReason.replace("_", " ")}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground capitalize">
+                          {flag.messageType} message · {new Date(flag.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => flagReviewMutation.mutate({ id: flag.id, action: "dismiss" })}
+                          disabled={flagReviewMutation.isPending}
+                        >
+                          Dismiss
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => flagReviewMutation.mutate({ id: flag.id, action: "escalate" })}
+                          disabled={flagReviewMutation.isPending}
+                        >
+                          Escalate
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+            )}
+          </TabsContent>
+
+          {/* Audit Log Tab */}
+          <TabsContent value="audit" className="mt-4">
+            {auditLoading ? (
+              <Skeleton className="h-48 w-full" />
+            ) : auditLogs.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground">
+                No audit log entries.
+              </div>
+            ) : (
+              <div className="rounded-lg border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left p-3 font-medium">Action</th>
+                      <th className="text-left p-3 font-medium">Resource</th>
+                      <th className="text-left p-3 font-medium">Actor</th>
+                      <th className="text-left p-3 font-medium">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditLogs.map((log) => (
+                      <tr key={log.id} className="border-t">
+                        <td className="p-3 font-mono text-xs">{log.action}</td>
+                        <td className="p-3 text-muted-foreground text-xs capitalize">
+                          {log.resourceType}
+                          {log.resourceId && ` #${log.resourceId.slice(0, 8)}`}
+                        </td>
+                        <td className="p-3 text-muted-foreground text-xs">
+                          {log.actorId ? log.actorId.slice(0, 8) : "system"}
+                        </td>
+                        <td className="p-3 text-muted-foreground text-xs">
+                          {new Date(log.createdAt).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </TabsContent>
         </Tabs>

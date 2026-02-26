@@ -31,13 +31,11 @@ export default function ResourcesPage() {
 
   const getTitle = (r: Resource) => {
     if (language === "fr") return r.titleFr;
-    if (language === "darija") return r.titleDarija || r.titleAr;
     return r.titleAr;
   };
 
   const getContent = (r: Resource) => {
     if (language === "fr") return r.contentFr;
-    if (language === "darija") return r.contentDarija || r.contentAr;
     return r.contentAr;
   };
 

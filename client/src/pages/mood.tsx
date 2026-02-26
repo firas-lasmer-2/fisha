@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Smile, TrendingUp, Sparkles, Loader2 } from "lucide-react";
+import { Smile, TrendingUp, Loader2 } from "lucide-react";
 import { useState } from "react";
 import type { MoodEntry } from "@shared/schema";
 
@@ -21,18 +21,13 @@ const moodOptions = [
 ];
 
 export default function MoodPage() {
-  const { t, isRTL, language } = useI18n();
+  const { t, isRTL } = useI18n();
   const [selectedMood, setSelectedMood] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [selectedEmotions, setSelectedEmotions] = useState<string[]>([]);
 
   const { data: entries, isLoading } = useQuery<MoodEntry[]>({
     queryKey: ["/api/mood"],
-  });
-
-  const { data: insight } = useQuery<{ insight: string }>({
-    queryKey: ["/api/ai/wellness-insight"],
-    enabled: false,
   });
 
   const saveMutation = useMutation({
@@ -49,13 +44,6 @@ export default function MoodPage() {
       setSelectedMood(null);
       setNotes("");
       setSelectedEmotions([]);
-    },
-  });
-
-  const getInsightMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/ai/wellness-insight", { language });
-      return res.json();
     },
   });
 
@@ -140,28 +128,6 @@ export default function MoodPage() {
             </Button>
           </CardContent>
         </Card>
-
-        {entries && entries.length > 3 && (
-          <Card data-testid="card-ai-insight">
-            <CardContent className="p-5">
-              <Button
-                variant="outline"
-                className="w-full gap-2"
-                onClick={() => getInsightMutation.mutate()}
-                disabled={getInsightMutation.isPending}
-                data-testid="button-get-insight"
-              >
-                {getInsightMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                {t("mood.get_ai_insight")}
-              </Button>
-              {getInsightMutation.data && (
-                <div className="mt-4 p-4 bg-primary/5 rounded-lg text-sm leading-relaxed" data-testid="text-ai-insight">
-                  {getInsightMutation.data.insight}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
 
         <Card data-testid="card-mood-history">
           <CardHeader>

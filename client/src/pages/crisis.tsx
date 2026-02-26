@@ -84,9 +84,9 @@ export default function CrisisPage() {
           </div>
           <div>
             <h1 className="text-2xl font-bold" data-testid="text-crisis-title">
-              {t("crisis.title")}
+              {tr("crisis.title", "You're not alone. Help is here.")}
             </h1>
-            <p className="text-sm text-muted-foreground mt-1">{t("crisis.subtitle")}</p>
+            <p className="text-sm text-muted-foreground mt-1">{tr("crisis.subtitle", "This is a safe space. Take one breath at a time.")}</p>
           </div>
           <Badge variant="secondary" className="safe-muted text-safe border-transparent">
             {tr("crisis.stay_present", "Take one small step at a time")}

@@ -105,11 +105,10 @@ export default function OnboardingPage() {
         preferredLanguage,
       });
 
-      if (includeOptional && (genderPreference || budgetRange)) {
+      if (includeOptional && genderPreference) {
         await apiRequest("POST", "/api/onboarding/preferences", {
           preferredLanguage,
           genderPreference: genderPreference || null,
-          budgetRange: budgetRange || null,
         });
       }
 
@@ -159,9 +158,13 @@ export default function OnboardingPage() {
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-b from-background to-muted/30">
       <Card className="w-full max-w-xl">
         <CardHeader className="text-center space-y-3">
-          <div className="w-12 h-12 rounded-xl gradient-calm flex items-center justify-center mx-auto">
-            <Heart className="h-6 w-6 text-white" />
-          </div>
+          {step === 0 ? (
+            <div className="breathing-circle mx-auto" aria-hidden />
+          ) : (
+            <div className="w-12 h-12 rounded-xl gradient-calm flex items-center justify-center mx-auto">
+              <Heart className="h-6 w-6 text-white" />
+            </div>
+          )}
           <CardTitle>{t("onboarding.title")}</CardTitle>
           <p className="text-sm text-muted-foreground">{t("onboarding.subtitle")}</p>
 
@@ -183,7 +186,7 @@ export default function OnboardingPage() {
           {step === 0 && (
             <div className="space-y-4">
               <h2 className="text-lg font-semibold">{t("onboarding.concerns_title")}</h2>
-              <p className="text-sm text-muted-foreground">{t("onboarding.concerns_desc")}</p>
+              <p className="text-sm text-muted-foreground">{tr("onboarding.concerns_desc", "Choose what's been weighing on your mind. There's no wrong answer.")}</p>
               <div className="flex flex-wrap gap-2">
                 {CONCERNS.map((concern) => {
                   const selected = concerns.includes(concern);
@@ -208,6 +211,9 @@ export default function OnboardingPage() {
                   );
                 })}
               </div>
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5 pt-1">
+                🔒 {tr("onboarding.privacy_note", "Your choices are private. We never share your information without your consent.")}
+              </p>
             </div>
           )}
 
@@ -219,7 +225,6 @@ export default function OnboardingPage() {
                 {[
                   { value: "ar", label: "العربية" },
                   { value: "fr", label: "Français" },
-                  { value: "darija", label: "تونسي (Darija)" },
                 ].map((lang) => (
                   <Label
                     key={lang.value}
@@ -311,28 +316,6 @@ export default function OnboardingPage() {
                 </RadioGroup>
               </div>
 
-              <div className="space-y-3">
-                <p className="text-sm font-medium">{t("onboarding.budget_title")}</p>
-                <RadioGroup value={budgetRange} onValueChange={setBudgetRange} className="space-y-2">
-                  {[
-                    { value: "50-80", label: `50-80 ${t("common.dinar")}` },
-                    { value: "80-120", label: `80-120 ${t("common.dinar")}` },
-                    { value: "120-200", label: `120-200 ${t("common.dinar")}` },
-                    { value: "200+", label: `200+ ${t("common.dinar")}` },
-                  ].map((item) => (
-                    <Label
-                      key={item.value}
-                      className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer ${
-                        budgetRange === item.value ? "border-primary bg-primary/5" : ""
-                      }`}
-                    >
-                      <RadioGroupItem value={item.value} />
-                      <span>{item.label}</span>
-                    </Label>
-                  ))}
-                </RadioGroup>
-              </div>
-
               <div className="space-y-2">
                 <p className="text-sm font-medium">{tr("onboarding.start_path", "How would you like to start?")}</p>
                 <div className="flex flex-wrap gap-2">
@@ -403,7 +386,7 @@ export default function OnboardingPage() {
                 disabled={completeOnboardingMutation.isPending}
                 className="w-full text-center text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
-                {tr("onboarding.skip_optional", "Skip optional suggestions")}
+                {tr("onboarding.skip_optional", "I'll add this later")}
               </button>
             )}
           </div>

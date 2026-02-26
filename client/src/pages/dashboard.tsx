@@ -15,12 +15,8 @@ import {
   ArrowRight,
   BookOpen,
   Calendar,
-  Frown,
   Heart,
   HeartHandshake,
-  Meh,
-  Smile,
-  SmilePlus,
   Sparkles,
   TrendingUp,
   Users,
@@ -29,13 +25,13 @@ import {
 } from "lucide-react";
 import type { Appointment, MoodEntry, OnboardingResponse, User } from "@shared/schema";
 
-const moodIcons = [
-  { icon: Frown, label: "mood.awful", color: "text-destructive" },
-  { icon: Meh, label: "mood.bad", color: "text-chart-4" },
-  { icon: Smile, label: "mood.okay", color: "text-chart-3" },
-  { icon: SmilePlus, label: "mood.good", color: "text-chart-2" },
-  { icon: Heart, label: "mood.great", color: "text-primary" },
-] as const;
+const moodOptions = [
+  { value: 1, emoji: "😢", label: "mood.awful" },
+  { value: 2, emoji: "😔", label: "mood.bad" },
+  { value: 3, emoji: "😐", label: "mood.okay" },
+  { value: 4, emoji: "🙂", label: "mood.good" },
+  { value: 5, emoji: "😊", label: "mood.great" },
+];
 
 type RecommendationBlueprint = {
   concern: string;
@@ -310,8 +306,40 @@ export default function DashboardPage() {
     return items;
   }, [onboarding?.primaryConcerns, recommendationMap]);
 
+  const sevenDayDots = useMemo(() => {
+    const today = new Date();
+    return Array.from({ length: 7 }, (_, i) => {
+      const day = new Date(today);
+      day.setDate(today.getDate() - (6 - i));
+      const dateStr = day.toDateString();
+      return sortedMoods.some((m) => m.createdAt && new Date(m.createdAt).toDateString() === dateStr);
+    });
+  }, [sortedMoods]);
+
+  const streakCount = useMemo(() => {
+    let count = 0;
+    const today = new Date();
+    for (let i = 0; i < 30; i++) {
+      const day = new Date(today);
+      day.setDate(today.getDate() - i);
+      const dateStr = day.toDateString();
+      if (sortedMoods.some((m) => m.createdAt && new Date(m.createdAt).toDateString() === dateStr)) {
+        count++;
+      } else {
+        break;
+      }
+    }
+    return count;
+  }, [sortedMoods]);
   const dailyAffirmation = t(affirmationKeys[now.getDay() % affirmationKeys.length]);
-  const dailyWellnessSuggestion = dailyWellnessSuggestions[now.getDay() % dailyWellnessSuggestions.length];
+  const hour = now.getHours();
+  const dailyWellnessSuggestion = hour >= 6 && hour < 12
+    ? dailyWellnessSuggestions[1] // morning: journal/reflection
+    : hour >= 12 && hour < 18
+      ? dailyWellnessSuggestions[0] // afternoon: breathing/self-care
+      : hour >= 18
+        ? dailyWellnessSuggestions[1] // evening: journaling
+        : dailyWellnessSuggestions[0]; // night (0-5): grounding/self-care
   const todayDate = now.toLocaleDateString(isRTL ? "ar-TN" : "fr-TN", {
     weekday: "long",
     month: "long",
@@ -395,22 +423,21 @@ export default function DashboardPage() {
                 ) : (
                   <div className="space-y-4" data-testid="section-daily-checkin">
                     <div>
-                      <p className="text-sm text-muted-foreground mb-3">{t("mood.how_feeling")}</p>
+                      <p className="text-sm text-muted-foreground mb-3">{tr("mood.how_feeling", "How are you really feeling right now?")}</p>
                       <div className="flex items-center justify-center sm:justify-start gap-3">
-                        {moodIcons.map((mood, index) => {
-                          const score = index + 1;
-                          const selected = selectedMood === score;
+                        {moodOptions.map((mood) => {
+                          const selected = selectedMood === mood.value;
                           return (
                             <button
-                              key={score}
+                              key={mood.value}
                               type="button"
                               disabled={moodMutation.isPending}
-                              onClick={() => handleMoodSubmit(score)}
+                              onClick={() => handleMoodSubmit(mood.value)}
                               className={`mood-btn flex flex-col items-center gap-1.5 p-2 rounded-xl ${selected ? "selected" : ""}`}
-                              data-testid={`button-mood-${score}`}
+                              data-testid={`button-mood-${mood.value}`}
                             >
-                              <div className={`w-11 h-11 rounded-full flex items-center justify-center ${selected ? "gradient-calm" : "bg-muted"}`}>
-                                <mood.icon className={`h-5 w-5 ${selected ? "text-white" : mood.color}`} />
+                              <div className={`w-11 h-11 rounded-full flex items-center justify-center text-2xl ${selected ? "gradient-calm" : "bg-muted"}`}>
+                                {mood.emoji}
                               </div>
                               <span className="text-[11px] text-muted-foreground">{t(mood.label)}</span>
                             </button>
@@ -457,19 +484,22 @@ export default function DashboardPage() {
                           style={{ width: `${wellnessScore}%`, transition: "width 400ms ease" }}
                         />
                       </div>
-                      <div className="grid grid-cols-7 gap-1">
-                        {recentMoods.map((entry) => (
+                      <div className="flex items-center gap-1.5 justify-between">
+                        {sevenDayDots.map((filled, i) => (
                           <div
-                            key={entry.id}
-                            className="rounded-sm bg-primary/20"
-                            style={{ height: `${Math.max(8, entry.moodScore * 9)}px` }}
-                            title={entry.createdAt || ""}
+                            key={i}
+                            className={`flex-1 h-3 rounded-full ${filled ? "gradient-calm" : "bg-muted"}`}
+                            title={filled ? "Logged" : "No entry"}
                           />
                         ))}
                       </div>
-                      {recentMoods.length === 0 && (
-                        <p className="text-xs text-muted-foreground">{tr("dashboard.track_mood_now", "Log your mood to see your trend.")}</p>
-                      )}
+                      <p className="text-xs text-muted-foreground">
+                        {streakCount > 0
+                          ? streakCount === 1 && moodLoggedToday
+                            ? tr("dashboard.showed_up_today", "You showed up today. That matters.")
+                            : `${streakCount}-${tr("dashboard.day_streak", "day check-in streak")}`
+                          : tr("dashboard.track_mood_now", "Log your mood to see your trend.")}
+                      </p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-xs">
@@ -627,55 +657,6 @@ export default function DashboardPage() {
             </Card>
           </motion.div>
         </div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45, delay: 0.2 }}
-          className="grid gap-3 sm:grid-cols-3"
-        >
-          <Link href="/listen">
-            <Card className="hover-elevate cursor-pointer h-full" data-testid="quick-peer-support">
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                  <HeartHandshake className="h-5 w-5" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">{tr("nav.peer_support", "Peer Support")}</p>
-                  <p className="text-xs text-muted-foreground">{tr("dashboard.quick_peer_desc", "Talk to a trained listener now.")}</p>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-
-          <Link href="/therapists">
-            <Card className="hover-elevate cursor-pointer h-full" data-testid="quick-therapists">
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-chart-2/10 text-chart-2 flex items-center justify-center">
-                  <Users className="h-5 w-5" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">{t("therapist.find")}</p>
-                  <p className="text-xs text-muted-foreground">{tr("dashboard.quick_therapist_desc", "Book student or professional sessions.")}</p>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-
-          <Link href="/self-care">
-            <Card className="hover-elevate cursor-pointer h-full" data-testid="quick-selfcare">
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-chart-5/10 text-chart-5 flex items-center justify-center">
-                  <Wind className="h-5 w-5" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">{t("nav.selfcare")}</p>
-                  <p className="text-xs text-muted-foreground">{tr("dashboard.quick_selfcare_desc", "Reset with breathing and grounding tools.")}</p>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        </motion.div>
 
         {latestMood && (
           <p className="text-xs text-muted-foreground text-center" data-testid="text-last-checkin">

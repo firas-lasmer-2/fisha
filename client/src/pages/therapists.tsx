@@ -6,22 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
   Search,
@@ -34,6 +20,7 @@ import {
   Filter,
   Sparkles,
   MessageCircle,
+  Video,
   Calendar,
   ArrowRight,
   ArrowLeft,
@@ -81,11 +68,7 @@ export default function TherapistsPage() {
     const tierParam = new URLSearchParams(window.location.search).get("tier");
     return tierParam === "student" || tierParam === "professional" ? tierParam : "";
   });
-  const [aiDialogOpen, setAiDialogOpen] = useState(false);
-  const [aiStep, setAiStep] = useState(0);
-  const [aiConcerns, setAiConcerns] = useState<string[]>([]);
-  const [aiLanguagePref, setAiLanguagePref] = useState("");
-  const [aiBudget, setAiBudget] = useState("");
+  const [budget, setBudget] = useState<string>("");
   const [onlineOnly, setOnlineOnly] = useState(false);
 
   const onlineTherapists = useOnlineTherapists();
@@ -107,32 +90,6 @@ export default function TherapistsPage() {
   const { data: onboarding } = useQuery<OnboardingResponse | null>({
     queryKey: ["/api/onboarding"],
     enabled: !!user && user.role === "client",
-  });
-
-  const aiMatchMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/ai/match-therapist", {
-        concerns: aiConcerns,
-        language: aiLanguagePref,
-        budget: aiBudget,
-      });
-      return res.json();
-    },
-    onSuccess: () => {
-      setAiDialogOpen(false);
-      setAiStep(0);
-      toast({
-        title: t("therapist.matches_found"),
-        description: t("therapist.matches_found_desc"),
-      });
-    },
-    onError: () => {
-      toast({
-        title: t("common.error"),
-        description: t("therapist.try_again_later"),
-        variant: "destructive",
-      });
-    },
   });
 
   const specializations = [
@@ -162,7 +119,6 @@ export default function TherapistsPage() {
   const languageOptions = [
     { value: "ar", label: "العربية" },
     { value: "fr", label: "Français" },
-    { value: "darija", label: "تونسي" },
   ];
 
   const genderOptions = [
@@ -173,6 +129,12 @@ export default function TherapistsPage() {
   const tierOptions = [
     { value: "student", label: t("tier.student_therapist") },
     { value: "professional", label: t("tier.professional_therapist") },
+  ];
+
+  const budgetOptions = [
+    { value: "0-80", label: `< 80 ${t("common.dinar")}` },
+    { value: "80-120", label: `80-120 ${t("common.dinar")}` },
+    { value: "120+", label: `120+ ${t("common.dinar")}` },
   ];
 
   const handleStartConversation = async (therapistId: string) => {
@@ -209,16 +171,14 @@ export default function TherapistsPage() {
     }
   };
 
-  const toggleAiConcern = (concern: string) => {
-    setAiConcerns((prev) =>
-      prev.includes(concern)
-        ? prev.filter((c) => c !== concern)
-        : [...prev, concern],
-    );
-  };
-
   const filteredTherapists = therapists?.filter((tp) => {
     if (onlineOnly && !onlineTherapists.has(tp.userId)) return false;
+    if (budget) {
+      const rate = tp.rateDinar ?? 0;
+      if (budget === "0-80" && rate >= 80) return false;
+      if (budget === "80-120" && (rate < 80 || rate > 120)) return false;
+      if (budget === "120+" && rate <= 120) return false;
+    }
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     const name =
@@ -279,120 +239,6 @@ export default function TherapistsPage() {
     return scored.sort((a, b) => b.score - a.score).slice(0, 3);
   }, [filteredTherapists, onboarding?.primaryConcerns, onboarding?.preferredLanguage, onboarding?.budgetRange, onlineTherapists]);
 
-  const renderAiStep = () => {
-    switch (aiStep) {
-      case 0:
-        return (
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              {t("therapist.concerns")}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {specializations.map((s) => (
-                <Badge
-                  key={s.value}
-                  variant={
-                    aiConcerns.includes(s.value) ? "default" : "secondary"
-                  }
-                  className={`cursor-pointer toggle-elevate ${aiConcerns.includes(s.value) ? "toggle-elevated" : ""}`}
-                  onClick={() => toggleAiConcern(s.value)}
-                  data-testid={`badge-ai-concern-${s.value}`}
-                >
-                  {s.label}
-                </Badge>
-              ))}
-            </div>
-            <Button
-              className="w-full"
-              onClick={() => setAiStep(1)}
-              disabled={aiConcerns.length === 0}
-              data-testid="button-ai-next-1"
-            >
-              {t("common.next")}
-              <ArrowIcon className="h-4 w-4 ms-2" />
-            </Button>
-          </div>
-        );
-      case 1:
-        return (
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              {t("therapist.language")}
-            </p>
-            <Select value={aiLanguagePref} onValueChange={setAiLanguagePref}>
-              <SelectTrigger data-testid="select-ai-language">
-                <SelectValue
-                  placeholder={
-                    t("therapist.select_language")
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {languageOptions.map((l) => (
-                  <SelectItem key={l.value} value={l.value}>
-                    {l.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-sm text-muted-foreground mt-4">
-              {t("therapist.budget")}
-            </p>
-            <Select value={aiBudget} onValueChange={setAiBudget}>
-              <SelectTrigger data-testid="select-ai-budget">
-                <SelectValue
-                  placeholder={
-                    t("therapist.select_budget")
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="50-80">
-                  50-80 {t("common.dinar")}
-                </SelectItem>
-                <SelectItem value="80-120">
-                  80-120 {t("common.dinar")}
-                </SelectItem>
-                <SelectItem value="120-200">
-                  120-200 {t("common.dinar")}
-                </SelectItem>
-                <SelectItem value="200+">
-                  200+ {t("common.dinar")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => setAiStep(0)}
-                data-testid="button-ai-back"
-              >
-                {t("common.back")}
-              </Button>
-              <Button
-                className="flex-1"
-                onClick={() => aiMatchMutation.mutate()}
-                disabled={aiMatchMutation.isPending}
-                data-testid="button-ai-find-match"
-              >
-                {aiMatchMutation.isPending ? (
-                  <span className="animate-spin me-2">
-                    <Brain className="h-4 w-4" />
-                  </span>
-                ) : (
-                  <Sparkles className="h-4 w-4 me-2" />
-                )}
-                {t("therapist.find_match")}
-              </Button>
-            </div>
-          </div>
-        );
-      default:
-        return null;
-    }
-  };
-
   return (
     <AppLayout>
       <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-6">
@@ -433,40 +279,6 @@ export default function TherapistsPage() {
         <div className="space-y-3" data-testid="section-filters">
           <ScrollArea className="w-full">
             <div className="flex items-center gap-2 pb-2">
-              <Dialog open={aiDialogOpen} onOpenChange={setAiDialogOpen}>
-                <DialogTrigger asChild>
-                  <motion.div
-                    custom={0}
-                    variants={filterChipVariants}
-                    initial="hidden"
-                    animate="visible"
-                  >
-                    <Button
-                      variant="outline"
-                      className="shrink-0 gradient-calm text-white border-0"
-                      data-testid="button-ai-match"
-                    >
-                      <Sparkles className="h-4 w-4 me-1.5" />
-                      {t("therapist.ai_match")}
-                    </Button>
-                  </motion.div>
-                </DialogTrigger>
-                <DialogContent data-testid="dialog-ai-match">
-                  <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                      <Sparkles className="h-5 w-5 text-primary" />
-                      {t("therapist.ai_match")}
-                    </DialogTitle>
-                    <p className="text-sm text-muted-foreground">
-                      {t("therapist.ai_match.desc")}
-                    </p>
-                  </DialogHeader>
-                  {renderAiStep()}
-                </DialogContent>
-              </Dialog>
-
-              <div className="w-px h-6 bg-border shrink-0" />
-
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
                 <Filter className="h-3.5 w-3.5" />
               </div>
@@ -474,7 +286,7 @@ export default function TherapistsPage() {
               {specializations.map((s, i) => (
                 <motion.div
                   key={s.value}
-                  custom={i + 1}
+                  custom={i}
                   variants={filterChipVariants}
                   initial="hidden"
                   animate="visible"
@@ -560,7 +372,21 @@ export default function TherapistsPage() {
                 </Badge>
               ))}
 
-              {(specialization || language || gender || tier || onlineOnly) && (
+              <div className="w-px h-5 bg-border shrink-0" />
+
+              {budgetOptions.map((b) => (
+                <Badge
+                  key={b.value}
+                  variant={budget === b.value ? "default" : "secondary"}
+                  className="cursor-pointer shrink-0 whitespace-nowrap"
+                  onClick={() => setBudget(budget === b.value ? "" : b.value)}
+                  data-testid={`filter-budget-${b.value}`}
+                >
+                  {b.label}
+                </Badge>
+              ))}
+
+              {(specialization || language || gender || tier || onlineOnly || budget) && (
                 <Badge
                   variant="outline"
                   className="cursor-pointer shrink-0 text-destructive"
@@ -569,6 +395,7 @@ export default function TherapistsPage() {
                     setLanguage("");
                     setGender("");
                     setTier("");
+                    setBudget("");
                     setOnlineOnly(false);
                   }}
                   data-testid="button-clear-filters"
@@ -706,11 +533,24 @@ export default function TherapistsPage() {
                             </h3>
                           </Link>
                           {tp.verified && (
-                            <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
+                            <span className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400" title="Verified professional">
+                              <CheckCircle className="h-3.5 w-3.5 fill-emerald-500/20" />
+                              <span className="text-[10px] font-medium hidden sm:inline">{tr("therapist.verified_badge", "Verified")}</span>
+                            </span>
                           )}
                           <Badge variant="outline" className="text-[10px]">
                             {tp.tier === "student" ? t("tier.student_therapist") : t("tier.professional_therapist")}
                           </Badge>
+                          {tp.hasOpenSlots === true && (
+                            <Badge variant="secondary" className="text-[10px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                              • {tr("therapist.accepting_clients", "Accepting clients")}
+                            </Badge>
+                          )}
+                          {tp.hasOpenSlots === false && (
+                            <Badge variant="secondary" className="text-[10px] text-muted-foreground">
+                              • {tr("therapist.fully_booked", "Fully booked")}
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-xs text-muted-foreground line-clamp-1">
                           {tp.headline || tr("therapist.simple_headline", "Warm, culturally-aware mental health support.")}
@@ -740,8 +580,14 @@ export default function TherapistsPage() {
 
                     <div className="mt-auto pt-3 border-t flex items-center justify-between gap-2">
                       <div data-testid={`text-rate-${tp.userId}`}>
-                        <span className="font-bold text-primary text-lg">{tp.rateDinar}</span>
-                        <span className="text-xs text-muted-foreground ms-1">{t("common.dinar")}</span>
+                        <div className="flex flex-col gap-0.5 text-xs">
+                          <span className="flex items-center gap-1 text-primary font-medium">
+                            <MessageCircle className="h-3 w-3" /> {tr("therapist.free_to_message", "Free to message")}
+                          </span>
+                          <span className="flex items-center gap-1 text-muted-foreground">
+                            <Video className="h-3 w-3" /> {tp.rateDinar} {t("common.dinar")} / {tr("therapist.video_session", "video session")}
+                          </span>
+                        </div>
                       </div>
                       <div className="flex gap-2">
                         <Button

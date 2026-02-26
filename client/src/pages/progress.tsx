@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { AppLayout } from "@/components/app-layout";
 import { useI18n } from "@/lib/i18n";
@@ -8,7 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import {
   TrendingUp,
   BookOpen,
@@ -16,56 +18,41 @@ import {
   Calendar,
   BarChart2,
   Star,
+  Target,
+  Plus,
+  Trash2,
+  CheckCircle2,
+  Clock,
 } from "lucide-react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { MoodEntry, JournalEntry, Appointment } from "@shared/schema";
 
-const MOOD_EMOJI: Record<number, string> = { 1: "😢", 2: "😔", 3: "😐", 4: "🙂", 5: "😊" };
-
-function MoodSparkline({ entries }: { entries: MoodEntry[] }) {
-  const last7 = entries
-    .slice()
-    .sort((a, b) => (a.createdAt || "") > (b.createdAt || "") ? 1 : -1)
-    .slice(-7);
-
-  if (last7.length < 2) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        Log at least 2 moods to see your trend.
-      </p>
-    );
-  }
-
-  const max = 5;
-  const width = 260;
-  const height = 60;
-  const stepX = width / (last7.length - 1);
-
-  const points = last7
-    .map((e, i) => `${i * stepX},${height - (e.moodScore / max) * height}`)
-    .join(" ");
-
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full max-w-xs" style={{ height: 60 }}>
-      <polyline
-        fill="none"
-        stroke="hsl(var(--primary))"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        points={points}
-      />
-      {last7.map((e, i) => (
-        <circle
-          key={e.id}
-          cx={i * stepX}
-          cy={height - (e.moodScore / max) * height}
-          r="3"
-          fill="hsl(var(--primary))"
-        />
-      ))}
-    </svg>
-  );
+interface TreatmentGoal {
+  id: number;
+  userId: string;
+  title: string;
+  description: string | null;
+  targetDate: string | null;
+  status: "active" | "completed" | "abandoned";
+  progressPct: number;
+  createdAt: string;
 }
+
+interface MoodAnalytics {
+  moodTrend: { date: string; avgMood: number }[];
+}
+
+const MOOD_EMOJI: Record<number, string> = { 1: "😢", 2: "😔", 3: "😐", 4: "🙂", 5: "😊" };
 
 function journalStreak(entries: JournalEntry[]): number {
   if (!entries.length) return 0;
@@ -89,14 +76,102 @@ function journalStreak(entries: JournalEntry[]): number {
   return streak;
 }
 
+function GoalCard({
+  goal,
+  onDelete,
+  onUpdate,
+}: {
+  goal: TreatmentGoal;
+  onDelete: (id: number) => void;
+  onUpdate: (id: number, data: Partial<TreatmentGoal>) => void;
+}) {
+  const statusColor = goal.status === "completed" ? "text-emerald-500" : goal.status === "abandoned" ? "text-muted-foreground" : "text-primary";
+
+  return (
+    <div className="rounded-lg border p-4 space-y-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <p className={`font-medium text-sm ${goal.status === "abandoned" ? "line-through text-muted-foreground" : ""}`}>
+            {goal.title}
+          </p>
+          {goal.description && (
+            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{goal.description}</p>
+          )}
+          {goal.targetDate && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+              <Clock className="h-3 w-3" />
+              Target: {new Date(goal.targetDate).toLocaleDateString()}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {goal.status === "active" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0 text-emerald-500 hover:text-emerald-600"
+              onClick={() => onUpdate(goal.id, { status: "completed", progressPct: 100 })}
+              title="Mark complete"
+            >
+              <CheckCircle2 className="h-4 w-4" />
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+            onClick={() => onDelete(goal.id)}
+            title="Delete goal"
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>Progress</span>
+          <span>{goal.progressPct}%</span>
+        </div>
+        <Progress value={goal.progressPct} className="h-1.5" />
+        {goal.status === "active" && (
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={goal.progressPct}
+            onChange={(e) => onUpdate(goal.id, { progressPct: Number(e.target.value) })}
+            className="w-full h-1 accent-primary cursor-pointer mt-1"
+          />
+        )}
+      </div>
+
+      <Badge
+        className={`text-xs ${statusColor}`}
+        variant="outline"
+      >
+        {goal.status}
+      </Badge>
+    </div>
+  );
+}
+
 export default function ProgressPage() {
   const { t } = useI18n();
   const { user } = useAuth();
+  const { toast } = useToast();
 
   const tr = (key: string, fallback: string) => {
     const val = t(key);
     return val === key ? fallback : val;
   };
+
+  const [newGoalTitle, setNewGoalTitle] = useState("");
+  const [newGoalDesc, setNewGoalDesc] = useState("");
+  const [newGoalDate, setNewGoalDate] = useState("");
+  const [goalDialogOpen, setGoalDialogOpen] = useState(false);
+  const [analyticsDays, setAnalyticsDays] = useState(30);
 
   const { data: moodEntries = [], isLoading: moodLoading } = useQuery<MoodEntry[]>({
     queryKey: ["/api/mood"],
@@ -108,6 +183,18 @@ export default function ProgressPage() {
 
   const { data: appointments = [], isLoading: appointmentsLoading } = useQuery<Appointment[]>({
     queryKey: ["/api/appointments"],
+  });
+
+  const { data: goals = [], isLoading: goalsLoading } = useQuery<TreatmentGoal[]>({
+    queryKey: ["/api/goals"],
+  });
+
+  const { data: analyticsData, isLoading: analyticsLoading } = useQuery<MoodAnalytics>({
+    queryKey: ["/api/progress/analytics", analyticsDays],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/progress/analytics?days=${analyticsDays}`);
+      return res.json();
+    },
   });
 
   const avgMood = useMemo(() => {
@@ -130,7 +217,45 @@ export default function ProgressPage() {
     [appointments]
   );
 
+  const createGoalMutation = useMutation({
+    mutationFn: async (data: { title: string; description?: string; targetDate?: string }) => {
+      const res = await apiRequest("POST", "/api/goals", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/goals"] });
+      setNewGoalTitle("");
+      setNewGoalDesc("");
+      setNewGoalDate("");
+      setGoalDialogOpen(false);
+      toast({ title: "Goal created" });
+    },
+    onError: () => toast({ title: t("common.error"), variant: "destructive" }),
+  });
+
+  const updateGoalMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: Partial<TreatmentGoal> }) => {
+      const res = await apiRequest("PATCH", `/api/goals/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/goals"] }),
+    onError: () => toast({ title: t("common.error"), variant: "destructive" }),
+  });
+
+  const deleteGoalMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/goals/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/goals"] });
+      toast({ title: "Goal deleted" });
+    },
+    onError: () => toast({ title: t("common.error"), variant: "destructive" }),
+  });
+
   const isLoading = moodLoading || journalLoading || appointmentsLoading;
+  const activeGoals = goals.filter((g) => g.status === "active");
+  const completedGoals = goals.filter((g) => g.status === "completed");
 
   return (
     <AppLayout>
@@ -217,27 +342,175 @@ export default function ProgressPage() {
           </div>
         )}
 
-        {/* Mood sparkline */}
+        {/* Mood Trend Chart */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-primary" />
-              {tr("progress.mood_trend", "Mood Trend (last 7 days)")}
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-primary" />
+                Mood Trend
+              </CardTitle>
+              <div className="flex gap-1">
+                {[30, 60, 90].map((d) => (
+                  <Button
+                    key={d}
+                    size="sm"
+                    variant={analyticsDays === d ? "default" : "outline"}
+                    className="h-6 px-2 text-xs"
+                    onClick={() => setAnalyticsDays(d)}
+                  >
+                    {d}d
+                  </Button>
+                ))}
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="pt-0">
-            {moodLoading ? (
-              <Skeleton className="h-16 w-full" />
+            {analyticsLoading ? (
+              <Skeleton className="h-40 w-full" />
+            ) : !analyticsData?.moodTrend?.length ? (
+              <div className="h-40 flex items-center justify-center">
+                <p className="text-sm text-muted-foreground">Log moods to see your trend chart.</p>
+              </div>
             ) : (
-              <MoodSparkline entries={moodEntries} />
+              <ResponsiveContainer width="100%" height={160}>
+                <LineChart data={analyticsData.moodTrend} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 10 }}
+                    tickFormatter={(d) => d.slice(5)}
+                  />
+                  <YAxis domain={[1, 5]} tick={{ fontSize: 10 }} ticks={[1, 2, 3, 4, 5]} />
+                  <Tooltip
+                    formatter={(v: number) => [`${v} / 5`, "Avg Mood"]}
+                    labelFormatter={(l) => l}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="avgMood"
+                    stroke="hsl(var(--primary))"
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
             )}
-            <div className="mt-3">
+            <div className="mt-2">
               <Link href="/mood">
                 <Button variant="ghost" size="sm">
                   {tr("progress.log_mood", "Log today's mood")}
                 </Button>
               </Link>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Treatment Goals */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Target className="h-4 w-4 text-violet-500" />
+                Treatment Goals
+                {activeGoals.length > 0 && (
+                  <Badge variant="secondary">{activeGoals.length} active</Badge>
+                )}
+              </CardTitle>
+              <Dialog open={goalDialogOpen} onOpenChange={setGoalDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" variant="outline" className="gap-1.5">
+                    <Plus className="h-3.5 w-3.5" />
+                    Add Goal
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>New Treatment Goal</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3 pt-2">
+                    <div>
+                      <label className="text-sm font-medium">Goal Title *</label>
+                      <Input
+                        className="mt-1"
+                        placeholder="e.g. Practice mindfulness daily"
+                        value={newGoalTitle}
+                        onChange={(e) => setNewGoalTitle(e.target.value)}
+                        maxLength={200}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Description (optional)</label>
+                      <Input
+                        className="mt-1"
+                        placeholder="More details about this goal..."
+                        value={newGoalDesc}
+                        onChange={(e) => setNewGoalDesc(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Target Date (optional)</label>
+                      <Input
+                        className="mt-1"
+                        type="date"
+                        value={newGoalDate}
+                        onChange={(e) => setNewGoalDate(e.target.value)}
+                      />
+                    </div>
+                    <Button
+                      className="w-full"
+                      disabled={!newGoalTitle.trim() || createGoalMutation.isPending}
+                      onClick={() =>
+                        createGoalMutation.mutate({
+                          title: newGoalTitle.trim(),
+                          description: newGoalDesc.trim() || undefined,
+                          targetDate: newGoalDate || undefined,
+                        })
+                      }
+                    >
+                      Create Goal
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {goalsLoading ? (
+              <Skeleton className="h-20 w-full" />
+            ) : goals.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                No goals yet. Add one to track your progress.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {activeGoals.map((goal) => (
+                  <GoalCard
+                    key={goal.id}
+                    goal={goal}
+                    onDelete={(id) => deleteGoalMutation.mutate(id)}
+                    onUpdate={(id, data) => updateGoalMutation.mutate({ id, data })}
+                  />
+                ))}
+                {completedGoals.length > 0 && (
+                  <details>
+                    <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+                      {completedGoals.length} completed goal{completedGoals.length !== 1 ? "s" : ""}
+                    </summary>
+                    <div className="mt-2 space-y-2 opacity-60">
+                      {completedGoals.map((goal) => (
+                        <GoalCard
+                          key={goal.id}
+                          goal={goal}
+                          onDelete={(id) => deleteGoalMutation.mutate(id)}
+                          onUpdate={(id, data) => updateGoalMutation.mutate({ id, data })}
+                        />
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 

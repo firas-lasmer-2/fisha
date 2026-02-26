@@ -60,6 +60,7 @@ export interface TherapistProfile {
   landingPageCtaText: string | null;
   landingPageCtaUrl: string | null;
   createdAt: string | null;
+  hasOpenSlots?: boolean;
 }
 
 export interface TherapistReview {
@@ -109,6 +110,7 @@ export interface Appointment {
   status: string;
   notes: string | null;
   priceDinar: number | null;
+  meetLink: string | null;
   createdAt: string | null;
 }
 
@@ -120,6 +122,7 @@ export interface TherapistSlot {
   priceDinar: number;
   status: string;
   appointmentId: number | null;
+  meetLink: string | null;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -386,6 +389,7 @@ export const insertTherapistSlotSchema = z.object({
   priceDinar: z.number().nonnegative(),
   status: z.string().default("open").optional(),
   appointmentId: z.number().optional().nullable(),
+  meetLink: z.string().optional().nullable(),
 });
 
 export const insertMoodEntrySchema = z.object({
@@ -624,6 +628,203 @@ export type InsertPeerMessage = z.infer<typeof insertPeerMessageSchema>;
 export type InsertPeerSessionFeedback = z.infer<typeof insertPeerSessionFeedbackSchema>;
 export type InsertPeerReport = z.infer<typeof insertPeerReportSchema>;
 
+// ---- Progress tracking types (Phase 3.3) ----
+
+export interface TreatmentGoal {
+  id: number;
+  userId: string;
+  title: string;
+  description: string | null;
+  targetDate: string | null;
+  status: "active" | "completed" | "abandoned";
+  progressPct: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const insertTreatmentGoalSchema = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().max(2000).optional().nullable(),
+  targetDate: z.string().optional().nullable(),
+  progressPct: z.number().int().min(0).max(100).default(0),
+});
+
+export const updateTreatmentGoalSchema = z.object({
+  title: z.string().min(1).max(200).optional(),
+  description: z.string().max(2000).optional().nullable(),
+  targetDate: z.string().optional().nullable(),
+  status: z.enum(["active", "completed", "abandoned"]).optional(),
+  progressPct: z.number().int().min(0).max(100).optional(),
+});
+
+export type InsertTreatmentGoal = z.infer<typeof insertTreatmentGoalSchema>;
+export type UpdateTreatmentGoal = z.infer<typeof updateTreatmentGoalSchema>;
+
+export function mapTreatmentGoal(row: any): TreatmentGoal {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    title: row.title,
+    description: row.description,
+    targetDate: row.target_date,
+    status: row.status,
+    progressPct: row.progress_pct,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export interface SessionSummary {
+  id: number;
+  appointmentId: number;
+  therapistId: string;
+  clientId: string;
+  keyTopics: string[] | null;
+  homework: string | null;
+  therapistNotes: string | null;
+  clientVisible: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const upsertSessionSummarySchema = z.object({
+  keyTopics: z.array(z.string().max(200)).max(20).optional().nullable(),
+  homework: z.string().max(2000).optional().nullable(),
+  therapistNotes: z.string().max(5000).optional().nullable(),
+  clientVisible: z.boolean().default(false),
+});
+
+export type UpsertSessionSummary = z.infer<typeof upsertSessionSummarySchema>;
+
+export function mapSessionSummary(row: any): SessionSummary {
+  return {
+    id: row.id,
+    appointmentId: row.appointment_id,
+    therapistId: row.therapist_id,
+    clientId: row.client_id,
+    keyTopics: row.key_topics,
+    homework: row.homework,
+    therapistNotes: row.therapist_notes,
+    clientVisible: row.client_visible,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+// ---- Audit log type ----
+
+export interface AuditLog {
+  id: number;
+  actorId: string | null;
+  action: string;
+  resourceType: string;
+  resourceId: string | null;
+  metadata: Record<string, unknown> | null;
+  ipAddress: string | null;
+  createdAt: string;
+}
+
+export function mapAuditLog(row: any): AuditLog {
+  return {
+    id: row.id,
+    actorId: row.actor_id,
+    action: row.action,
+    resourceType: row.resource_type,
+    resourceId: row.resource_id,
+    metadata: row.metadata,
+    ipAddress: row.ip_address,
+    createdAt: row.created_at,
+  };
+}
+
+// ---- API request validation schemas (used by server middleware) ----
+
+export const signupRequestSchema = z.object({
+  email: z.string().email("Invalid email address"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+  role: z.enum(["client", "therapist"]).default("client"),
+  firstName: z.string().min(1).max(50).optional(),
+  lastName: z.string().min(1).max(50).optional(),
+  phone: z.string().optional(),
+});
+
+export const loginRequestSchema = z.object({
+  email: z.string().email("Invalid email address"),
+  password: z.string().min(1, "Password is required"),
+});
+
+export const otpRequestSchema = z.object({
+  phone: z.string().min(8, "Valid phone number required"),
+});
+
+export const verifyOtpRequestSchema = z.object({
+  phone: z.string().min(8),
+  token: z.string().min(4).max(10),
+});
+
+export const sendMessageRequestSchema = z.object({
+  content: z.string().min(1).max(10000),
+  messageType: z.string().default("text").optional(),
+  crisisDetectedByClient: z.boolean().optional(),
+});
+
+export const moodEntryRequestSchema = z.object({
+  moodScore: z.number().int().min(1).max(5),
+  emotions: z.array(z.string()).optional(),
+  notes: z.string().max(2000).optional(),
+  triggers: z.array(z.string()).optional(),
+});
+
+export const journalEntryRequestSchema = z.object({
+  title: z.string().max(200).optional(),
+  content: z.string().min(1).max(20000),
+  mood: z.string().optional(),
+  isSharedWithTherapist: z.boolean().default(false).optional(),
+});
+
+export const onboardingRequestSchema = z.object({
+  primaryConcerns: z.array(z.string()).optional(),
+  preferredLanguage: z.string().optional(),
+  genderPreference: z.string().optional(),
+  budgetRange: z.string().optional(),
+  howDidYouHear: z.string().optional(),
+  displayName: z.string().min(3).max(30).regex(/^[a-zA-Z0-9\u0600-\u06FF_]+$/).optional(),
+  starterPath: z.string().optional(),
+  onboardingCompleted: z.boolean().optional(),
+});
+
+export const reviewRequestSchema = z.object({
+  overallRating: z.number().int().min(1).max(5),
+  helpfulnessRating: z.number().int().min(1).max(5).optional(),
+  communicationRating: z.number().int().min(1).max(5).optional(),
+  comment: z.string().max(2000).optional(),
+  isAnonymous: z.boolean().default(true).optional(),
+  appointmentId: z.number().optional(),
+});
+
+export const slotCreateRequestSchema = z.object({
+  startsAt: z.string().datetime({ message: "Must be ISO 8601 datetime" }),
+  durationMinutes: z.number().int().min(15).max(180),
+  priceDinar: z.number().nonnegative().max(1000),
+  meetLink: z.string().url().optional().nullable(),
+});
+
+export const paymentInitiateRequestSchema = z.object({
+  appointmentId: z.number().int().positive(),
+  therapistId: z.string().uuid(),
+  amount: z.number().positive().max(1000),
+});
+
+export const queueJoinRequestSchema = z.object({
+  preferredLanguage: z.string().optional(),
+  topicTags: z.array(z.string()).optional(),
+});
+
+export const peerMessageRequestSchema = z.object({
+  content: z.string().min(1).max(5000),
+});
+
+
 // ---- Helper: map snake_case DB row to camelCase TS object ----
 
 export function mapProfile(row: any): User {
@@ -742,6 +943,7 @@ export function mapAppointment(row: any): Appointment {
     status: row.status,
     notes: row.notes,
     priceDinar: row.price_dinar,
+    meetLink: row.meet_link ?? null,
     createdAt: row.created_at,
   };
 }
@@ -755,6 +957,7 @@ export function mapTherapistSlot(row: any): TherapistSlot {
     priceDinar: row.price_dinar,
     status: row.status,
     appointmentId: row.appointment_id,
+    meetLink: row.meet_link ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -984,3 +1187,29 @@ export function toSnakeCase(obj: Record<string, any>): Record<string, any> {
   }
   return result;
 }
+
+// ---- Therapist Landing Page Builder types (Phase 3.4) ----
+
+export type LandingSection =
+  | { type: "hero"; enabled: boolean }
+  | { type: "about"; enabled: boolean }
+  | { type: "specializations"; enabled: boolean }
+  | { type: "testimonials"; enabled: boolean; maxCount?: number }
+  | { type: "faq"; enabled: boolean }
+  | { type: "slots"; enabled: boolean }
+  | { type: "video"; enabled: boolean }
+  | { type: "office_photos"; enabled: boolean }
+  | { type: "social_links"; enabled: boolean }
+  | { type: "custom_text"; enabled: boolean; title: string; content: string };
+
+export const DEFAULT_LANDING_SECTIONS: LandingSection[] = [
+  { type: "hero", enabled: true },
+  { type: "about", enabled: true },
+  { type: "specializations", enabled: true },
+  { type: "slots", enabled: true },
+  { type: "testimonials", enabled: true, maxCount: 3 },
+  { type: "faq", enabled: false },
+  { type: "video", enabled: false },
+  { type: "office_photos", enabled: false },
+  { type: "social_links", enabled: false },
+];

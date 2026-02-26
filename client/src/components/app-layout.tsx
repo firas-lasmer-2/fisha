@@ -4,11 +4,19 @@ import { triggerHaptic } from "@/lib/haptics";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Link, useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import {
   Heart, LayoutDashboard, Users, MessageCircle, Smile, BookOpen,
   Calendar, Library, LogOut, Wind, UserCircle, AlertCircle,
-  HeartHandshake, ShieldCheck, UserPlus, Sparkles, TrendingUp,
+  HeartHandshake, ShieldCheck, UserPlus, Sparkles, TrendingUp, Leaf,
+  ChevronDown,
 } from "lucide-react";
 
 function homeHrefForRole(role: string | null | undefined): string {
@@ -30,6 +38,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const [location] = useLocation();
 
+  const { data: unread } = useQuery<{ count: number }>({
+    queryKey: ["/api/unread-count"],
+    enabled: !!user,
+  });
+
   const tr = (key: string, fallback: string) => {
     const value = t(key);
     return value === key ? fallback : value;
@@ -41,11 +54,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     { href: "/appointments", icon: Calendar, label: t("nav.appointments") },
     { href: "/messages", icon: MessageCircle, label: t("nav.messages") },
     { href: "/dashboard", icon: LayoutDashboard, label: t("nav.dashboard") },
-    { href: "/grow", icon: Sparkles, label: tr("nav.grow", "Grow") },
-    { href: "/mood", icon: Smile, label: t("nav.mood") },
-    { href: "/journal", icon: BookOpen, label: t("nav.journal") },
-    { href: "/self-care", icon: Wind, label: t("nav.selfcare") },
-    { href: "/resources", icon: Library, label: t("nav.resources") },
     ...(user?.role === "therapist"
       ? [{ href: "/therapist-dashboard", icon: UserCircle, label: t("therapist_dash.your_page") }]
       : []),
@@ -58,6 +66,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           { href: "/admin/dashboard", icon: LayoutDashboard, label: tr("nav.admin_dashboard", "Admin Dashboard") },
         ]
       : []),
+  ];
+
+  const wellnessNavItems = [
+    { href: "/grow", icon: Sparkles, label: tr("nav.grow", "Grow") },
+    { href: "/mood", icon: Smile, label: t("nav.mood") },
+    { href: "/journal", icon: BookOpen, label: t("nav.journal") },
+    { href: "/self-care", icon: Wind, label: t("nav.selfcare") },
+    { href: "/resources", icon: Library, label: t("nav.resources") },
     ...(user?.role === "client"
       ? [
           { href: "/progress", icon: TrendingUp, label: tr("nav.progress", "Progress") },
@@ -78,11 +94,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       active: location === homeHref || location === "/dashboard",
     },
     {
-      key: "listen",
-      href: "/listen",
-      icon: HeartHandshake,
-      label: tr("nav.listen", "Listen"),
-      active: location.startsWith("/listen") || location.startsWith("/peer-support"),
+      key: "messages",
+      href: "/messages",
+      icon: MessageCircle,
+      label: t("nav.messages"),
+      active: location.startsWith("/messages"),
+      badge: (unread?.count ?? 0) > 0,
     },
     {
       key: "therapists",
@@ -93,10 +110,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     },
     {
       key: "wellness",
-      href: "/self-care",
-      icon: Wind,
-      label: tr("nav.wellness", "Wellness"),
-      active: ["/self-care", "/mood", "/journal", "/resources"].some((path) => location.startsWith(path)),
+      href: "/grow",
+      icon: Leaf,
+      label: tr("nav.grow", "Grow"),
+      active: ["/grow", "/self-care", "/mood", "/journal", "/resources"].some((path) => location.startsWith(path)),
     },
     {
       key: "profile",
@@ -132,6 +149,32 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 </Button>
               </Link>
             ))}
+
+            {/* Wellness dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant={wellnessNavItems.some((i) => location.startsWith(i.href)) ? "secondary" : "ghost"}
+                  size="sm"
+                  className="gap-1.5 text-xs"
+                  data-testid="nav-dropdown-wellness"
+                >
+                  <Leaf className="h-3.5 w-3.5" />
+                  {tr("nav.grow", "Grow")}
+                  <ChevronDown className="h-3 w-3 opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-[160px]">
+                {wellnessNavItems.map((item) => (
+                  <Link key={item.href} href={item.href}>
+                    <DropdownMenuItem className="gap-2 cursor-pointer" data-testid={`nav-link-${item.href.slice(1)}`}>
+                      <item.icon className="h-3.5 w-3.5" />
+                      {item.label}
+                    </DropdownMenuItem>
+                  </Link>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </nav>
 
           <div className="flex items-center gap-1.5">
@@ -171,12 +214,17 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 onClick={() => {
                   triggerHaptic("selection");
                 }}
-                className={`w-full rounded-lg py-1.5 flex flex-col items-center justify-center gap-1 text-[11px] ${
-                  item.active ? "text-primary bg-primary/10" : "text-muted-foreground"
+                className={`w-full rounded-lg py-2 flex flex-col items-center justify-center gap-1 text-[11px] ${
+                  item.active ? "text-primary bg-primary/20 font-medium" : "text-muted-foreground"
                 }`}
                 data-testid={`bottom-nav-${item.key}`}
               >
-                <item.icon className="h-4 w-4" />
+                <span className="relative">
+                  <item.icon className="h-4 w-4" />
+                  {item.badge && (
+                    <span className="absolute -top-1 -end-1 w-2 h-2 rounded-full bg-destructive" />
+                  )}
+                </span>
                 <span className="leading-none">{item.label}</span>
               </button>
             </Link>
