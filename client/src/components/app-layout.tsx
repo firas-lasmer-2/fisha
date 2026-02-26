@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import {
   Heart, LayoutDashboard, Users, MessageCircle, Smile, BookOpen,
-  Calendar, Library, LogOut, Menu, X, Wind, UserCircle,
+  Calendar, Library, LogOut, Menu, X, Wind, UserCircle, AlertTriangle,
+  HeartHandshake, ShieldCheck, CreditCard, UserPlus,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -15,6 +16,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const [location] = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const tr = (key: string, fallback: string) => {
+    const value = t(key);
+    return value === key ? fallback : value;
+  };
 
   const baseNavItems = [
     { href: "/dashboard", icon: LayoutDashboard, label: t("nav.dashboard") },
@@ -25,11 +31,25 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     { href: "/journal", icon: BookOpen, label: t("nav.journal") },
     { href: "/self-care", icon: Wind, label: t("nav.selfcare") },
     { href: "/resources", icon: Library, label: t("nav.resources") },
+    { href: "/peer-support", icon: HeartHandshake, label: tr("nav.peer_support", "Peer Support") },
+    { href: "/pricing", icon: CreditCard, label: tr("nav.pricing", "Pricing") },
   ];
 
-  const navItems = user?.role === "therapist"
-    ? [...baseNavItems, { href: "/therapist-dashboard", icon: UserCircle, label: t("therapist_dash.your_page") }]
-    : baseNavItems;
+  const navItems = [
+    ...baseNavItems,
+    ...(user?.role === "therapist"
+      ? [{ href: "/therapist-dashboard", icon: UserCircle, label: t("therapist_dash.your_page") }]
+      : []),
+    ...(user?.role === "listener"
+      ? [{ href: "/listener/dashboard", icon: UserCircle, label: tr("nav.listener_dashboard", "Listener Dashboard") }]
+      : []),
+    ...(user?.role === "moderator" || user?.role === "admin"
+      ? [{ href: "/admin/listeners", icon: ShieldCheck, label: tr("nav.admin_listeners", "Listener Moderation") }]
+      : []),
+    ...(user?.role !== "therapist" && user?.role !== "moderator" && user?.role !== "admin"
+      ? [{ href: "/listener/apply", icon: UserPlus, label: tr("nav.listener_apply", "Become a Listener") }]
+      : []),
+  ];
 
   return (
     <div className="min-h-screen bg-background">
@@ -102,6 +122,18 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <main className="pt-14 min-h-screen">
         {children}
       </main>
+
+      {user && (
+        <Link href="/crisis">
+          <Button
+            className="fixed bottom-6 end-6 z-50 rounded-full h-12 px-4 bg-destructive hover:bg-destructive/90 shadow-lg"
+            data-testid="button-sos"
+          >
+            <AlertTriangle className="h-4 w-4 me-2" />
+            SOS
+          </Button>
+        </Link>
+      )}
     </div>
   );
 }

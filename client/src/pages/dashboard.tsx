@@ -15,8 +15,9 @@ import {
   Users, MessageCircle, Smile, BookOpen, Heart, Calendar,
   Frown, Meh, SmilePlus, Sparkles, Wind, ArrowRight, ArrowLeft,
   TrendingUp, Brain, HandHeart, ChevronRight,
+  Wallet,
 } from "lucide-react";
-import type { Appointment, MoodEntry, User } from "@shared/schema";
+import type { Appointment, MoodEntry, PaymentTransaction, User } from "@shared/schema";
 
 const moodIcons = [
   { icon: Frown, label: "mood.awful", color: "text-destructive" },
@@ -76,6 +77,10 @@ export default function DashboardPage() {
 
   const { data: unread } = useQuery<{ count: number }>({
     queryKey: ["/api/unread-count"],
+  });
+
+  const { data: payments } = useQuery<PaymentTransaction[]>({
+    queryKey: ["/api/payments"],
   });
 
   const moodMutation = useMutation({
@@ -287,7 +292,7 @@ export default function DashboardPage() {
                 {selectedPath ? (
                   (() => {
                     const path = growthPaths.find(p => p.key === selectedPath)!;
-                    const completed = Math.floor(Math.random() * path.steps);
+                    const completed = Math.min(moods?.length ?? 0, path.steps);
                     const progress = Math.round((completed / path.steps) * 100);
                     return (
                       <div className="space-y-3">
@@ -340,10 +345,43 @@ export default function DashboardPage() {
                 )}
               </CardContent>
             </Card>
-          </motion.div>
+        </motion.div>
 
-          <motion.div variants={fadeUp}>
-            <Card data-testid="card-upcoming-appointments">
+        <motion.div variants={fadeUp}>
+          <Card data-testid="card-payments-history">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Wallet className="h-4 w-4 text-primary" />
+                {t("dashboard.payments")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {payments && payments.length > 0 ? (
+                <div className="space-y-2">
+                  {payments.slice(0, 4).map((payment) => (
+                    <div key={payment.id} className="flex items-center justify-between text-sm p-2 rounded-md bg-muted/50">
+                      <div>
+                        <p className="font-medium">{payment.paymentMethod.toUpperCase()}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {payment.createdAt ? new Date(payment.createdAt).toLocaleDateString() : ""}
+                        </p>
+                      </div>
+                      <div className="text-end">
+                        <p className="font-semibold">{payment.amountDinar} {t("common.dinar")}</p>
+                        <p className="text-xs text-muted-foreground">{payment.status}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground py-2">{t("dashboard.no_payments")}</div>
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        <motion.div variants={fadeUp}>
+          <Card data-testid="card-upcoming-appointments">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Calendar className="h-4 w-4 text-primary" />

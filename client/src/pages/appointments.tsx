@@ -6,11 +6,15 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/use-auth";
+import { supabase } from "@/lib/supabase";
 import { Calendar, Clock, CheckCircle, XCircle, AlertCircle, Loader2 } from "lucide-react";
+import { useEffect } from "react";
 import type { Appointment, User } from "@shared/schema";
 
 export default function AppointmentsPage() {
-  const { t, isRTL } = useI18n();
+  const { t } = useI18n();
+  const { user } = useAuth();
 
   const { data: appointments, isLoading } = useQuery<(Appointment & { otherUser: User })[]>({
     queryKey: ["/api/appointments"],
@@ -25,6 +29,47 @@ export default function AppointmentsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/appointments"] });
     },
   });
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channelClient = supabase
+      .channel(`appointments-client-${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "appointments",
+          filter: `client_id=eq.${user.id}`,
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["/api/appointments"] });
+        },
+      )
+      .subscribe();
+
+    const channelTherapist = supabase
+      .channel(`appointments-therapist-${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "appointments",
+          filter: `therapist_id=eq.${user.id}`,
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["/api/appointments"] });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channelClient);
+      supabase.removeChannel(channelTherapist);
+    };
+  }, [user?.id]);
 
   const statusConfig: Record<string, { icon: any; color: string; label: string }> = {
     pending: { icon: AlertCircle, color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400", label: t("appointment.pending") },

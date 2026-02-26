@@ -50,6 +50,7 @@ import {
 import { useState } from "react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useOnlineTherapists } from "@/hooks/use-online-therapists";
 import { motion } from "framer-motion";
 import type { TherapistProfile, User, TherapistReview } from "@shared/schema";
 
@@ -117,6 +118,7 @@ export default function TherapistProfilePage() {
   const { toast } = useToast();
   const params = useParams<{ userId: string }>();
   const userId = params.userId;
+  const onlineTherapists = useOnlineTherapists();
 
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const [overallRating, setOverallRating] = useState(0);
@@ -137,11 +139,7 @@ export default function TherapistProfilePage() {
     queryKey: ["/api/therapists", userId, "reviews"],
   });
 
-  const { data: onlineIds } = useQuery<string[]>({
-    queryKey: ["/api/therapists/online"],
-    refetchInterval: 30000,
-  });
-  const isTherapistOnline = onlineIds?.includes(userId!) ?? false;
+  const isTherapistOnline = userId ? onlineTherapists.has(userId) : false;
 
   const reviewMutation = useMutation({
     mutationFn: async () => {

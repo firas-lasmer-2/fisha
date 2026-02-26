@@ -1,47 +1,213 @@
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/components/app-layout";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { MessageCircle, Send, ArrowLeft, ArrowRight } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { MessageCircle, Send, ArrowLeft, ArrowRight, ShieldAlert } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import {
+  decryptMessageContent,
+  encryptMessageContent,
+  generateConversationKey,
+  isEncryptedPayload,
+  unwrapConversationKey,
+  wrapConversationKey,
+} from "@/lib/e2e";
 import type { TherapyConversation, TherapyMessage, User } from "@shared/schema";
+
+const CRISIS_KEYWORDS = [
+  "انتحار",
+  "أقتل نفسي",
+  "أريد الموت",
+  "لا أريد العيش",
+  "أنهي حياتي",
+  "suicide",
+  "me tuer",
+  "mourir",
+  "en finir",
+  "plus envie de vivre",
+  "نقتل روحي",
+  "نموت",
+  "ما نحبش نعيش",
+  "نكمل حياتي",
+];
 
 export default function MessagesPage() {
   const { t, isRTL } = useI18n();
   const { user } = useAuth();
   const [selectedConv, setSelectedConv] = useState<number | null>(null);
   const [messageText, setMessageText] = useState("");
+  const [conversationKey, setConversationKey] = useState<CryptoKey | null>(null);
+  const [decryptedMessages, setDecryptedMessages] = useState<Record<number, string>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const urlParams = new URLSearchParams(window.location.search);
   const convParam = urlParams.get("conv");
   useEffect(() => {
-    if (convParam) setSelectedConv(parseInt(convParam));
+    if (convParam) setSelectedConv(parseInt(convParam, 10));
   }, [convParam]);
 
-  const { data: conversations, isLoading: convsLoading } = useQuery<(TherapyConversation & { otherUser: User })[]>({
+  const { data: conversations, isLoading: convsLoading } = useQuery<
+    (TherapyConversation & { otherUser: User })[]
+  >({
     queryKey: ["/api/conversations"],
   });
 
   const { data: messages, isLoading: msgsLoading } = useQuery<TherapyMessage[]>({
     queryKey: ["/api/conversations", selectedConv, "messages"],
     enabled: !!selectedConv,
-    refetchInterval: 3000,
   });
+
+  const selectedConvData = conversations?.find((c) => c.id === selectedConv);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, decryptedMessages]);
+
+  useEffect(() => {
+    if (!selectedConv) return;
+
+    const channel = supabase
+      .channel(`conversation-${selectedConv}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "therapy_messages",
+          filter: `conversation_id=eq.${selectedConv}`,
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["/api/conversations", selectedConv, "messages"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/unread-count"] });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedConv]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function ensureConversationKey() {
+      if (!user || !selectedConvData) {
+        setConversationKey(null);
+        return;
+      }
+
+      const isClient = selectedConvData.clientId === user.id;
+      const userWrappedKey = isClient
+        ? selectedConvData.clientKeyEncrypted
+        : selectedConvData.therapistKeyEncrypted;
+
+      if (userWrappedKey) {
+        const key = await unwrapConversationKey(user.id, userWrappedKey);
+        if (!cancelled) {
+          setConversationKey(key);
+        }
+        return;
+      }
+
+      if (!user.publicKey || !selectedConvData.otherUser.publicKey) {
+        if (!cancelled) {
+          setConversationKey(null);
+        }
+        return;
+      }
+
+      const generatedKey = await generateConversationKey();
+      const clientPublicKey = isClient ? user.publicKey : selectedConvData.otherUser.publicKey;
+      const therapistPublicKey = isClient ? selectedConvData.otherUser.publicKey : user.publicKey;
+
+      const clientKeyEncrypted = await wrapConversationKey(generatedKey, clientPublicKey);
+      const therapistKeyEncrypted = await wrapConversationKey(generatedKey, therapistPublicKey);
+
+      await apiRequest("POST", `/api/conversations/${selectedConvData.id}/encryption-keys`, {
+        clientKeyEncrypted,
+        therapistKeyEncrypted,
+        keyVersion: 1,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+      if (!cancelled) {
+        setConversationKey(generatedKey);
+      }
+    }
+
+    ensureConversationKey().catch(() => {
+      if (!cancelled) {
+        setConversationKey(null);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedConvData, user]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function resolveMessages() {
+      if (!messages || messages.length === 0) {
+        setDecryptedMessages({});
+        return;
+      }
+
+      const resolved: Record<number, string> = {};
+
+      for (const msg of messages) {
+        if (conversationKey && isEncryptedPayload(msg.content)) {
+          try {
+            resolved[msg.id] = await decryptMessageContent(msg.content, conversationKey);
+          } catch {
+            resolved[msg.id] = "[Unable to decrypt message]";
+          }
+        } else {
+          resolved[msg.id] = msg.content;
+        }
+      }
+
+      if (!cancelled) {
+        setDecryptedMessages(resolved);
+      }
+    }
+
+    resolveMessages().catch(() => {
+      if (!cancelled) {
+        setDecryptedMessages({});
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationKey, messages]);
 
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
-      const res = await apiRequest("POST", `/api/conversations/${selectedConv}/messages`, { content });
+      if (!selectedConv || !conversationKey) {
+        throw new Error("Encryption key unavailable");
+      }
+
+      const encryptedContent = await encryptMessageContent(content, conversationKey);
+      const lowerContent = content.toLowerCase();
+      const crisisDetectedByClient = CRISIS_KEYWORDS.some((kw) => lowerContent.includes(kw));
+
+      const res = await apiRequest("POST", `/api/conversations/${selectedConv}/messages`, {
+        content: encryptedContent,
+        encrypted: true,
+        crisisDetectedByClient,
+      });
       return res.json();
     },
     onSuccess: () => {
@@ -52,11 +218,9 @@ export default function MessagesPage() {
   });
 
   const handleSend = () => {
-    if (!messageText.trim() || !selectedConv) return;
+    if (!messageText.trim() || !selectedConv || !conversationKey) return;
     sendMutation.mutate(messageText.trim());
   };
-
-  const selectedConvData = conversations?.find((c) => c.id === selectedConv);
 
   return (
     <AppLayout>
@@ -119,6 +283,13 @@ export default function MessagesPage() {
                 </span>
               </div>
 
+              {!conversationKey && (
+                <div className="p-3 border-b bg-amber-50 text-amber-800 text-xs flex items-center gap-2">
+                  <ShieldAlert className="h-4 w-4 shrink-0" />
+                  <span>Waiting for encryption key exchange in this conversation.</span>
+                </div>
+              )}
+
               <ScrollArea className="flex-1 p-4">
                 {msgsLoading ? (
                   <div className="space-y-3">
@@ -128,6 +299,7 @@ export default function MessagesPage() {
                   <div className="space-y-3">
                     {messages?.map((msg) => {
                       const isMe = msg.senderId === user?.id;
+                      const resolvedMessage = decryptedMessages[msg.id] ?? msg.content;
                       return (
                         <div
                           key={msg.id}
@@ -141,7 +313,7 @@ export default function MessagesPage() {
                                 : "bg-muted rounded-es-sm"
                             }`}
                           >
-                            {msg.content}
+                            {resolvedMessage}
                             <div className={`text-[10px] mt-1 ${isMe ? "text-white/60" : "text-muted-foreground"}`}>
                               {new Date(msg.createdAt!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                             </div>
@@ -165,8 +337,14 @@ export default function MessagesPage() {
                     placeholder={t("messages.type")}
                     className="flex-1"
                     data-testid="input-message"
+                    disabled={!conversationKey}
                   />
-                  <Button type="submit" size="icon" disabled={!messageText.trim() || sendMutation.isPending} data-testid="button-send-message">
+                  <Button
+                    type="submit"
+                    size="icon"
+                    disabled={!messageText.trim() || sendMutation.isPending || !conversationKey}
+                    data-testid="button-send-message"
+                  >
                     <Send className="h-4 w-4" />
                   </Button>
                 </form>
@@ -185,3 +363,4 @@ export default function MessagesPage() {
     </AppLayout>
   );
 }
+

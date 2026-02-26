@@ -51,7 +51,7 @@ export default function LandingPage() {
         window.location.href = "/therapists";
       }
     } else {
-      window.location.href = "/api/login";
+      window.location.href = "/login";
     }
   };
 
@@ -85,7 +85,7 @@ export default function LandingPage() {
                     <Button size="sm" data-testid="button-dashboard">{t("nav.dashboard")}</Button>
                   </Link>
                 ) : (
-                  <a href="/api/login">
+                  <a href="/login">
                     <Button size="sm" data-testid="button-login">{t("nav.login")}</Button>
                   </a>
                 )
@@ -130,7 +130,7 @@ export default function LandingPage() {
           </motion.p>
 
           <motion.div variants={fadeIn} className="flex flex-col sm:flex-row gap-4 justify-center">
-            <a href={user ? "/dashboard" : "/api/login"}>
+            <a href={user ? "/dashboard" : "/login"}>
               <Button size="lg" className="text-base gap-2 w-full sm:w-auto" data-testid="button-hero-cta">
                 {t("landing.hero.cta")}
                 <Arrow className="h-4 w-4" />
@@ -416,7 +416,7 @@ export default function LandingPage() {
               <Moon className="h-10 w-10 mx-auto mb-6 opacity-80" />
               <h2 className="text-2xl sm:text-3xl font-bold mb-4">{t("landing.cta.title")}</h2>
               <p className="text-white/80 mb-8 max-w-lg mx-auto">{t("landing.cta.desc")}</p>
-              <a href={user ? "/dashboard" : "/api/login"}>
+              <a href={user ? "/dashboard" : "/login"}>
                 <Button size="lg" variant="secondary" className="text-primary font-semibold" data-testid="button-cta-signup">
                   {t("landing.cta.button")}
                   <Arrow className="h-4 w-4 ms-2" />

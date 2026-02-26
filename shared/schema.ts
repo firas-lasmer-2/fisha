@@ -1,186 +1,940 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, serial, integer, boolean, timestamp, jsonb, index, real } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const sessions = pgTable(
-  "sessions",
-  {
-    sid: varchar("sid").primaryKey(),
-    sess: jsonb("sess").notNull(),
-    expire: timestamp("expire").notNull(),
-  },
-  (table) => [index("IDX_session_expire").on(table.expire)]
-);
+// ---- Type definitions matching Supabase tables ----
 
-export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  email: varchar("email").unique(),
-  firstName: varchar("first_name"),
-  lastName: varchar("last_name"),
-  profileImageUrl: varchar("profile_image_url"),
-  role: varchar("role", { length: 20 }).default("client").notNull(),
-  phone: varchar("phone"),
-  languagePreference: varchar("language_preference", { length: 10 }).default("ar"),
-  governorate: varchar("governorate"),
-  bio: text("bio"),
-  isAnonymous: boolean("is_anonymous").default(false),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
+export interface User {
+  id: string;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  profileImageUrl: string | null;
+  role: string;
+  phone: string | null;
+  publicKey: string | null;
+  languagePreference: string | null;
+  governorate: string | null;
+  bio: string | null;
+  isAnonymous: boolean | null;
+  onboardingCompleted: boolean | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface TherapistProfile {
+  id: number;
+  userId: string;
+  licenseNumber: string | null;
+  specializations: string[] | null;
+  languages: string[] | null;
+  rateDinar: number | null;
+  verified: boolean | null;
+  rating: number | null;
+  reviewCount: number | null;
+  yearsExperience: number | null;
+  education: string | null;
+  approach: string | null;
+  availableDays: string[] | null;
+  availableHoursStart: string | null;
+  availableHoursEnd: string | null;
+  acceptsOnline: boolean | null;
+  acceptsInPerson: boolean | null;
+  officeAddress: string | null;
+  gender: string | null;
+  headline: string | null;
+  aboutMe: string | null;
+  videoIntroUrl: string | null;
+  officePhotos: string[] | null;
+  faqItems: any;
+  socialLinks: any;
+  slug: string | null;
+  profileThemeColor: string | null;
+  acceptingNewClients: boolean | null;
+  createdAt: string | null;
+}
+
+export interface TherapistReview {
+  id: number;
+  therapistId: string;
+  clientId: string;
+  appointmentId: number | null;
+  overallRating: number;
+  helpfulnessRating: number | null;
+  communicationRating: number | null;
+  comment: string | null;
+  therapistResponse: string | null;
+  isAnonymous: boolean | null;
+  createdAt: string | null;
+}
+
+export interface TherapyConversation {
+  id: number;
+  clientId: string;
+  therapistId: string;
+  status: string;
+  encryptionKey: string | null;
+  clientKeyEncrypted: string | null;
+  therapistKeyEncrypted: string | null;
+  keyVersion: number | null;
+  lastMessageAt: string | null;
+  createdAt: string | null;
+}
+
+export interface TherapyMessage {
+  id: number;
+  conversationId: number;
+  senderId: string;
+  content: string;
+  messageType: string;
+  isRead: boolean | null;
+  createdAt: string | null;
+}
+
+export interface Appointment {
+  id: number;
+  clientId: string;
+  therapistId: string;
+  scheduledAt: string;
+  durationMinutes: number | null;
+  sessionType: string;
+  status: string;
+  notes: string | null;
+  priceDinar: number | null;
+  createdAt: string | null;
+}
+
+export interface MoodEntry {
+  id: number;
+  userId: string;
+  moodScore: number;
+  emotions: string[] | null;
+  notes: string | null;
+  triggers: string[] | null;
+  createdAt: string | null;
+}
+
+export interface JournalEntry {
+  id: number;
+  userId: string;
+  title: string | null;
+  content: string;
+  promptId: number | null;
+  mood: string | null;
+  isSharedWithTherapist: boolean | null;
+  createdAt: string | null;
+}
+
+export interface Resource {
+  id: number;
+  titleAr: string;
+  titleFr: string;
+  titleDarija: string | null;
+  contentAr: string;
+  contentFr: string;
+  contentDarija: string | null;
+  category: string;
+  imageUrl: string | null;
+  readTimeMinutes: number | null;
+  createdAt: string | null;
+}
+
+export interface PaymentTransaction {
+  id: number;
+  clientId: string;
+  therapistId: string;
+  appointmentId: number | null;
+  amountDinar: number;
+  paymentMethod: string;
+  status: string;
+  externalRef: string | null;
+  providerEventId: string | null;
+  providerName: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface CrisisReport {
+  id: number;
+  userId: string;
+  severity: string;
+  autoDetected: boolean | null;
+  responderId: string | null;
+  resolvedAt: string | null;
+  createdAt: string | null;
+}
+
+export interface OnboardingResponse {
+  id: number;
+  userId: string;
+  primaryConcerns: string[] | null;
+  preferredLanguage: string | null;
+  genderPreference: string | null;
+  budgetRange: string | null;
+  howDidYouHear: string | null;
+  completedAt: string | null;
+}
+
+export interface FcmToken {
+  id: number;
+  userId: string;
+  token: string;
+  deviceType: string | null;
+  createdAt: string | null;
+}
+
+export interface ListenerProfile {
+  userId: string;
+  displayAlias: string | null;
+  languages: string[] | null;
+  topics: string[] | null;
+  timezone: string | null;
+  verificationStatus: string;
+  activationStatus: string;
+  trainingCompletedAt: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  isAvailable: boolean;
+  lastSeenAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface ListenerApplication {
+  id: number;
+  userId: string;
+  motivation: string | null;
+  relevantExperience: string | null;
+  languages: string[] | null;
+  topics: string[] | null;
+  weeklyHours: number | null;
+  status: string;
+  moderationNotes: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface ListenerQueueEntry {
+  id: number;
+  clientId: string;
+  preferredLanguage: string | null;
+  topicTags: string[] | null;
+  status: string;
+  matchedListenerId: string | null;
+  sessionId: number | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface PeerSession {
+  id: number;
+  clientId: string;
+  listenerId: string;
+  queueEntryId: number | null;
+  status: string;
+  anonymousAliasClient: string | null;
+  anonymousAliasListener: string | null;
+  escalatedToCrisis: boolean | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  createdAt: string | null;
+}
+
+export interface PeerMessage {
+  id: number;
+  sessionId: number;
+  senderId: string;
+  content: string;
+  encrypted: boolean | null;
+  isFlagged: boolean | null;
+  createdAt: string | null;
+}
+
+export interface PeerSessionFeedback {
+  id: number;
+  sessionId: number;
+  clientId: string;
+  listenerId: string;
+  rating: number;
+  tags: string[] | null;
+  comment: string | null;
+  createdAt: string | null;
+}
+
+export interface PeerReport {
+  id: number;
+  sessionId: number | null;
+  reporterId: string;
+  targetUserId: string | null;
+  reason: string;
+  details: string | null;
+  severity: string;
+  moderationStatus: string;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  createdAt: string | null;
+}
+
+export interface Plan {
+  id: number;
+  code: string;
+  name: string;
+  monthlyPriceDinar: number;
+  peerMinutesLimit: number;
+  priorityLevel: number;
+  therapistDiscountPct: number;
+  createdAt: string | null;
+}
+
+export interface Subscription {
+  id: number;
+  userId: string;
+  planId: number;
+  status: string;
+  provider: string | null;
+  providerRef: string | null;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface Entitlement {
+  id: number;
+  userId: string;
+  planCode: string;
+  peerMinutesRemaining: number;
+  priorityLevel: number;
+  therapistDiscountPct: number;
+  renewedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+// ---- Zod insert schemas for API validation ----
+
+export const insertUserSchema = z.object({
+  email: z.string().email().optional().nullable(),
+  firstName: z.string().optional().nullable(),
+  lastName: z.string().optional().nullable(),
+  profileImageUrl: z.string().optional().nullable(),
+  role: z.string().default("client").optional(),
+  phone: z.string().optional().nullable(),
+  publicKey: z.string().optional().nullable(),
+  languagePreference: z.string().default("ar").optional(),
+  governorate: z.string().optional().nullable(),
+  bio: z.string().optional().nullable(),
+  isAnonymous: z.boolean().default(false).optional(),
 });
 
-export const therapistProfiles = pgTable("therapist_profiles", {
-  id: serial("id").primaryKey(),
-  userId: varchar("user_id").notNull().references(() => users.id),
-  licenseNumber: varchar("license_number"),
-  specializations: text("specializations").array(),
-  languages: text("languages").array(),
-  rateDinar: real("rate_dinar").default(80),
-  verified: boolean("verified").default(false),
-  rating: real("rating").default(0),
-  reviewCount: integer("review_count").default(0),
-  yearsExperience: integer("years_experience").default(0),
-  education: text("education"),
-  approach: text("approach"),
-  availableDays: text("available_days").array(),
-  availableHoursStart: varchar("available_hours_start", { length: 5 }).default("09:00"),
-  availableHoursEnd: varchar("available_hours_end", { length: 5 }).default("17:00"),
-  acceptsOnline: boolean("accepts_online").default(true),
-  acceptsInPerson: boolean("accepts_in_person").default(false),
-  officeAddress: text("office_address"),
-  gender: varchar("gender", { length: 10 }),
-  headline: text("headline"),
-  aboutMe: text("about_me"),
-  videoIntroUrl: varchar("video_intro_url"),
-  officePhotos: text("office_photos").array(),
-  faqItems: jsonb("faq_items"),
-  socialLinks: jsonb("social_links"),
-  slug: varchar("slug").unique(),
-  profileThemeColor: varchar("profile_theme_color", { length: 20 }),
-  acceptingNewClients: boolean("accepting_new_clients").default(true),
-  createdAt: timestamp("created_at").defaultNow(),
+export const insertTherapistProfileSchema = z.object({
+  userId: z.string(),
+  licenseNumber: z.string().optional().nullable(),
+  specializations: z.array(z.string()).optional().nullable(),
+  languages: z.array(z.string()).optional().nullable(),
+  rateDinar: z.number().default(80).optional(),
+  verified: z.boolean().default(false).optional(),
+  yearsExperience: z.number().default(0).optional(),
+  education: z.string().optional().nullable(),
+  approach: z.string().optional().nullable(),
+  availableDays: z.array(z.string()).optional().nullable(),
+  availableHoursStart: z.string().default("09:00").optional(),
+  availableHoursEnd: z.string().default("17:00").optional(),
+  acceptsOnline: z.boolean().default(true).optional(),
+  acceptsInPerson: z.boolean().default(false).optional(),
+  officeAddress: z.string().optional().nullable(),
+  gender: z.string().optional().nullable(),
+  headline: z.string().optional().nullable(),
+  aboutMe: z.string().optional().nullable(),
+  videoIntroUrl: z.string().optional().nullable(),
+  officePhotos: z.array(z.string()).optional().nullable(),
+  faqItems: z.any().optional().nullable(),
+  socialLinks: z.any().optional().nullable(),
+  slug: z.string().optional().nullable(),
+  profileThemeColor: z.string().optional().nullable(),
+  acceptingNewClients: z.boolean().default(true).optional(),
 });
 
-export const therapistReviews = pgTable("therapist_reviews", {
-  id: serial("id").primaryKey(),
-  therapistId: varchar("therapist_id").notNull().references(() => users.id),
-  clientId: varchar("client_id").notNull().references(() => users.id),
-  appointmentId: integer("appointment_id").references(() => appointments.id),
-  overallRating: integer("overall_rating").notNull(),
-  helpfulnessRating: integer("helpfulness_rating"),
-  communicationRating: integer("communication_rating"),
-  comment: text("comment"),
-  therapistResponse: text("therapist_response"),
-  isAnonymous: boolean("is_anonymous").default(true),
-  createdAt: timestamp("created_at").defaultNow(),
+export const insertAppointmentSchema = z.object({
+  clientId: z.string(),
+  therapistId: z.string(),
+  scheduledAt: z.string(),
+  durationMinutes: z.number().default(50).optional(),
+  sessionType: z.string().default("chat").optional(),
+  status: z.string().default("pending").optional(),
+  notes: z.string().optional().nullable(),
+  priceDinar: z.number().optional().nullable(),
 });
 
-export const therapyConversations = pgTable("therapy_conversations", {
-  id: serial("id").primaryKey(),
-  clientId: varchar("client_id").notNull().references(() => users.id),
-  therapistId: varchar("therapist_id").notNull().references(() => users.id),
-  status: varchar("status", { length: 20 }).default("active").notNull(),
-  lastMessageAt: timestamp("last_message_at").defaultNow(),
-  createdAt: timestamp("created_at").defaultNow(),
+export const insertMoodEntrySchema = z.object({
+  userId: z.string(),
+  moodScore: z.number(),
+  emotions: z.array(z.string()).optional().nullable(),
+  notes: z.string().optional().nullable(),
+  triggers: z.array(z.string()).optional().nullable(),
 });
 
-export const therapyMessages = pgTable("therapy_messages", {
-  id: serial("id").primaryKey(),
-  conversationId: integer("conversation_id").notNull().references(() => therapyConversations.id),
-  senderId: varchar("sender_id").notNull().references(() => users.id),
-  content: text("content").notNull(),
-  messageType: varchar("message_type", { length: 20 }).default("text").notNull(),
-  isRead: boolean("is_read").default(false),
-  createdAt: timestamp("created_at").defaultNow(),
+export const insertJournalEntrySchema = z.object({
+  userId: z.string(),
+  title: z.string().optional().nullable(),
+  content: z.string(),
+  promptId: z.number().optional().nullable(),
+  mood: z.string().optional().nullable(),
+  isSharedWithTherapist: z.boolean().default(false).optional(),
 });
 
-export const appointments = pgTable("appointments", {
-  id: serial("id").primaryKey(),
-  clientId: varchar("client_id").notNull().references(() => users.id),
-  therapistId: varchar("therapist_id").notNull().references(() => users.id),
-  scheduledAt: timestamp("scheduled_at").notNull(),
-  durationMinutes: integer("duration_minutes").default(50),
-  sessionType: varchar("session_type", { length: 20 }).default("chat").notNull(),
-  status: varchar("status", { length: 20 }).default("pending").notNull(),
-  notes: text("notes"),
-  priceDinar: real("price_dinar"),
-  createdAt: timestamp("created_at").defaultNow(),
+export const insertTherapyMessageSchema = z.object({
+  conversationId: z.number(),
+  senderId: z.string(),
+  content: z.string(),
+  messageType: z.string().default("text").optional(),
 });
 
-export const moodEntries = pgTable("mood_entries", {
-  id: serial("id").primaryKey(),
-  userId: varchar("user_id").notNull().references(() => users.id),
-  moodScore: integer("mood_score").notNull(),
-  emotions: text("emotions").array(),
-  notes: text("notes"),
-  triggers: text("triggers").array(),
-  createdAt: timestamp("created_at").defaultNow(),
+export const insertTherapyConversationSchema = z.object({
+  clientId: z.string(),
+  therapistId: z.string(),
+  status: z.string().default("active").optional(),
+  clientKeyEncrypted: z.string().optional().nullable(),
+  therapistKeyEncrypted: z.string().optional().nullable(),
+  keyVersion: z.number().default(1).optional(),
 });
 
-export const journalEntries = pgTable("journal_entries", {
-  id: serial("id").primaryKey(),
-  userId: varchar("user_id").notNull().references(() => users.id),
-  title: varchar("title"),
-  content: text("content").notNull(),
-  promptId: integer("prompt_id"),
-  mood: varchar("mood", { length: 20 }),
-  isSharedWithTherapist: boolean("is_shared_with_therapist").default(false),
-  createdAt: timestamp("created_at").defaultNow(),
+export const insertResourceSchema = z.object({
+  titleAr: z.string(),
+  titleFr: z.string(),
+  titleDarija: z.string().optional().nullable(),
+  contentAr: z.string(),
+  contentFr: z.string(),
+  contentDarija: z.string().optional().nullable(),
+  category: z.string(),
+  imageUrl: z.string().optional().nullable(),
+  readTimeMinutes: z.number().default(5).optional(),
 });
 
-export const resources = pgTable("resources", {
-  id: serial("id").primaryKey(),
-  titleAr: text("title_ar").notNull(),
-  titleFr: text("title_fr").notNull(),
-  titleDarija: text("title_darija"),
-  contentAr: text("content_ar").notNull(),
-  contentFr: text("content_fr").notNull(),
-  contentDarija: text("content_darija"),
-  category: varchar("category", { length: 50 }).notNull(),
-  imageUrl: varchar("image_url"),
-  readTimeMinutes: integer("read_time_minutes").default(5),
-  createdAt: timestamp("created_at").defaultNow(),
+export const insertTherapistReviewSchema = z.object({
+  therapistId: z.string(),
+  clientId: z.string(),
+  appointmentId: z.number().optional().nullable(),
+  overallRating: z.number(),
+  helpfulnessRating: z.number().optional().nullable(),
+  communicationRating: z.number().optional().nullable(),
+  comment: z.string().optional().nullable(),
+  therapistResponse: z.string().optional().nullable(),
+  isAnonymous: z.boolean().default(true).optional(),
 });
 
-export const conversations = pgTable("conversations", {
-  id: serial("id").primaryKey(),
-  title: text("title").notNull(),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+export const insertOnboardingResponseSchema = z.object({
+  userId: z.string(),
+  primaryConcerns: z.array(z.string()).optional().nullable(),
+  preferredLanguage: z.string().optional().nullable(),
+  genderPreference: z.string().optional().nullable(),
+  budgetRange: z.string().optional().nullable(),
+  howDidYouHear: z.string().optional().nullable(),
 });
 
-export const messages = pgTable("messages", {
-  id: serial("id").primaryKey(),
-  conversationId: integer("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
-  role: text("role").notNull(),
-  content: text("content").notNull(),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+export const insertCrisisReportSchema = z.object({
+  userId: z.string(),
+  severity: z.string().default("medium").optional(),
+  autoDetected: z.boolean().default(false).optional(),
 });
 
-export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertTherapistProfileSchema = createInsertSchema(therapistProfiles).omit({ id: true, createdAt: true });
-export const insertAppointmentSchema = createInsertSchema(appointments).omit({ id: true, createdAt: true });
-export const insertMoodEntrySchema = createInsertSchema(moodEntries).omit({ id: true, createdAt: true });
-export const insertJournalEntrySchema = createInsertSchema(journalEntries).omit({ id: true, createdAt: true });
-export const insertTherapyMessageSchema = createInsertSchema(therapyMessages).omit({ id: true, createdAt: true });
-export const insertTherapyConversationSchema = createInsertSchema(therapyConversations).omit({ id: true, createdAt: true, lastMessageAt: true });
-export const insertResourceSchema = createInsertSchema(resources).omit({ id: true, createdAt: true });
-export const insertTherapistReviewSchema = createInsertSchema(therapistReviews).omit({ id: true, createdAt: true });
+export const insertPaymentTransactionSchema = z.object({
+  clientId: z.string(),
+  therapistId: z.string(),
+  appointmentId: z.number().optional().nullable(),
+  amountDinar: z.number(),
+  paymentMethod: z.string(),
+  status: z.string().default("pending").optional(),
+  externalRef: z.string().optional().nullable(),
+  providerEventId: z.string().optional().nullable(),
+  providerName: z.string().optional().nullable(),
+});
 
-export type User = typeof users.$inferSelect;
+export const insertListenerProfileSchema = z.object({
+  userId: z.string(),
+  displayAlias: z.string().optional().nullable(),
+  languages: z.array(z.string()).optional().nullable(),
+  topics: z.array(z.string()).optional().nullable(),
+  timezone: z.string().optional().nullable(),
+  verificationStatus: z.string().default("pending").optional(),
+  activationStatus: z.string().default("inactive").optional(),
+  trainingCompletedAt: z.string().optional().nullable(),
+  approvedBy: z.string().optional().nullable(),
+  approvedAt: z.string().optional().nullable(),
+  isAvailable: z.boolean().default(false).optional(),
+});
+
+export const insertListenerApplicationSchema = z.object({
+  userId: z.string(),
+  motivation: z.string().optional().nullable(),
+  relevantExperience: z.string().optional().nullable(),
+  languages: z.array(z.string()).optional().nullable(),
+  topics: z.array(z.string()).optional().nullable(),
+  weeklyHours: z.number().optional().nullable(),
+  status: z.string().default("pending").optional(),
+  moderationNotes: z.string().optional().nullable(),
+  reviewedBy: z.string().optional().nullable(),
+  reviewedAt: z.string().optional().nullable(),
+});
+
+export const insertListenerQueueEntrySchema = z.object({
+  clientId: z.string(),
+  preferredLanguage: z.string().optional().nullable(),
+  topicTags: z.array(z.string()).optional().nullable(),
+  status: z.string().default("waiting").optional(),
+});
+
+export const insertPeerSessionSchema = z.object({
+  clientId: z.string(),
+  listenerId: z.string(),
+  queueEntryId: z.number().optional().nullable(),
+  status: z.string().default("active").optional(),
+  anonymousAliasClient: z.string().optional().nullable(),
+  anonymousAliasListener: z.string().optional().nullable(),
+  escalatedToCrisis: z.boolean().default(false).optional(),
+  startedAt: z.string().optional().nullable(),
+  endedAt: z.string().optional().nullable(),
+});
+
+export const insertPeerMessageSchema = z.object({
+  sessionId: z.number(),
+  senderId: z.string(),
+  content: z.string(),
+  encrypted: z.boolean().default(false).optional(),
+  isFlagged: z.boolean().default(false).optional(),
+});
+
+export const insertPeerSessionFeedbackSchema = z.object({
+  sessionId: z.number(),
+  clientId: z.string(),
+  listenerId: z.string(),
+  rating: z.number().min(1).max(5),
+  tags: z.array(z.string()).optional().nullable(),
+  comment: z.string().optional().nullable(),
+});
+
+export const insertPeerReportSchema = z.object({
+  sessionId: z.number().optional().nullable(),
+  reporterId: z.string(),
+  targetUserId: z.string().optional().nullable(),
+  reason: z.string(),
+  details: z.string().optional().nullable(),
+  severity: z.string().default("medium").optional(),
+  moderationStatus: z.string().default("open").optional(),
+  resolvedBy: z.string().optional().nullable(),
+  resolvedAt: z.string().optional().nullable(),
+});
+
+export const insertPlanSchema = z.object({
+  code: z.string(),
+  name: z.string(),
+  monthlyPriceDinar: z.number().default(0).optional(),
+  peerMinutesLimit: z.number().default(60).optional(),
+  priorityLevel: z.number().default(0).optional(),
+  therapistDiscountPct: z.number().default(0).optional(),
+});
+
+export const insertSubscriptionSchema = z.object({
+  userId: z.string(),
+  planId: z.number(),
+  status: z.string().default("active").optional(),
+  provider: z.string().optional().nullable(),
+  providerRef: z.string().optional().nullable(),
+  currentPeriodStart: z.string().optional().nullable(),
+  currentPeriodEnd: z.string().optional().nullable(),
+  cancelAtPeriodEnd: z.boolean().default(false).optional(),
+});
+
+export const insertEntitlementSchema = z.object({
+  userId: z.string(),
+  planCode: z.string().default("free").optional(),
+  peerMinutesRemaining: z.number().default(60).optional(),
+  priorityLevel: z.number().default(0).optional(),
+  therapistDiscountPct: z.number().default(0).optional(),
+  renewedAt: z.string().optional().nullable(),
+});
+
+// ---- Insert types ----
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
-export type TherapistProfile = typeof therapistProfiles.$inferSelect;
 export type InsertTherapistProfile = z.infer<typeof insertTherapistProfileSchema>;
-export type Appointment = typeof appointments.$inferSelect;
 export type InsertAppointment = z.infer<typeof insertAppointmentSchema>;
-export type MoodEntry = typeof moodEntries.$inferSelect;
 export type InsertMoodEntry = z.infer<typeof insertMoodEntrySchema>;
-export type JournalEntry = typeof journalEntries.$inferSelect;
 export type InsertJournalEntry = z.infer<typeof insertJournalEntrySchema>;
-export type TherapyConversation = typeof therapyConversations.$inferSelect;
-export type InsertTherapyConversation = z.infer<typeof insertTherapyConversationSchema>;
-export type TherapyMessage = typeof therapyMessages.$inferSelect;
 export type InsertTherapyMessage = z.infer<typeof insertTherapyMessageSchema>;
-export type Resource = typeof resources.$inferSelect;
+export type InsertTherapyConversation = z.infer<typeof insertTherapyConversationSchema>;
 export type InsertResource = z.infer<typeof insertResourceSchema>;
-export type TherapistReview = typeof therapistReviews.$inferSelect;
 export type InsertTherapistReview = z.infer<typeof insertTherapistReviewSchema>;
+export type InsertOnboardingResponse = z.infer<typeof insertOnboardingResponseSchema>;
+export type InsertCrisisReport = z.infer<typeof insertCrisisReportSchema>;
+export type InsertPaymentTransaction = z.infer<typeof insertPaymentTransactionSchema>;
+export type InsertListenerProfile = z.infer<typeof insertListenerProfileSchema>;
+export type InsertListenerApplication = z.infer<typeof insertListenerApplicationSchema>;
+export type InsertListenerQueueEntry = z.infer<typeof insertListenerQueueEntrySchema>;
+export type InsertPeerSession = z.infer<typeof insertPeerSessionSchema>;
+export type InsertPeerMessage = z.infer<typeof insertPeerMessageSchema>;
+export type InsertPeerSessionFeedback = z.infer<typeof insertPeerSessionFeedbackSchema>;
+export type InsertPeerReport = z.infer<typeof insertPeerReportSchema>;
+export type InsertPlan = z.infer<typeof insertPlanSchema>;
+export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
+export type InsertEntitlement = z.infer<typeof insertEntitlementSchema>;
+
+// ---- Helper: map snake_case DB row to camelCase TS object ----
+
+export function mapProfile(row: any): User {
+  return {
+    id: row.id,
+    email: row.email,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    profileImageUrl: row.profile_image_url,
+    role: row.role,
+    phone: row.phone,
+    publicKey: row.public_key,
+    languagePreference: row.language_preference,
+    governorate: row.governorate,
+    bio: row.bio,
+    isAnonymous: row.is_anonymous,
+    onboardingCompleted: row.onboarding_completed,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapTherapistProfile(row: any): TherapistProfile {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    licenseNumber: row.license_number,
+    specializations: row.specializations,
+    languages: row.languages,
+    rateDinar: row.rate_dinar,
+    verified: row.verified,
+    rating: row.rating,
+    reviewCount: row.review_count,
+    yearsExperience: row.years_experience,
+    education: row.education,
+    approach: row.approach,
+    availableDays: row.available_days,
+    availableHoursStart: row.available_hours_start,
+    availableHoursEnd: row.available_hours_end,
+    acceptsOnline: row.accepts_online,
+    acceptsInPerson: row.accepts_in_person,
+    officeAddress: row.office_address,
+    gender: row.gender,
+    headline: row.headline,
+    aboutMe: row.about_me,
+    videoIntroUrl: row.video_intro_url,
+    officePhotos: row.office_photos,
+    faqItems: row.faq_items,
+    socialLinks: row.social_links,
+    slug: row.slug,
+    profileThemeColor: row.profile_theme_color,
+    acceptingNewClients: row.accepting_new_clients,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapTherapistReview(row: any): TherapistReview {
+  return {
+    id: row.id,
+    therapistId: row.therapist_id,
+    clientId: row.client_id,
+    appointmentId: row.appointment_id,
+    overallRating: row.overall_rating,
+    helpfulnessRating: row.helpfulness_rating,
+    communicationRating: row.communication_rating,
+    comment: row.comment,
+    therapistResponse: row.therapist_response,
+    isAnonymous: row.is_anonymous,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapConversation(row: any): TherapyConversation {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    therapistId: row.therapist_id,
+    status: row.status,
+    encryptionKey: row.encryption_key,
+    clientKeyEncrypted: row.client_key_encrypted,
+    therapistKeyEncrypted: row.therapist_key_encrypted,
+    keyVersion: row.key_version,
+    lastMessageAt: row.last_message_at,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapMessage(row: any): TherapyMessage {
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    senderId: row.sender_id,
+    content: row.content,
+    messageType: row.message_type,
+    isRead: row.is_read,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapAppointment(row: any): Appointment {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    therapistId: row.therapist_id,
+    scheduledAt: row.scheduled_at,
+    durationMinutes: row.duration_minutes,
+    sessionType: row.session_type,
+    status: row.status,
+    notes: row.notes,
+    priceDinar: row.price_dinar,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapMoodEntry(row: any): MoodEntry {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    moodScore: row.mood_score,
+    emotions: row.emotions,
+    notes: row.notes,
+    triggers: row.triggers,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapJournalEntry(row: any): JournalEntry {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    title: row.title,
+    content: row.content,
+    promptId: row.prompt_id,
+    mood: row.mood,
+    isSharedWithTherapist: row.is_shared_with_therapist,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapResource(row: any): Resource {
+  return {
+    id: row.id,
+    titleAr: row.title_ar,
+    titleFr: row.title_fr,
+    titleDarija: row.title_darija,
+    contentAr: row.content_ar,
+    contentFr: row.content_fr,
+    contentDarija: row.content_darija,
+    category: row.category,
+    imageUrl: row.image_url,
+    readTimeMinutes: row.read_time_minutes,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapPaymentTransaction(row: any): PaymentTransaction {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    therapistId: row.therapist_id,
+    appointmentId: row.appointment_id,
+    amountDinar: row.amount_dinar,
+    paymentMethod: row.payment_method,
+    status: row.status,
+    externalRef: row.external_ref,
+    providerEventId: row.provider_event_id,
+    providerName: row.provider_name,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapCrisisReport(row: any): CrisisReport {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    severity: row.severity,
+    autoDetected: row.auto_detected,
+    responderId: row.responder_id,
+    resolvedAt: row.resolved_at,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapOnboardingResponse(row: any): OnboardingResponse {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    primaryConcerns: row.primary_concerns,
+    preferredLanguage: row.preferred_language,
+    genderPreference: row.gender_preference,
+    budgetRange: row.budget_range,
+    howDidYouHear: row.how_did_you_hear,
+    completedAt: row.completed_at,
+  };
+}
+
+export function mapListenerProfile(row: any): ListenerProfile {
+  return {
+    userId: row.user_id,
+    displayAlias: row.display_alias,
+    languages: row.languages,
+    topics: row.topics,
+    timezone: row.timezone,
+    verificationStatus: row.verification_status,
+    activationStatus: row.activation_status,
+    trainingCompletedAt: row.training_completed_at,
+    approvedBy: row.approved_by,
+    approvedAt: row.approved_at,
+    isAvailable: row.is_available,
+    lastSeenAt: row.last_seen_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapListenerApplication(row: any): ListenerApplication {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    motivation: row.motivation,
+    relevantExperience: row.relevant_experience,
+    languages: row.languages,
+    topics: row.topics,
+    weeklyHours: row.weekly_hours,
+    status: row.status,
+    moderationNotes: row.moderation_notes,
+    reviewedBy: row.reviewed_by,
+    reviewedAt: row.reviewed_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapListenerQueueEntry(row: any): ListenerQueueEntry {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    preferredLanguage: row.preferred_language,
+    topicTags: row.topic_tags,
+    status: row.status,
+    matchedListenerId: row.matched_listener_id,
+    sessionId: row.session_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapPeerSession(row: any): PeerSession {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    listenerId: row.listener_id,
+    queueEntryId: row.queue_entry_id,
+    status: row.status,
+    anonymousAliasClient: row.anonymous_alias_client,
+    anonymousAliasListener: row.anonymous_alias_listener,
+    escalatedToCrisis: row.escalated_to_crisis,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapPeerMessage(row: any): PeerMessage {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    senderId: row.sender_id,
+    content: row.content,
+    encrypted: row.encrypted,
+    isFlagged: row.is_flagged,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapPeerSessionFeedback(row: any): PeerSessionFeedback {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    clientId: row.client_id,
+    listenerId: row.listener_id,
+    rating: row.rating,
+    tags: row.tags,
+    comment: row.comment,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapPeerReport(row: any): PeerReport {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    reporterId: row.reporter_id,
+    targetUserId: row.target_user_id,
+    reason: row.reason,
+    details: row.details,
+    severity: row.severity,
+    moderationStatus: row.moderation_status,
+    resolvedBy: row.resolved_by,
+    resolvedAt: row.resolved_at,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapPlan(row: any): Plan {
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    monthlyPriceDinar: row.monthly_price_dinar,
+    peerMinutesLimit: row.peer_minutes_limit,
+    priorityLevel: row.priority_level,
+    therapistDiscountPct: row.therapist_discount_pct,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapSubscription(row: any): Subscription {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    planId: row.plan_id,
+    status: row.status,
+    provider: row.provider,
+    providerRef: row.provider_ref,
+    currentPeriodStart: row.current_period_start,
+    currentPeriodEnd: row.current_period_end,
+    cancelAtPeriodEnd: row.cancel_at_period_end,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapEntitlement(row: any): Entitlement {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    planCode: row.plan_code,
+    peerMinutesRemaining: row.peer_minutes_remaining,
+    priorityLevel: row.priority_level,
+    therapistDiscountPct: row.therapist_discount_pct,
+    renewedAt: row.renewed_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+// Helper: convert camelCase insert data to snake_case for Supabase
+export function toSnakeCase(obj: Record<string, any>): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined) continue;
+    const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    result[snakeKey] = value;
+  }
+  return result;
+}

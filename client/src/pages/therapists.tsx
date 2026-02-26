@@ -40,52 +40,12 @@ import {
   ArrowLeft,
   Clock,
 } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useOnlineTherapists } from "@/hooks/use-online-therapists";
 import { motion } from "framer-motion";
 import type { TherapistProfile, User } from "@shared/schema";
-
-function useOnlineTherapists() {
-  const { data: initialOnline } = useQuery<string[]>({
-    queryKey: ["/api/therapists/online"],
-    refetchInterval: 30000,
-  });
-
-  const [onlineSet, setOnlineSet] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (initialOnline) {
-      setOnlineSet(new Set(initialOnline));
-    }
-  }, [initialOnline]);
-
-  useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "presence") {
-          setOnlineSet((prev) => {
-            const next = new Set(prev);
-            if (data.status === "online") {
-              next.add(data.userId);
-            } else {
-              next.delete(data.userId);
-            }
-            return next;
-          });
-        }
-      } catch {}
-    };
-
-    return () => ws.close();
-  }, []);
-
-  return onlineSet;
-}
 
 const filterChipVariants = {
   hidden: { opacity: 0, y: 10 },
@@ -198,7 +158,7 @@ export default function TherapistsPage() {
 
   const handleStartConversation = async (therapistId: string) => {
     if (!user) {
-      window.location.href = "/api/login";
+      window.location.href = "/login";
       return;
     }
     try {
