@@ -20,6 +20,8 @@ export interface User {
   updatedAt: string | null;
 }
 
+export type TherapistTier = "student" | "professional";
+
 export interface TherapistProfile {
   id: number;
   userId: string;
@@ -49,6 +51,9 @@ export interface TherapistProfile {
   slug: string | null;
   profileThemeColor: string | null;
   acceptingNewClients: boolean | null;
+  tier: TherapistTier;
+  tierApprovedBy: string | null;
+  tierApprovedAt: string | null;
   createdAt: string | null;
 }
 
@@ -100,6 +105,18 @@ export interface Appointment {
   notes: string | null;
   priceDinar: number | null;
   createdAt: string | null;
+}
+
+export interface TherapistSlot {
+  id: number;
+  therapistId: string;
+  startsAt: string;
+  durationMinutes: number;
+  priceDinar: number;
+  status: string;
+  appointmentId: number | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 export interface MoodEntry {
@@ -198,6 +215,24 @@ export interface ListenerProfile {
   updatedAt: string | null;
 }
 
+export interface ListenerProgress {
+  listenerId: string;
+  points: number;
+  level: number;
+  sessionsRatedCount: number;
+  lastCalculatedAt: string | null;
+}
+
+export interface ListenerPointsLedger {
+  id: number;
+  listenerId: string;
+  sessionId: number | null;
+  eventType: string;
+  delta: number;
+  meta: any;
+  createdAt: string | null;
+}
+
 export interface ListenerApplication {
   id: number;
   userId: string;
@@ -272,44 +307,8 @@ export interface PeerReport {
   moderationStatus: string;
   resolvedBy: string | null;
   resolvedAt: string | null;
+  penaltyApplied: boolean | null;
   createdAt: string | null;
-}
-
-export interface Plan {
-  id: number;
-  code: string;
-  name: string;
-  monthlyPriceDinar: number;
-  peerMinutesLimit: number;
-  priorityLevel: number;
-  therapistDiscountPct: number;
-  createdAt: string | null;
-}
-
-export interface Subscription {
-  id: number;
-  userId: string;
-  planId: number;
-  status: string;
-  provider: string | null;
-  providerRef: string | null;
-  currentPeriodStart: string | null;
-  currentPeriodEnd: string | null;
-  cancelAtPeriodEnd: boolean | null;
-  createdAt: string | null;
-  updatedAt: string | null;
-}
-
-export interface Entitlement {
-  id: number;
-  userId: string;
-  planCode: string;
-  peerMinutesRemaining: number;
-  priorityLevel: number;
-  therapistDiscountPct: number;
-  renewedAt: string | null;
-  createdAt: string | null;
-  updatedAt: string | null;
 }
 
 // ---- Zod insert schemas for API validation ----
@@ -354,6 +353,9 @@ export const insertTherapistProfileSchema = z.object({
   slug: z.string().optional().nullable(),
   profileThemeColor: z.string().optional().nullable(),
   acceptingNewClients: z.boolean().default(true).optional(),
+  tier: z.enum(["student", "professional"]).default("professional").optional(),
+  tierApprovedBy: z.string().optional().nullable(),
+  tierApprovedAt: z.string().optional().nullable(),
 });
 
 export const insertAppointmentSchema = z.object({
@@ -365,6 +367,15 @@ export const insertAppointmentSchema = z.object({
   status: z.string().default("pending").optional(),
   notes: z.string().optional().nullable(),
   priceDinar: z.number().optional().nullable(),
+});
+
+export const insertTherapistSlotSchema = z.object({
+  therapistId: z.string(),
+  startsAt: z.string(),
+  durationMinutes: z.number().int().positive(),
+  priceDinar: z.number().nonnegative(),
+  status: z.string().default("open").optional(),
+  appointmentId: z.number().optional().nullable(),
 });
 
 export const insertMoodEntrySchema = z.object({
@@ -465,6 +476,22 @@ export const insertListenerProfileSchema = z.object({
   isAvailable: z.boolean().default(false).optional(),
 });
 
+export const insertListenerProgressSchema = z.object({
+  listenerId: z.string(),
+  points: z.number().int().default(0).optional(),
+  level: z.number().int().default(1).optional(),
+  sessionsRatedCount: z.number().int().default(0).optional(),
+  lastCalculatedAt: z.string().optional().nullable(),
+});
+
+export const insertListenerPointsLedgerSchema = z.object({
+  listenerId: z.string(),
+  sessionId: z.number().optional().nullable(),
+  eventType: z.string(),
+  delta: z.number().int(),
+  meta: z.any().optional().nullable(),
+});
+
 export const insertListenerApplicationSchema = z.object({
   userId: z.string(),
   motivation: z.string().optional().nullable(),
@@ -526,40 +553,12 @@ export const insertPeerReportSchema = z.object({
   resolvedAt: z.string().optional().nullable(),
 });
 
-export const insertPlanSchema = z.object({
-  code: z.string(),
-  name: z.string(),
-  monthlyPriceDinar: z.number().default(0).optional(),
-  peerMinutesLimit: z.number().default(60).optional(),
-  priorityLevel: z.number().default(0).optional(),
-  therapistDiscountPct: z.number().default(0).optional(),
-});
-
-export const insertSubscriptionSchema = z.object({
-  userId: z.string(),
-  planId: z.number(),
-  status: z.string().default("active").optional(),
-  provider: z.string().optional().nullable(),
-  providerRef: z.string().optional().nullable(),
-  currentPeriodStart: z.string().optional().nullable(),
-  currentPeriodEnd: z.string().optional().nullable(),
-  cancelAtPeriodEnd: z.boolean().default(false).optional(),
-});
-
-export const insertEntitlementSchema = z.object({
-  userId: z.string(),
-  planCode: z.string().default("free").optional(),
-  peerMinutesRemaining: z.number().default(60).optional(),
-  priorityLevel: z.number().default(0).optional(),
-  therapistDiscountPct: z.number().default(0).optional(),
-  renewedAt: z.string().optional().nullable(),
-});
-
 // ---- Insert types ----
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type InsertTherapistProfile = z.infer<typeof insertTherapistProfileSchema>;
 export type InsertAppointment = z.infer<typeof insertAppointmentSchema>;
+export type InsertTherapistSlot = z.infer<typeof insertTherapistSlotSchema>;
 export type InsertMoodEntry = z.infer<typeof insertMoodEntrySchema>;
 export type InsertJournalEntry = z.infer<typeof insertJournalEntrySchema>;
 export type InsertTherapyMessage = z.infer<typeof insertTherapyMessageSchema>;
@@ -570,15 +569,14 @@ export type InsertOnboardingResponse = z.infer<typeof insertOnboardingResponseSc
 export type InsertCrisisReport = z.infer<typeof insertCrisisReportSchema>;
 export type InsertPaymentTransaction = z.infer<typeof insertPaymentTransactionSchema>;
 export type InsertListenerProfile = z.infer<typeof insertListenerProfileSchema>;
+export type InsertListenerProgress = z.infer<typeof insertListenerProgressSchema>;
+export type InsertListenerPointsLedger = z.infer<typeof insertListenerPointsLedgerSchema>;
 export type InsertListenerApplication = z.infer<typeof insertListenerApplicationSchema>;
 export type InsertListenerQueueEntry = z.infer<typeof insertListenerQueueEntrySchema>;
 export type InsertPeerSession = z.infer<typeof insertPeerSessionSchema>;
 export type InsertPeerMessage = z.infer<typeof insertPeerMessageSchema>;
 export type InsertPeerSessionFeedback = z.infer<typeof insertPeerSessionFeedbackSchema>;
 export type InsertPeerReport = z.infer<typeof insertPeerReportSchema>;
-export type InsertPlan = z.infer<typeof insertPlanSchema>;
-export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
-export type InsertEntitlement = z.infer<typeof insertEntitlementSchema>;
 
 // ---- Helper: map snake_case DB row to camelCase TS object ----
 
@@ -632,6 +630,9 @@ export function mapTherapistProfile(row: any): TherapistProfile {
     slug: row.slug,
     profileThemeColor: row.profile_theme_color,
     acceptingNewClients: row.accepting_new_clients,
+    tier: row.tier || "professional",
+    tierApprovedBy: row.tier_approved_by,
+    tierApprovedAt: row.tier_approved_at,
     createdAt: row.created_at,
   };
 }
@@ -691,6 +692,20 @@ export function mapAppointment(row: any): Appointment {
     notes: row.notes,
     priceDinar: row.price_dinar,
     createdAt: row.created_at,
+  };
+}
+
+export function mapTherapistSlot(row: any): TherapistSlot {
+  return {
+    id: row.id,
+    therapistId: row.therapist_id,
+    startsAt: row.starts_at,
+    durationMinutes: row.duration_minutes,
+    priceDinar: row.price_dinar,
+    status: row.status,
+    appointmentId: row.appointment_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -796,6 +811,28 @@ export function mapListenerProfile(row: any): ListenerProfile {
   };
 }
 
+export function mapListenerProgress(row: any): ListenerProgress {
+  return {
+    listenerId: row.listener_id,
+    points: row.points,
+    level: row.level,
+    sessionsRatedCount: row.sessions_rated_count,
+    lastCalculatedAt: row.last_calculated_at,
+  };
+}
+
+export function mapListenerPointsLedger(row: any): ListenerPointsLedger {
+  return {
+    id: row.id,
+    listenerId: row.listener_id,
+    sessionId: row.session_id,
+    eventType: row.event_type,
+    delta: row.delta,
+    meta: row.meta,
+    createdAt: row.created_at,
+  };
+}
+
 export function mapListenerApplication(row: any): ListenerApplication {
   return {
     id: row.id,
@@ -881,50 +918,8 @@ export function mapPeerReport(row: any): PeerReport {
     moderationStatus: row.moderation_status,
     resolvedBy: row.resolved_by,
     resolvedAt: row.resolved_at,
+    penaltyApplied: row.penalty_applied,
     createdAt: row.created_at,
-  };
-}
-
-export function mapPlan(row: any): Plan {
-  return {
-    id: row.id,
-    code: row.code,
-    name: row.name,
-    monthlyPriceDinar: row.monthly_price_dinar,
-    peerMinutesLimit: row.peer_minutes_limit,
-    priorityLevel: row.priority_level,
-    therapistDiscountPct: row.therapist_discount_pct,
-    createdAt: row.created_at,
-  };
-}
-
-export function mapSubscription(row: any): Subscription {
-  return {
-    id: row.id,
-    userId: row.user_id,
-    planId: row.plan_id,
-    status: row.status,
-    provider: row.provider,
-    providerRef: row.provider_ref,
-    currentPeriodStart: row.current_period_start,
-    currentPeriodEnd: row.current_period_end,
-    cancelAtPeriodEnd: row.cancel_at_period_end,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-export function mapEntitlement(row: any): Entitlement {
-  return {
-    id: row.id,
-    userId: row.user_id,
-    planCode: row.plan_code,
-    peerMinutesRemaining: row.peer_minutes_remaining,
-    priorityLevel: row.priority_level,
-    therapistDiscountPct: row.therapist_discount_pct,
-    renewedAt: row.renewed_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
   };
 }
 

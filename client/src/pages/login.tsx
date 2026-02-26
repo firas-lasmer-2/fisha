@@ -184,7 +184,7 @@ export default function LoginPage() {
                 <div className="space-y-3 pt-2">
                   <Input
                     type="tel"
-                    placeholder="+216 XX XXX XXX"
+                    placeholder={t("auth.phone_placeholder_format")}
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     data-testid="input-login-phone"

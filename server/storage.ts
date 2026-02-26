@@ -1,7 +1,8 @@
 import { supabaseAdmin } from "./supabase";
 import {
   type User, type InsertUser,
-  type TherapistProfile, type InsertTherapistProfile,
+  type TherapistProfile, type TherapistSlot, type TherapistTier,
+  type InsertTherapistProfile, type InsertTherapistSlot,
   type TherapyConversation, type InsertTherapyConversation,
   type TherapyMessage, type InsertTherapyMessage,
   type Appointment, type InsertAppointment,
@@ -13,27 +14,46 @@ import {
   type CrisisReport, type InsertCrisisReport,
   type OnboardingResponse, type InsertOnboardingResponse,
   type ListenerProfile, type InsertListenerProfile,
+  type ListenerProgress, type ListenerPointsLedger,
+  type InsertListenerProgress, type InsertListenerPointsLedger,
   type ListenerApplication, type InsertListenerApplication,
   type ListenerQueueEntry, type InsertListenerQueueEntry,
   type PeerSession, type InsertPeerSession,
   type PeerMessage, type InsertPeerMessage,
   type PeerSessionFeedback, type InsertPeerSessionFeedback,
   type PeerReport, type InsertPeerReport,
-  type Plan, type InsertPlan,
-  type Subscription, type InsertSubscription,
-  type Entitlement, type InsertEntitlement,
   type FcmToken,
   mapProfile, mapTherapistProfile, mapTherapistReview,
-  mapConversation, mapMessage, mapAppointment,
+  mapConversation, mapMessage, mapAppointment, mapTherapistSlot,
   mapMoodEntry, mapJournalEntry, mapResource,
   mapPaymentTransaction, mapCrisisReport, mapOnboardingResponse,
-  mapListenerProfile, mapListenerApplication, mapListenerQueueEntry,
+  mapListenerProfile, mapListenerProgress, mapListenerPointsLedger,
+  mapListenerApplication, mapListenerQueueEntry,
   mapPeerSession, mapPeerMessage, mapPeerSessionFeedback, mapPeerReport,
-  mapPlan, mapSubscription, mapEntitlement,
   toSnakeCase,
 } from "@shared/schema";
 
 const supabase = supabaseAdmin;
+
+const LISTENER_LEVEL_THRESHOLDS = [0, 50, 150, 300, 500, 800, 1200, 1700, 2300, 3000];
+const RATING_BONUS_BY_SCORE: Record<number, number> = {
+  1: 0,
+  2: 5,
+  3: 10,
+  4: 15,
+  5: 20,
+};
+
+function listenerLevelForPoints(points: number): number {
+  const safePoints = Math.max(0, points);
+  let level = 1;
+  for (let i = 0; i < LISTENER_LEVEL_THRESHOLDS.length; i += 1) {
+    if (safePoints >= LISTENER_LEVEL_THRESHOLDS[i]) {
+      level = i + 1;
+    }
+  }
+  return level;
+}
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -44,6 +64,11 @@ export interface IStorage {
   getTherapistProfiles(filters?: { specialization?: string; language?: string; minPrice?: number; maxPrice?: number; gender?: string }): Promise<(TherapistProfile & { user: User })[]>;
   createTherapistProfile(profile: InsertTherapistProfile): Promise<TherapistProfile>;
   updateTherapistProfile(userId: string, data: Partial<InsertTherapistProfile>): Promise<TherapistProfile | undefined>;
+  updateTherapistTier(
+    therapistUserId: string,
+    tier: TherapistTier,
+    reviewerId: string,
+  ): Promise<TherapistProfile | undefined>;
 
   getConversation(id: number): Promise<TherapyConversation | undefined>;
   getConversationsByUser(userId: string): Promise<(TherapyConversation & { otherUser: User })[]>;
@@ -61,7 +86,22 @@ export interface IStorage {
 
   getAppointments(userId: string): Promise<(Appointment & { otherUser: User })[]>;
   createAppointment(apt: InsertAppointment): Promise<Appointment>;
+  createAppointmentFromSlot(
+    slotId: number,
+    clientId: string,
+    notes?: string | null,
+    sessionType?: string,
+  ): Promise<{ appointment: Appointment; slot: TherapistSlot } | undefined>;
   updateAppointmentStatus(id: number, status: string): Promise<Appointment | undefined>;
+  getTherapistSlots(
+    therapistId: string,
+    from?: string,
+    to?: string,
+    statuses?: string[],
+  ): Promise<TherapistSlot[]>;
+  createTherapistSlot(slot: InsertTherapistSlot): Promise<TherapistSlot>;
+  updateTherapistSlot(id: number, data: Partial<InsertTherapistSlot>): Promise<TherapistSlot | undefined>;
+  cancelTherapistSlot(id: number): Promise<TherapistSlot | undefined>;
 
   getMoodEntries(userId: string, limit?: number): Promise<MoodEntry[]>;
   createMoodEntry(entry: InsertMoodEntry): Promise<MoodEntry>;
@@ -106,6 +146,19 @@ export interface IStorage {
   // Hybrid peer-support methods
   getListenerProfile(userId: string): Promise<ListenerProfile | undefined>;
   createOrUpdateListenerProfile(data: InsertListenerProfile): Promise<ListenerProfile>;
+  getListenerProgress(userId: string): Promise<ListenerProgress | undefined>;
+  upsertListenerProgress(data: InsertListenerProgress): Promise<ListenerProgress>;
+  addListenerPointsLedgerEntry(data: InsertListenerPointsLedger): Promise<ListenerPointsLedger>;
+  applyListenerFeedbackOutcome(data: {
+    sessionId: number;
+    listenerId: string;
+    rating: number;
+  }): Promise<ListenerProgress>;
+  applyListenerReportPenalty(
+    listenerId: string,
+    reportId: number,
+    moderatorId: string,
+  ): Promise<ListenerProgress>;
 
   submitListenerApplication(data: InsertListenerApplication): Promise<ListenerApplication>;
   getListenerApplicationByUser(userId: string): Promise<ListenerApplication | undefined>;
@@ -142,18 +195,6 @@ export interface IStorage {
   createPeerReport(data: InsertPeerReport): Promise<PeerReport>;
   listOpenPeerReports(): Promise<PeerReport[]>;
   resolvePeerReport(reportId: number, moderatorId: string): Promise<PeerReport | undefined>;
-
-  getPlans(): Promise<Plan[]>;
-  getSubscriptionByUser(userId: string): Promise<Subscription | undefined>;
-  createOrUpdateSubscription(data: InsertSubscription): Promise<Subscription>;
-  updateSubscriptionStatus(
-    userId: string,
-    status: string,
-    cancelAtPeriodEnd?: boolean,
-  ): Promise<Subscription | undefined>;
-  getEntitlement(userId: string): Promise<Entitlement | undefined>;
-  upsertEntitlement(data: InsertEntitlement): Promise<Entitlement>;
-  consumePeerMinutes(userId: string, minutes: number): Promise<Entitlement | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -281,6 +322,26 @@ export class DatabaseStorage implements IStorage {
       .single();
     if (error) return undefined;
     return mapTherapistProfile(result);
+  }
+
+  async updateTherapistTier(
+    therapistUserId: string,
+    tier: TherapistTier,
+    reviewerId: string,
+  ): Promise<TherapistProfile | undefined> {
+    const { data, error } = await supabase
+      .from("therapist_profiles")
+      .update({
+        tier,
+        tier_approved_by: reviewerId,
+        tier_approved_at: new Date().toISOString(),
+      })
+      .eq("user_id", therapistUserId)
+      .select("*")
+      .single();
+
+    if (error || !data) return undefined;
+    return mapTherapistProfile(data);
   }
 
   // ---- Conversations ----
@@ -445,6 +506,59 @@ export class DatabaseStorage implements IStorage {
     return mapAppointment(data);
   }
 
+  async createAppointmentFromSlot(
+    slotId: number,
+    clientId: string,
+    notes?: string | null,
+    sessionType = "chat",
+  ): Promise<{ appointment: Appointment; slot: TherapistSlot } | undefined> {
+    const { data: slotRow, error: slotError } = await supabase
+      .from("therapist_slots")
+      .select("*")
+      .eq("id", slotId)
+      .single();
+    if (slotError || !slotRow) return undefined;
+    if (slotRow.status !== "open") return undefined;
+    if (slotRow.therapist_id === clientId) return undefined;
+
+    const { data: appointmentRow, error: appointmentError } = await supabase
+      .from("appointments")
+      .insert({
+        client_id: clientId,
+        therapist_id: slotRow.therapist_id,
+        scheduled_at: slotRow.starts_at,
+        duration_minutes: slotRow.duration_minutes,
+        session_type: sessionType,
+        status: "pending",
+        notes: notes || null,
+        price_dinar: slotRow.price_dinar,
+      })
+      .select("*")
+      .single();
+    if (appointmentError || !appointmentRow) return undefined;
+
+    const { data: updatedSlotRow, error: updateSlotError } = await supabase
+      .from("therapist_slots")
+      .update({
+        status: "booked",
+        appointment_id: appointmentRow.id,
+      })
+      .eq("id", slotId)
+      .eq("status", "open")
+      .select("*")
+      .single();
+
+    if (updateSlotError || !updatedSlotRow) {
+      await supabase.from("appointments").delete().eq("id", appointmentRow.id);
+      return undefined;
+    }
+
+    return {
+      appointment: mapAppointment(appointmentRow),
+      slot: mapTherapistSlot(updatedSlotRow),
+    };
+  }
+
   async updateAppointmentStatus(id: number, status: string): Promise<Appointment | undefined> {
     const { data, error } = await supabase
       .from("appointments")
@@ -454,6 +568,63 @@ export class DatabaseStorage implements IStorage {
       .single();
     if (error) return undefined;
     return mapAppointment(data);
+  }
+
+  async getTherapistSlots(
+    therapistId: string,
+    from?: string,
+    to?: string,
+    statuses?: string[],
+  ): Promise<TherapistSlot[]> {
+    let query = supabase
+      .from("therapist_slots")
+      .select("*")
+      .eq("therapist_id", therapistId)
+      .order("starts_at", { ascending: true });
+
+    if (from) query = query.gte("starts_at", from);
+    if (to) query = query.lte("starts_at", to);
+    if (statuses && statuses.length > 0) query = query.in("status", statuses);
+
+    const { data, error } = await query;
+    if (error || !data) return [];
+    return data.map(mapTherapistSlot);
+  }
+
+  async createTherapistSlot(slot: InsertTherapistSlot): Promise<TherapistSlot> {
+    const row = toSnakeCase(slot);
+    const { data, error } = await supabase
+      .from("therapist_slots")
+      .insert(row)
+      .select("*")
+      .single();
+    if (error) throw error;
+    return mapTherapistSlot(data);
+  }
+
+  async updateTherapistSlot(id: number, data: Partial<InsertTherapistSlot>): Promise<TherapistSlot | undefined> {
+    const row = toSnakeCase(data);
+    delete row.therapist_id;
+
+    const { data: updated, error } = await supabase
+      .from("therapist_slots")
+      .update(row)
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error || !updated) return undefined;
+    return mapTherapistSlot(updated);
+  }
+
+  async cancelTherapistSlot(id: number): Promise<TherapistSlot | undefined> {
+    const { data, error } = await supabase
+      .from("therapist_slots")
+      .update({ status: "cancelled" })
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error || !data) return undefined;
+    return mapTherapistSlot(data);
   }
 
   // ---- Mood Entries ----
@@ -793,6 +964,160 @@ export class DatabaseStorage implements IStorage {
     return mapListenerProfile(result);
   }
 
+  async getListenerProgress(userId: string): Promise<ListenerProgress | undefined> {
+    const { data, error } = await supabase
+      .from("listener_progress")
+      .select("*")
+      .eq("listener_id", userId)
+      .single();
+    if (error || !data) return undefined;
+    return mapListenerProgress(data);
+  }
+
+  async upsertListenerProgress(data: InsertListenerProgress): Promise<ListenerProgress> {
+    const payload = toSnakeCase(data);
+    payload.last_calculated_at = payload.last_calculated_at || new Date().toISOString();
+    const { data: result, error } = await supabase
+      .from("listener_progress")
+      .upsert(payload, { onConflict: "listener_id" })
+      .select("*")
+      .single();
+    if (error || !result) throw error;
+    return mapListenerProgress(result);
+  }
+
+  async addListenerPointsLedgerEntry(data: InsertListenerPointsLedger): Promise<ListenerPointsLedger> {
+    const payload = toSnakeCase(data);
+    const { data: result, error } = await supabase
+      .from("listener_points_ledger")
+      .insert(payload)
+      .select("*")
+      .single();
+    if (error || !result) throw error;
+    return mapListenerPointsLedger(result);
+  }
+
+  async applyListenerFeedbackOutcome(data: {
+    sessionId: number;
+    listenerId: string;
+    rating: number;
+  }): Promise<ListenerProgress> {
+    const current = await this.getListenerProgress(data.listenerId);
+    const basePoints = 10;
+    const bonusPoints = RATING_BONUS_BY_SCORE[data.rating] ?? 0;
+    const lowRatingPenalty = data.rating <= 2 ? -20 : 0;
+
+    const entries: InsertListenerPointsLedger[] = [
+      {
+        listenerId: data.listenerId,
+        sessionId: data.sessionId,
+        eventType: "session_base",
+        delta: basePoints,
+        meta: { rating: data.rating },
+      },
+      {
+        listenerId: data.listenerId,
+        sessionId: data.sessionId,
+        eventType: "rating_bonus",
+        delta: bonusPoints,
+        meta: { rating: data.rating },
+      },
+    ];
+
+    if (lowRatingPenalty !== 0) {
+      entries.push({
+        listenerId: data.listenerId,
+        sessionId: data.sessionId,
+        eventType: "low_rating_penalty",
+        delta: lowRatingPenalty,
+        meta: { rating: data.rating },
+      });
+    }
+
+    for (const entry of entries) {
+      try {
+        await this.addListenerPointsLedgerEntry(entry);
+      } catch {
+        // Duplicate award attempt for same session should be ignored.
+      }
+    }
+
+    const { data: sumRows } = await supabase
+      .from("listener_points_ledger")
+      .select("delta")
+      .eq("listener_id", data.listenerId);
+    const totalPoints = Math.max(0, (sumRows || []).reduce((sum, row: any) => sum + Number(row.delta || 0), 0));
+    const nextLevel = listenerLevelForPoints(totalPoints);
+
+    return this.upsertListenerProgress({
+      listenerId: data.listenerId,
+      points: totalPoints,
+      level: nextLevel,
+      sessionsRatedCount: (current?.sessionsRatedCount || 0) + 1,
+      lastCalculatedAt: new Date().toISOString(),
+    });
+  }
+
+  async applyListenerReportPenalty(
+    listenerId: string,
+    reportId: number,
+    moderatorId: string,
+  ): Promise<ListenerProgress> {
+    const current = await this.getListenerProgress(listenerId);
+    const { data: report, error: reportError } = await supabase
+      .from("peer_reports")
+      .select("id, penalty_applied")
+      .eq("id", reportId)
+      .single();
+    if (reportError || !report) {
+      return this.upsertListenerProgress({
+        listenerId,
+        points: current?.points || 0,
+        level: current?.level || 1,
+        sessionsRatedCount: current?.sessionsRatedCount || 0,
+        lastCalculatedAt: new Date().toISOString(),
+      });
+    }
+
+    if (report.penalty_applied) {
+      return this.upsertListenerProgress({
+        listenerId,
+        points: current?.points || 0,
+        level: current?.level || 1,
+        sessionsRatedCount: current?.sessionsRatedCount || 0,
+        lastCalculatedAt: new Date().toISOString(),
+      });
+    }
+
+    await this.addListenerPointsLedgerEntry({
+      listenerId,
+      sessionId: null,
+      eventType: "report_penalty",
+      delta: -50,
+      meta: { reportId, moderatorId },
+    });
+
+    await supabase
+      .from("peer_reports")
+      .update({ penalty_applied: true })
+      .eq("id", reportId);
+
+    const { data: sumRows } = await supabase
+      .from("listener_points_ledger")
+      .select("delta")
+      .eq("listener_id", listenerId);
+    const totalPoints = Math.max(0, (sumRows || []).reduce((sum, row: any) => sum + Number(row.delta || 0), 0));
+    const nextLevel = listenerLevelForPoints(totalPoints);
+
+    return this.upsertListenerProgress({
+      listenerId,
+      points: totalPoints,
+      level: nextLevel,
+      sessionsRatedCount: current?.sessionsRatedCount || 0,
+      lastCalculatedAt: new Date().toISOString(),
+    });
+  }
+
   async submitListenerApplication(data: InsertListenerApplication): Promise<ListenerApplication> {
     const row = toSnakeCase(data);
     row.updated_at = new Date().toISOString();
@@ -1120,117 +1445,6 @@ export class DatabaseStorage implements IStorage {
     return mapPeerReport(data);
   }
 
-  // ---- Billing and entitlements ----
-
-  async getPlans(): Promise<Plan[]> {
-    const { data, error } = await supabase
-      .from("plans")
-      .select("*")
-      .order("priority_level", { ascending: true });
-    if (error || !data) return [];
-    return data.map(mapPlan);
-  }
-
-  async getSubscriptionByUser(userId: string): Promise<Subscription | undefined> {
-    const { data, error } = await supabase
-      .from("subscriptions")
-      .select("*")
-      .eq("user_id", userId)
-      .in("status", ["active", "trialing"])
-      .order("created_at", { ascending: false })
-      .limit(1);
-    if (error || !data || data.length === 0) return undefined;
-    return mapSubscription(data[0]);
-  }
-
-  async createOrUpdateSubscription(data: InsertSubscription): Promise<Subscription> {
-    const existing = await this.getSubscriptionByUser(data.userId);
-    const row = toSnakeCase(data);
-    row.updated_at = new Date().toISOString();
-
-    if (existing) {
-      const { data: result, error } = await supabase
-        .from("subscriptions")
-        .update(row)
-        .eq("id", existing.id)
-        .select("*")
-        .single();
-      if (error) throw error;
-      return mapSubscription(result);
-    }
-
-    const { data: result, error } = await supabase
-      .from("subscriptions")
-      .insert(row)
-      .select("*")
-      .single();
-    if (error) throw error;
-    return mapSubscription(result);
-  }
-
-  async updateSubscriptionStatus(
-    userId: string,
-    status: string,
-    cancelAtPeriodEnd = false,
-  ): Promise<Subscription | undefined> {
-    const { data: currentRows, error: readError } = await supabase
-      .from("subscriptions")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(1);
-    if (readError || !currentRows || currentRows.length === 0) return undefined;
-
-    const { data, error } = await supabase
-      .from("subscriptions")
-      .update({
-        status,
-        cancel_at_period_end: cancelAtPeriodEnd,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", currentRows[0].id)
-      .select("*")
-      .single();
-    if (error || !data) return undefined;
-    return mapSubscription(data);
-  }
-
-  async getEntitlement(userId: string): Promise<Entitlement | undefined> {
-    const { data, error } = await supabase
-      .from("entitlements")
-      .select("*")
-      .eq("user_id", userId)
-      .single();
-    if (error || !data) return undefined;
-    return mapEntitlement(data);
-  }
-
-  async upsertEntitlement(data: InsertEntitlement): Promise<Entitlement> {
-    const row = toSnakeCase(data);
-    row.updated_at = new Date().toISOString();
-    const { data: result, error } = await supabase
-      .from("entitlements")
-      .upsert(row, { onConflict: "user_id" })
-      .select("*")
-      .single();
-    if (error) throw error;
-    return mapEntitlement(result);
-  }
-
-  async consumePeerMinutes(userId: string, minutes: number): Promise<Entitlement | undefined> {
-    const entitlement = await this.getEntitlement(userId);
-    if (!entitlement) return undefined;
-
-    const next = Math.max(0, entitlement.peerMinutesRemaining - Math.max(0, minutes));
-    return this.upsertEntitlement({
-      userId,
-      planCode: entitlement.planCode,
-      peerMinutesRemaining: next,
-      priorityLevel: entitlement.priorityLevel,
-      therapistDiscountPct: entitlement.therapistDiscountPct,
-      renewedAt: entitlement.renewedAt || new Date().toISOString(),
-    });
-  }
 }
 
 export const storage = new DatabaseStorage();

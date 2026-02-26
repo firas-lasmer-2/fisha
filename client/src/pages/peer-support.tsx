@@ -13,24 +13,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { MessageCircle, Send, HeartHandshake, Clock3, AlertTriangle, Star } from "lucide-react";
+import { MessageCircle, Send, HeartHandshake, AlertTriangle, Star } from "lucide-react";
 import type {
-  Entitlement,
   ListenerQueueEntry,
   PeerMessage,
   PeerSession,
-  Subscription,
   User,
 } from "@shared/schema";
 
 interface PeerSessionsResponse {
   sessions: (PeerSession & { otherUser: User })[];
   activeQueueEntry: ListenerQueueEntry | null;
-}
-
-interface BillingEntitlementsResponse {
-  subscription: Subscription | null;
-  entitlement: Entitlement | null;
 }
 
 export default function PeerSupportPage() {
@@ -49,10 +42,6 @@ export default function PeerSupportPage() {
 
   const { data: sessionsPayload, isLoading: sessionsLoading } = useQuery<PeerSessionsResponse>({
     queryKey: ["/api/peer/sessions"],
-  });
-
-  const { data: billingPayload } = useQuery<BillingEntitlementsResponse>({
-    queryKey: ["/api/billing/entitlements"],
   });
 
   const sessions = sessionsPayload?.sessions || [];
@@ -117,7 +106,6 @@ export default function PeerSupportPage() {
     },
     onSuccess: (payload: { matched?: boolean; session?: PeerSession | null }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/peer/sessions"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/billing/entitlements"] });
       if (payload?.session?.id) {
         setSelectedSessionId(payload.session.id);
       }
@@ -164,7 +152,6 @@ export default function PeerSupportPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/peer/sessions"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/billing/entitlements"] });
       toast({ title: t("peer.session_ended") });
     },
   });
@@ -203,7 +190,6 @@ export default function PeerSupportPage() {
   });
 
   const canSend = selectedSession?.status === "active" && messageText.trim().length > 0;
-  const remainingMinutes = billingPayload?.entitlement?.peerMinutesRemaining;
 
   return (
     <AppLayout>
@@ -217,13 +203,6 @@ export default function PeerSupportPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex flex-wrap gap-2 text-sm">
-              <Badge variant="secondary">
-                {t("peer.plan")}: {billingPayload?.entitlement?.planCode || "free"}
-              </Badge>
-              <Badge variant="outline">
-                <Clock3 className="h-3 w-3 me-1" />
-                {remainingMinutes ?? "--"} {t("peer.min_remaining")}
-              </Badge>
               {activeQueueEntry && (
                 <Badge variant="outline">{t("peer.queue_status")}: {activeQueueEntry.status}</Badge>
               )}
@@ -443,4 +422,3 @@ export default function PeerSupportPage() {
     </AppLayout>
   );
 }
-

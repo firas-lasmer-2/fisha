@@ -27,7 +27,6 @@ import PeerSupportPage from "@/pages/peer-support";
 import ListenerApplyPage from "@/pages/listener-apply";
 import ListenerDashboardPage from "@/pages/listener-dashboard";
 import AdminListenersPage from "@/pages/admin-listeners";
-import PricingPage from "@/pages/pricing";
 import NotFound from "@/pages/not-found";
 
 function AuthGuard({
@@ -111,9 +110,6 @@ function Router() {
       </Route>
       <Route path="/admin/listeners">
         <AuthGuard><AdminListenersPage /></AuthGuard>
-      </Route>
-      <Route path="/pricing">
-        <AuthGuard allowIncompleteOnboarding><PricingPage /></AuthGuard>
       </Route>
       <Route path="/therapists" component={TherapistsPage} />
       <Route path="/resources" component={ResourcesPage} />

@@ -100,6 +100,15 @@ function verifyWebhookSignature(req: Request, secret: string | undefined, header
   return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
+const STUDENT_THERAPIST_CAP_DINAR = Number(process.env.STUDENT_THERAPIST_CAP_DINAR || "20");
+
+function studentTherapistCapDinar(): number {
+  if (!Number.isFinite(STUDENT_THERAPIST_CAP_DINAR) || STUDENT_THERAPIST_CAP_DINAR <= 0) {
+    return 20;
+  }
+  return STUDENT_THERAPIST_CAP_DINAR;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -126,6 +135,94 @@ export async function registerRoutes(
     return (data || []).map((row: any) => row.id);
   };
 
+  const normalizeRole = (value: unknown): "client" | "therapist" | "listener" | "moderator" | "admin" => {
+    const role = String(value || "").trim();
+    if (["client", "therapist", "listener", "moderator", "admin"].includes(role)) {
+      return role as "client" | "therapist" | "listener" | "moderator" | "admin";
+    }
+    return "client";
+  };
+
+  const upsertProfileSafely = async (payload: {
+    id: string;
+    email?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    role?: string | null;
+    phone?: string | null;
+  }) => {
+    const nowIso = new Date().toISOString();
+    const profilePatch: Record<string, any> = {
+      email: payload.email ?? null,
+      role: normalizeRole(payload.role),
+      updated_at: nowIso,
+    };
+    if (payload.firstName !== undefined) profilePatch.first_name = payload.firstName;
+    if (payload.lastName !== undefined) profilePatch.last_name = payload.lastName;
+    if (payload.phone !== undefined) profilePatch.phone = payload.phone;
+
+    const { data: updatedRows, error: updateError } = await supabaseAdmin
+      .from("profiles")
+      .update(profilePatch)
+      .eq("id", payload.id)
+      .select("*");
+    if (updateError) throw updateError;
+    if (updatedRows && updatedRows.length > 0) {
+      return updatedRows[0];
+    }
+
+    const insertPayload: Record<string, any> = {
+      id: payload.id,
+      created_at: nowIso,
+      ...profilePatch,
+    };
+
+    const { data: insertedRow, error: insertError } = await supabaseAdmin
+      .from("profiles")
+      .insert(insertPayload)
+      .select("*")
+      .single();
+    if (!insertError && insertedRow) {
+      return insertedRow;
+    }
+
+    if ((insertError as any)?.code === "23505") {
+      const { data: existingRow, error: existingError } = await supabaseAdmin
+        .from("profiles")
+        .select("*")
+        .eq("id", payload.id)
+        .maybeSingle();
+      if (!existingError && existingRow) {
+        return existingRow;
+      }
+    }
+
+    throw insertError || new Error("Profile insert failed");
+  };
+
+  const ensureProfile = async (authUser: { id: string; email?: string }) => {
+    const existing = await storage.getUser(authUser.id);
+    if (existing) return existing;
+
+    try {
+      await upsertProfileSafely({
+        id: authUser.id,
+        email: authUser.email || null,
+        role: "client",
+      });
+      return await storage.getUser(authUser.id);
+    } catch (error: any) {
+      console.error("Failed to ensure profile", {
+        userId: authUser.id,
+        message: error?.message,
+        code: error?.code,
+        details: error?.details,
+        hint: error?.hint,
+      });
+      return undefined;
+    }
+  };
+
   // ---- Auth routes ----
 
   app.post("/api/auth/signup", async (req, res) => {
@@ -138,9 +235,11 @@ export async function registerRoutes(
       });
       if (error) return res.status(400).json({ message: error.message });
 
-      // Update profile with additional data
+      // Upsert profile so signup works even if DB auto-profile trigger is absent.
       if (data.user) {
-        await storage.updateUser(data.user.id, {
+        await upsertProfileSafely({
+          id: data.user.id,
+          email: data.user.email || email || null,
           firstName,
           lastName,
           role: role || "client",
@@ -155,12 +254,16 @@ export async function registerRoutes(
       });
       if (signInError) return res.status(400).json({ message: signInError.message });
 
-      const profile = await storage.getUser(data.user!.id);
+      const profile = await ensureProfile({
+        id: data.user!.id,
+        email: data.user?.email || email,
+      });
       res.json({
         user: profile,
         session: session.session,
       });
     } catch (error) {
+      console.error("Signup failed", error);
       res.status(500).json({ message: "Failed to sign up" });
     }
   });
@@ -174,7 +277,10 @@ export async function registerRoutes(
       });
       if (error) return res.status(401).json({ message: error.message });
 
-      const profile = await storage.getUser(data.user.id);
+      const profile = await ensureProfile({
+        id: data.user.id,
+        email: data.user.email || email,
+      });
       res.json({
         user: profile,
         session: data.session,
@@ -205,7 +311,9 @@ export async function registerRoutes(
       });
       if (error) return res.status(400).json({ message: error.message });
 
-      const profile = data.user ? await storage.getUser(data.user.id) : null;
+      const profile = data.user
+        ? await ensureProfile({ id: data.user.id, email: data.user.email || undefined })
+        : null;
       res.json({
         user: profile,
         session: data.session,
@@ -219,8 +327,8 @@ export async function registerRoutes(
     try {
       const authUser = await extractUser(req);
       if (!authUser) return res.status(401).json({ message: "Unauthorized" });
-      const profile = await storage.getUser(authUser.id);
-      if (!profile) return res.status(404).json({ message: "Profile not found" });
+      const profile = await ensureProfile(authUser);
+      if (!profile) return res.status(500).json({ message: "Failed to resolve profile" });
       res.json(profile);
     } catch (error) {
       res.status(500).json({ message: "Failed to get user" });
@@ -276,8 +384,12 @@ export async function registerRoutes(
   app.post("/api/therapists", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
+      const payload = { ...req.body };
+      delete payload.tier;
+      delete payload.tierApprovedBy;
+      delete payload.tierApprovedAt;
       await storage.updateUser(userId, { role: "therapist" });
-      const profile = await storage.createTherapistProfile({ ...req.body, userId });
+      const profile = await storage.createTherapistProfile({ ...payload, userId });
       res.status(201).json(profile);
     } catch (error) {
       res.status(500).json({ message: "Failed to create therapist profile" });
@@ -287,12 +399,66 @@ export async function registerRoutes(
   app.patch("/api/therapists", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const profile = await storage.updateTherapistProfile(userId, req.body);
+      const currentProfile = await storage.getTherapistProfile(userId);
+      if (!currentProfile) return res.status(404).json({ message: "Therapist profile not found" });
+
+      const payload = { ...req.body };
+      delete payload.tier;
+      delete payload.tierApprovedBy;
+      delete payload.tierApprovedAt;
+
+      const nextRate =
+        payload.rateDinar !== undefined && payload.rateDinar !== null
+          ? Number(payload.rateDinar)
+          : currentProfile.rateDinar;
+      const isStudentTier = currentProfile.tier === "student";
+      if (isStudentTier && Number.isFinite(Number(nextRate)) && Number(nextRate) > studentTherapistCapDinar()) {
+        return res.status(400).json({
+          message: `Student therapist rate cannot exceed ${studentTherapistCapDinar()} TND`,
+        });
+      }
+
+      const profile = await storage.updateTherapistProfile(userId, payload);
       res.json(profile);
     } catch (error) {
       res.status(500).json({ message: "Failed to update therapist profile" });
     }
   });
+
+  app.patch(
+    "/api/admin/therapists/:id/tier",
+    isAuthenticated,
+    requireRoles(["moderator", "admin"]),
+    async (req: any, res) => {
+      try {
+        const therapistUserId = req.params.id;
+        const tier = String(req.body.tier || "").trim();
+        if (!["student", "professional"].includes(tier)) {
+          return res.status(400).json({ message: "tier must be student or professional" });
+        }
+
+        const reviewerId = req.user.id;
+        const existingProfile = await storage.getTherapistProfile(therapistUserId);
+        if (!existingProfile) return res.status(404).json({ message: "Therapist profile not found" });
+
+        if (tier === "student" && (existingProfile.rateDinar || 0) > studentTherapistCapDinar()) {
+          return res.status(400).json({
+            message: `Current therapist rate exceeds student cap (${studentTherapistCapDinar()} TND)`,
+          });
+        }
+
+        const updated = await storage.updateTherapistTier(
+          therapistUserId,
+          tier as "student" | "professional",
+          reviewerId,
+        );
+        if (!updated) return res.status(500).json({ message: "Failed to update therapist tier" });
+        res.json(updated);
+      } catch (error) {
+        res.status(500).json({ message: "Failed to update therapist tier" });
+      }
+    },
+  );
 
   // ---- Conversation routes ----
 
@@ -437,7 +603,29 @@ export async function registerRoutes(
   app.post("/api/appointments", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const apt = await storage.createAppointment({ ...req.body, clientId: userId });
+      const therapistId = String(req.body.therapistId || "");
+      const therapistProfile = await storage.getTherapistProfile(therapistId);
+      if (!therapistProfile) return res.status(404).json({ message: "Therapist profile not found" });
+
+      let priceDinar = req.body.priceDinar;
+      if (priceDinar === undefined || priceDinar === null) {
+        priceDinar = therapistProfile.rateDinar;
+      }
+      if (
+        therapistProfile.tier === "student"
+        && Number.isFinite(Number(priceDinar))
+        && Number(priceDinar) > studentTherapistCapDinar()
+      ) {
+        return res.status(400).json({
+          message: `Student therapist appointment price cannot exceed ${studentTherapistCapDinar()} TND`,
+        });
+      }
+
+      const apt = await storage.createAppointment({
+        ...req.body,
+        clientId: userId,
+        priceDinar: Number.isFinite(Number(priceDinar)) ? Number(priceDinar) : null,
+      });
       await notifyUser(
         apt.therapistId,
         "New appointment request",
@@ -466,6 +654,166 @@ export async function registerRoutes(
       res.json(apt);
     } catch (error) {
       res.status(500).json({ message: "Failed to update appointment" });
+    }
+  });
+
+  app.get("/api/therapists/:userId/slots", async (req, res) => {
+    try {
+      const therapistId = req.params.userId;
+      const from = typeof req.query.from === "string" ? req.query.from : undefined;
+      const to = typeof req.query.to === "string" ? req.query.to : undefined;
+      const requestedStatuses = normalizeStringArray(req.query.status)
+        || (typeof req.query.status === "string" ? normalizeStringArray(req.query.status) : null);
+
+      const authUser = await extractUser(req);
+      const authProfile = authUser ? await storage.getUser(authUser.id) : null;
+      const canViewAllStatuses = !!authUser && (
+        authUser.id === therapistId || !!authProfile && ["moderator", "admin"].includes(authProfile.role)
+      );
+      const statuses = canViewAllStatuses
+        ? (requestedStatuses || ["open", "booked", "cancelled", "closed"])
+        : ["open"];
+
+      const slots = await storage.getTherapistSlots(therapistId, from, to, statuses);
+      res.json(slots);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch therapist slots" });
+    }
+  });
+
+  app.post("/api/therapist/slots", isAuthenticated, async (req: any, res) => {
+    try {
+      const callerId = req.user.id;
+      const caller = await storage.getUser(callerId);
+      if (!caller) return res.status(401).json({ message: "Unauthorized" });
+
+      const therapistId = String(req.body.therapistId || callerId);
+      const callerCanManageOthers = ["moderator", "admin"].includes(caller.role);
+      if (!callerCanManageOthers && therapistId !== callerId) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const therapistProfile = await storage.getTherapistProfile(therapistId);
+      if (!therapistProfile) return res.status(404).json({ message: "Therapist profile not found" });
+
+      const startsAt = String(req.body.startsAt || "").trim();
+      const durationMinutes = Number(req.body.durationMinutes);
+      const priceDinar = Number(req.body.priceDinar);
+      if (!startsAt || !Number.isFinite(durationMinutes) || durationMinutes <= 0 || !Number.isFinite(priceDinar) || priceDinar < 0) {
+        return res.status(400).json({ message: "Invalid slot payload" });
+      }
+
+      if (therapistProfile.tier === "student" && priceDinar > studentTherapistCapDinar()) {
+        return res.status(400).json({
+          message: `Student therapist slot price cannot exceed ${studentTherapistCapDinar()} TND`,
+        });
+      }
+
+      const slot = await storage.createTherapistSlot({
+        therapistId,
+        startsAt,
+        durationMinutes,
+        priceDinar,
+        status: "open",
+      });
+
+      res.status(201).json(slot);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create therapist slot" });
+    }
+  });
+
+  app.patch("/api/therapist/slots/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const slotId = Number(req.params.id);
+      if (!Number.isInteger(slotId)) return res.status(400).json({ message: "Invalid slot id" });
+
+      const { data: slotRow } = await supabaseAdmin
+        .from("therapist_slots")
+        .select("*")
+        .eq("id", slotId)
+        .single();
+      if (!slotRow) return res.status(404).json({ message: "Slot not found" });
+
+      const callerId = req.user.id;
+      const caller = await storage.getUser(callerId);
+      if (!caller) return res.status(401).json({ message: "Unauthorized" });
+      const canManageSlot = slotRow.therapist_id === callerId || ["moderator", "admin"].includes(caller.role);
+      if (!canManageSlot) return res.status(403).json({ message: "Forbidden" });
+
+      const therapistProfile = await storage.getTherapistProfile(slotRow.therapist_id);
+      if (!therapistProfile) return res.status(404).json({ message: "Therapist profile not found" });
+
+      const payload: Record<string, any> = {};
+      if (req.body.startsAt !== undefined) payload.startsAt = String(req.body.startsAt);
+      if (req.body.durationMinutes !== undefined) payload.durationMinutes = Number(req.body.durationMinutes);
+      if (req.body.priceDinar !== undefined) payload.priceDinar = Number(req.body.priceDinar);
+      if (req.body.status !== undefined) payload.status = String(req.body.status);
+
+      if (payload.priceDinar !== undefined && therapistProfile.tier === "student" && payload.priceDinar > studentTherapistCapDinar()) {
+        return res.status(400).json({
+          message: `Student therapist slot price cannot exceed ${studentTherapistCapDinar()} TND`,
+        });
+      }
+
+      const updated = await storage.updateTherapistSlot(slotId, payload);
+      if (!updated) return res.status(500).json({ message: "Failed to update therapist slot" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update therapist slot" });
+    }
+  });
+
+  app.delete("/api/therapist/slots/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const slotId = Number(req.params.id);
+      if (!Number.isInteger(slotId)) return res.status(400).json({ message: "Invalid slot id" });
+
+      const { data: slotRow } = await supabaseAdmin
+        .from("therapist_slots")
+        .select("*")
+        .eq("id", slotId)
+        .single();
+      if (!slotRow) return res.status(404).json({ message: "Slot not found" });
+
+      const callerId = req.user.id;
+      const caller = await storage.getUser(callerId);
+      if (!caller) return res.status(401).json({ message: "Unauthorized" });
+      const canManageSlot = slotRow.therapist_id === callerId || ["moderator", "admin"].includes(caller.role);
+      if (!canManageSlot) return res.status(403).json({ message: "Forbidden" });
+
+      const cancelled = await storage.cancelTherapistSlot(slotId);
+      if (!cancelled) return res.status(500).json({ message: "Failed to cancel slot" });
+      res.json(cancelled);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to cancel therapist slot" });
+    }
+  });
+
+  app.post("/api/appointments/from-slot/:slotId", isAuthenticated, async (req: any, res) => {
+    try {
+      const slotId = Number(req.params.slotId);
+      if (!Number.isInteger(slotId)) return res.status(400).json({ message: "Invalid slot id" });
+
+      const clientId = req.user.id;
+      const result = await storage.createAppointmentFromSlot(
+        slotId,
+        clientId,
+        req.body.notes || null,
+        req.body.sessionType || "chat",
+      );
+      if (!result) return res.status(409).json({ message: "Slot unavailable or booking failed" });
+
+      await notifyUser(
+        result.appointment.therapistId,
+        "New appointment request",
+        "A client booked one of your published slots.",
+        { type: "appointment", appointmentId: String(result.appointment.id) },
+      );
+
+      res.status(201).json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create appointment from slot" });
     }
   });
 
@@ -986,6 +1334,25 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
     }
   });
 
+  app.get("/api/listener/progress", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const progress = await storage.getListenerProgress(userId);
+      if (!progress) {
+        return res.json({
+          listenerId: userId,
+          points: 0,
+          level: 1,
+          sessionsRatedCount: 0,
+          lastCalculatedAt: null,
+        });
+      }
+      res.json(progress);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch listener progress" });
+    }
+  });
+
   app.post("/api/listener/availability", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
@@ -1017,28 +1384,6 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
         ? req.body.preferredLanguage
         : null;
       const topicTags = normalizeStringArray(req.body.topicTags);
-
-      let entitlement = await storage.getEntitlement(clientId);
-      if (!entitlement) {
-        const plans = await storage.getPlans();
-        const freePlan = plans.find((plan) => plan.code === "free");
-        if (freePlan) {
-          entitlement = await storage.upsertEntitlement({
-            userId: clientId,
-            planCode: freePlan.code,
-            peerMinutesRemaining: freePlan.peerMinutesLimit,
-            priorityLevel: freePlan.priorityLevel,
-            therapistDiscountPct: freePlan.therapistDiscountPct,
-            renewedAt: new Date().toISOString(),
-          });
-        }
-      }
-
-      if (entitlement && entitlement.peerMinutesRemaining <= 0) {
-        return res.status(402).json({
-          message: "No peer-support minutes remaining. Please upgrade your plan.",
-        });
-      }
 
       const queueEntry = await storage.joinListenerQueue({
         clientId,
@@ -1190,7 +1535,6 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
         ? Math.max(1, Math.ceil((Date.now() - new Date(ended.startedAt).getTime()) / 60000))
         : 1;
 
-      await storage.consumePeerMinutes(ended.clientId, durationMinutes).catch(() => undefined);
       await storage.setListenerAvailability(ended.listenerId, true).catch(() => undefined);
 
       const otherUserId = userId === ended.clientId ? ended.listenerId : ended.clientId;
@@ -1313,6 +1657,9 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
       if (session.clientId !== userId) {
         return res.status(403).json({ message: "Only clients can submit listener feedback" });
       }
+      if (session.status !== "completed") {
+        return res.status(409).json({ message: "Session must be completed before rating" });
+      }
 
       const rating = Number(req.body.rating);
       if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
@@ -1328,7 +1675,13 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
         comment: req.body.comment || null,
       });
 
-      res.status(201).json(feedback);
+      const progress = await storage.applyListenerFeedbackOutcome({
+        sessionId,
+        listenerId: session.listenerId,
+        rating,
+      });
+
+      res.status(201).json({ feedback, listenerProgress: progress });
     } catch (error) {
       res.status(500).json({ message: "Failed to submit peer feedback" });
     }
@@ -1482,110 +1835,22 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
       const moderatorId = req.user.id;
       const report = await storage.resolvePeerReport(reportId, moderatorId);
       if (!report) return res.status(404).json({ message: "Peer report not found" });
-      res.json(report);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to resolve peer report" });
-    }
-  });
 
-  // ---- Billing plans and entitlements ----
-
-  app.get("/api/billing/plans", async (_req, res) => {
-    try {
-      const plans = await storage.getPlans();
-      res.json(plans);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch plans" });
-    }
-  });
-
-  app.get("/api/billing/entitlements", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.id;
-      const plans = await storage.getPlans();
-      const subscription = await storage.getSubscriptionByUser(userId);
-
-      let entitlement = await storage.getEntitlement(userId);
-      if (!entitlement) {
-        const selectedPlan = subscription
-          ? plans.find((plan) => plan.id === subscription.planId)
-          : plans.find((plan) => plan.code === "free");
-        if (selectedPlan) {
-          entitlement = await storage.upsertEntitlement({
-            userId,
-            planCode: selectedPlan.code,
-            peerMinutesRemaining: selectedPlan.peerMinutesLimit,
-            priorityLevel: selectedPlan.priorityLevel,
-            therapistDiscountPct: selectedPlan.therapistDiscountPct,
-            renewedAt: new Date().toISOString(),
-          });
+      let listenerProgress = null;
+      if (report.targetUserId) {
+        const targetUser = await storage.getUser(report.targetUserId);
+        if (targetUser?.role === "listener") {
+          listenerProgress = await storage.applyListenerReportPenalty(
+            report.targetUserId,
+            report.id,
+            moderatorId,
+          );
         }
       }
 
-      res.json({
-        subscription: subscription || null,
-        entitlement: entitlement || null,
-      });
+      res.json({ report, listenerProgress });
     } catch (error) {
-      res.status(500).json({ message: "Failed to fetch billing entitlements" });
-    }
-  });
-
-  app.post("/api/billing/subscribe", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.id;
-      const planCode = String(req.body.planCode || "").trim();
-      if (!planCode) return res.status(400).json({ message: "planCode is required" });
-
-      const plans = await storage.getPlans();
-      const selectedPlan = plans.find((plan) => plan.code === planCode);
-      if (!selectedPlan) return res.status(404).json({ message: "Plan not found" });
-
-      const now = new Date();
-      const periodEnd = new Date(now);
-      periodEnd.setMonth(periodEnd.getMonth() + 1);
-
-      const subscription = await storage.createOrUpdateSubscription({
-        userId,
-        planId: selectedPlan.id,
-        status: "active",
-        provider: req.body.provider || "manual",
-        providerRef: req.body.providerRef || `manual-${userId}-${Date.now()}`,
-        currentPeriodStart: now.toISOString(),
-        currentPeriodEnd: periodEnd.toISOString(),
-        cancelAtPeriodEnd: false,
-      });
-
-      const entitlement = await storage.upsertEntitlement({
-        userId,
-        planCode: selectedPlan.code,
-        peerMinutesRemaining: selectedPlan.peerMinutesLimit,
-        priorityLevel: selectedPlan.priorityLevel,
-        therapistDiscountPct: selectedPlan.therapistDiscountPct,
-        renewedAt: now.toISOString(),
-      });
-
-      res.status(201).json({ subscription, entitlement, plan: selectedPlan });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to subscribe to plan" });
-    }
-  });
-
-  app.post("/api/billing/cancel", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.id;
-      const immediate = req.body.immediate === true;
-
-      const subscription = await storage.updateSubscriptionStatus(
-        userId,
-        immediate ? "canceled" : "active",
-        !immediate,
-      );
-
-      if (!subscription) return res.status(404).json({ message: "No active subscription found" });
-      res.json(subscription);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to cancel subscription" });
+      res.status(500).json({ message: "Failed to resolve peer report" });
     }
   });
 

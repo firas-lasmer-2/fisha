@@ -572,6 +572,9 @@ export default function TherapistsPage() {
                               {t("therapist.verified")}
                             </Badge>
                           )}
+                          <Badge variant="outline" className="text-xs">
+                            {tp.tier === "student" ? t("tier.student_therapist") : t("tier.professional_therapist")}
+                          </Badge>
                         </div>
                         <div className="flex items-center gap-2 text-sm text-muted-foreground mt-0.5 flex-wrap">
                           <span className="flex items-center gap-0.5">
@@ -664,7 +667,7 @@ export default function TherapistsPage() {
                         >
                           <MessageCircle className="h-4 w-4" />
                         </Button>
-                        <Link href={`/appointments?therapist=${tp.userId}`}>
+                        <Link href={`/therapist/${tp.userId}#slots`}>
                           <Button
                             size="sm"
                             data-testid={`button-book-${tp.userId}`}

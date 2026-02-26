@@ -66,7 +66,7 @@ export default function CrisisPage() {
               data-testid="link-call-samu"
             >
               <div>
-                <p className="font-semibold text-red-700 dark:text-red-400">SAMU - 190</p>
+                <p className="font-semibold text-red-700 dark:text-red-400">{t("crisis.samu_label")}</p>
                 <p className="text-xs text-muted-foreground">{t("crisis.samu_desc")}</p>
               </div>
               <Phone className="h-5 w-5 text-red-600" />
@@ -77,7 +77,7 @@ export default function CrisisPage() {
               data-testid="link-call-police"
             >
               <div>
-                <p className="font-semibold text-blue-700 dark:text-blue-400">Police - 197</p>
+                <p className="font-semibold text-blue-700 dark:text-blue-400">{t("crisis.police_label")}</p>
                 <p className="text-xs text-muted-foreground">{t("crisis.police_desc")}</p>
               </div>
               <Phone className="h-5 w-5 text-blue-600" />

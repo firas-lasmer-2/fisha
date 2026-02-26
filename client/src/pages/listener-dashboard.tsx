@@ -10,7 +10,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import type { ListenerApplication, ListenerProfile, PeerSession, User } from "@shared/schema";
+import type {
+  ListenerApplication,
+  ListenerProfile,
+  ListenerProgress,
+  PeerSession,
+  User,
+} from "@shared/schema";
 
 interface ListenerApplicationPayload {
   application: ListenerApplication | null;
@@ -33,6 +39,10 @@ export default function ListenerDashboardPage() {
 
   const { data: peerSessionsData } = useQuery<PeerSessionsPayload>({
     queryKey: ["/api/peer/sessions"],
+  });
+
+  const { data: listenerProgress } = useQuery<ListenerProgress>({
+    queryKey: ["/api/listener/progress"],
   });
 
   useEffect(() => {
@@ -79,6 +89,12 @@ export default function ListenerDashboardPage() {
                   </Badge>
                   <Badge variant="outline">
                     {t("listener.activation")}: {profile?.activationStatus || "inactive"}
+                  </Badge>
+                  <Badge variant="outline">
+                    {t("listener.level")}: {listenerProgress?.level ?? 1}
+                  </Badge>
+                  <Badge variant="outline">
+                    {t("listener.points")}: {listenerProgress?.points ?? 0}
                   </Badge>
                   {user?.role && <Badge variant="outline">{t("listener.role")}: {user.role}</Badge>}
                 </div>
@@ -151,4 +167,3 @@ export default function ListenerDashboardPage() {
     </AppLayout>
   );
 }
-

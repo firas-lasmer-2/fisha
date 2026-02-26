@@ -34,32 +34,16 @@ const growthPaths = [
   { key: "relationships", icon: HandHeart, titleKey: "growth.relationships_path", steps: 8, color: "bg-chart-5/10 text-chart-5" },
 ];
 
-const affirmations: Record<string, string[]> = {
-  ar: [
-    "أنا أستحق السعادة والسلام الداخلي",
-    "كل يوم أصبح أقوى وأكثر ثقة بنفسي",
-    "أنا قادر على التغلب على أي تحدي",
-    "أختار أن أكون لطيفاً مع نفسي اليوم",
-    "مشاعري صالحة وأنا أحترمها",
-  ],
-  fr: [
-    "Je mérite le bonheur et la paix intérieure",
-    "Chaque jour, je deviens plus fort et plus confiant",
-    "Je suis capable de surmonter tout défi",
-    "Je choisis d'être bienveillant envers moi-même aujourd'hui",
-    "Mes émotions sont valides et je les respecte",
-  ],
-  darija: [
-    "أنا نستاهل السعادة والراحة النفسية",
-    "كل نهار نولي أقوى وأكثر ثقة في روحي",
-    "أنا نقدر نتغلب على أي تحدي",
-    "اليوم نختار نكون رحيم مع روحي",
-    "مشاعري مهمة وأنا نحترمها",
-  ],
-};
+const affirmationKeys = [
+  "dashboard.affirmation_1",
+  "dashboard.affirmation_2",
+  "dashboard.affirmation_3",
+  "dashboard.affirmation_4",
+  "dashboard.affirmation_5",
+];
 
 export default function DashboardPage() {
-  const { t, isRTL, language } = useI18n();
+  const { t, isRTL } = useI18n();
   const { user } = useAuth();
   const Arrow = isRTL ? ArrowLeft : ArrowRight;
 
@@ -111,7 +95,7 @@ export default function DashboardPage() {
     { weekday: "long", year: "numeric", month: "long", day: "numeric" }
   );
 
-  const dailyAffirmation = affirmations[language]?.[new Date().getDay() % affirmations[language].length] || affirmations.ar[0];
+  const dailyAffirmation = t(affirmationKeys[new Date().getDay() % affirmationKeys.length]);
 
   const quickActions = [
     { icon: Users, label: t("therapist.find"), href: "/therapists", color: "bg-primary/10 text-primary" },

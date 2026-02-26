@@ -6,12 +6,14 @@ import { useI18n } from "@/lib/i18n";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import type { ListenerApplication, PeerReport } from "@shared/schema";
+import type { ListenerApplication, PeerReport, TherapistProfile, User } from "@shared/schema";
 
 interface AdminListenersPayload {
   applications: ListenerApplication[];
   reports: PeerReport[];
 }
+
+type TherapistRow = TherapistProfile & { user: User };
 
 export default function AdminListenersPage() {
   const { t } = useI18n();
@@ -19,6 +21,10 @@ export default function AdminListenersPage() {
 
   const { data, isLoading } = useQuery<AdminListenersPayload>({
     queryKey: ["/api/admin/listeners"],
+  });
+
+  const { data: therapists = [] } = useQuery<TherapistRow[]>({
+    queryKey: ["/api/therapists"],
   });
 
   const reviewMutation = useMutation({
@@ -54,6 +60,25 @@ export default function AdminListenersPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/listeners"] });
       toast({ title: t("admin.report_resolved") });
+    },
+  });
+
+  const tierMutation = useMutation({
+    mutationFn: async ({
+      therapistId,
+      tier,
+    }: {
+      therapistId: string;
+      tier: "student" | "professional";
+    }) => {
+      await apiRequest("PATCH", `/api/admin/therapists/${therapistId}/tier`, { tier });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/therapists"] });
+      toast({ title: t("admin.tier_updated") });
+    },
+    onError: () => {
+      toast({ title: t("common.error"), variant: "destructive" });
     },
   });
 
@@ -176,8 +201,58 @@ export default function AdminListenersPage() {
             )}
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">{t("admin.therapist_tiers")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {therapists.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("admin.no_therapists")}</p>
+            ) : (
+              therapists.map((therapist) => (
+                <div key={therapist.userId} className="border rounded-md p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <p className="text-sm font-medium">
+                        {therapist.user.firstName} {therapist.user.lastName}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {therapist.rateDinar ?? "--"} {t("common.dinar")}
+                      </p>
+                    </div>
+                    <Badge variant="outline">
+                      {therapist.tier === "student" ? t("tier.student") : t("tier.professional")}
+                    </Badge>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        tierMutation.mutate({ therapistId: therapist.userId, tier: "student" })
+                      }
+                      disabled={tierMutation.isPending}
+                    >
+                      {t("admin.set_student")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        tierMutation.mutate({ therapistId: therapist.userId, tier: "professional" })
+                      }
+                      disabled={tierMutation.isPending}
+                    >
+                      {t("admin.set_professional")}
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
       </div>
     </AppLayout>
   );
 }
-

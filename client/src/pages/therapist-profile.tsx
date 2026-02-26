@@ -52,7 +52,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useOnlineTherapists } from "@/hooks/use-online-therapists";
 import { motion } from "framer-motion";
-import type { TherapistProfile, User, TherapistReview } from "@shared/schema";
+import type { TherapistProfile, TherapistSlot, User, TherapistReview } from "@shared/schema";
 
 const sectionVariants = {
   hidden: { opacity: 0, y: 30 },
@@ -139,7 +139,28 @@ export default function TherapistProfilePage() {
     queryKey: ["/api/therapists", userId, "reviews"],
   });
 
+  const { data: slots = [], isLoading: slotsLoading } = useQuery<TherapistSlot[]>({
+    queryKey: ["/api/therapists", userId, "slots"],
+    enabled: !!userId,
+  });
+
+  const bookSlotMutation = useMutation({
+    mutationFn: async (slotId: number) => {
+      const res = await apiRequest("POST", `/api/appointments/from-slot/${slotId}`, {});
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/therapists", userId, "slots"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/appointments"] });
+      toast({ title: t("slots.booked_success") });
+    },
+    onError: () => {
+      toast({ title: t("common.error"), variant: "destructive" });
+    },
+  });
+
   const isTherapistOnline = userId ? onlineTherapists.has(userId) : false;
+  const openSlots = slots.filter((slot) => slot.status === "open");
 
   const reviewMutation = useMutation({
     mutationFn: async () => {
@@ -272,6 +293,9 @@ export default function TherapistProfilePage() {
                         {t("therapist.verified")}
                       </Badge>
                     )}
+                    <Badge variant="outline">
+                      {profile.tier === "student" ? t("tier.student_therapist") : t("tier.professional_therapist")}
+                    </Badge>
                   </div>
 
                   {profile.headline && (
@@ -350,7 +374,7 @@ export default function TherapistProfilePage() {
                   )}
 
                   <div className="flex items-center gap-2 flex-wrap pt-1">
-                    <Link href="/appointments">
+                    <Link href={`/therapist/${userId}#slots`}>
                       <Button size="sm" className="gap-1.5" data-testid="button-book-session-hero">
                         <Calendar className="h-3.5 w-3.5" />
                         {t("profile.book_session")}
@@ -556,6 +580,59 @@ export default function TherapistProfilePage() {
             </Card>
           </motion.div>
         )}
+
+        <motion.div
+          id="slots"
+          variants={sectionVariants}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-50px" }}
+        >
+          <Card data-testid="section-slots">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Calendar className="h-5 w-5 text-primary" />
+                {t("slots.available_title")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {slotsLoading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                </div>
+              ) : openSlots.length > 0 ? (
+                <div className="space-y-2">
+                  {openSlots.map((slot) => (
+                    <div
+                      key={slot.id}
+                      className="border rounded-md p-3 flex flex-wrap items-center justify-between gap-2"
+                    >
+                      <div>
+                        <p className="text-sm font-medium">
+                          {new Date(slot.startsAt).toLocaleDateString()}{" "}
+                          {new Date(slot.startsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {slot.durationMinutes} {t("common.minutes")} • {slot.priceDinar} {t("common.dinar")}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => bookSlotMutation.mutate(slot.id)}
+                        disabled={!user || bookSlotMutation.isPending}
+                      >
+                        {t("profile.book_session")}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">{t("slots.no_open_now")}</p>
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
 
         {profile.officePhotos && profile.officePhotos.length > 0 && (
           <motion.div
@@ -849,7 +926,7 @@ export default function TherapistProfilePage() {
               {t("profile.send_message")}
             </Button>
           </Link>
-          <Link href={`/appointments`} className="flex-1">
+          <Link href={`/therapist/${userId}#slots`} className="flex-1">
             <Button
               className="w-full gap-1.5"
               data-testid="button-cta-book"
@@ -873,7 +950,7 @@ export default function TherapistProfilePage() {
               {t("profile.send_message")}
             </Button>
           </Link>
-          <Link href={`/appointments`}>
+          <Link href={`/therapist/${userId}#slots`}>
             <Button
               className="gap-1.5 shadow-lg"
               data-testid="button-desktop-book"

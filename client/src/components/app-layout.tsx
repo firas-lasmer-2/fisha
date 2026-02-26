@@ -7,7 +7,7 @@ import { Link, useLocation } from "wouter";
 import {
   Heart, LayoutDashboard, Users, MessageCircle, Smile, BookOpen,
   Calendar, Library, LogOut, Menu, X, Wind, UserCircle, AlertTriangle,
-  HeartHandshake, ShieldCheck, CreditCard, UserPlus,
+  HeartHandshake, ShieldCheck, UserPlus,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -32,7 +32,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     { href: "/self-care", icon: Wind, label: t("nav.selfcare") },
     { href: "/resources", icon: Library, label: t("nav.resources") },
     { href: "/peer-support", icon: HeartHandshake, label: tr("nav.peer_support", "Peer Support") },
-    { href: "/pricing", icon: CreditCard, label: tr("nav.pricing", "Pricing") },
   ];
 
   const navItems = [

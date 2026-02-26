@@ -24,6 +24,8 @@ import {
   BarChart3,
   Users,
   ClipboardList,
+  Calendar,
+  Clock,
   Video,
   Palette,
   Link2,
@@ -31,7 +33,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { useState, useEffect } from "react";
-import type { TherapistProfile, TherapistReview } from "@shared/schema";
+import type { TherapistProfile, TherapistReview, TherapistSlot } from "@shared/schema";
 
 interface DashboardData {
   profile: TherapistProfile;
@@ -86,9 +88,17 @@ export default function TherapistDashboardPage() {
   const [respondingTo, setRespondingTo] = useState<number | null>(null);
   const [responseText, setResponseText] = useState("");
   const [formLoaded, setFormLoaded] = useState(false);
+  const [slotStartsAt, setSlotStartsAt] = useState("");
+  const [slotDurationMinutes, setSlotDurationMinutes] = useState(50);
+  const [slotPriceDinar, setSlotPriceDinar] = useState(20);
 
   const { data: dashboardData, isLoading } = useQuery<DashboardData>({
     queryKey: ["/api/therapist/dashboard"],
+  });
+
+  const { data: slots = [] } = useQuery<TherapistSlot[]>({
+    queryKey: ["/api/therapists", user?.id, "slots"],
+    enabled: !!user?.id,
   });
 
   useEffect(() => {
@@ -103,6 +113,7 @@ export default function TherapistDashboardPage() {
       setSlug(p.slug || "");
       setThemeColor(p.profileThemeColor || "");
       setAcceptingNewClients(p.acceptingNewClients ?? true);
+      setSlotPriceDinar(p.rateDinar || 20);
       setFormLoaded(true);
     }
   }, [dashboardData, formLoaded]);
@@ -156,6 +167,39 @@ export default function TherapistDashboardPage() {
     },
   });
 
+  const createSlotMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", "/api/therapist/slots", {
+        startsAt: slotStartsAt,
+        durationMinutes: slotDurationMinutes,
+        priceDinar: slotPriceDinar,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/therapists", user?.id, "slots"] });
+      setSlotStartsAt("");
+      setSlotDurationMinutes(50);
+      setSlotPriceDinar(profile?.rateDinar || 20);
+      toast({ title: t("slots.published_success") });
+    },
+    onError: () => {
+      toast({ title: t("common.error"), variant: "destructive" });
+    },
+  });
+
+  const cancelSlotMutation = useMutation({
+    mutationFn: async (slotId: number) => {
+      await apiRequest("DELETE", `/api/therapist/slots/${slotId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/therapists", user?.id, "slots"] });
+      toast({ title: t("slots.cancelled_success") });
+    },
+    onError: () => {
+      toast({ title: t("common.error"), variant: "destructive" });
+    },
+  });
+
   const addFaqItem = () => {
     setFaqItems([...faqItems, { question: "", answer: "" }]);
   };
@@ -173,6 +217,7 @@ export default function TherapistDashboardPage() {
   const profile = dashboardData?.profile;
   const reviews = dashboardData?.recentReviews || [];
   const totalSessions = dashboardData?.stats?.totalSessions || 0;
+  const openSlots = slots.filter((slot) => slot.status === "open");
 
   const profileUrl = profile?.userId
     ? `/therapist/${profile.userId}`
@@ -299,6 +344,17 @@ export default function TherapistDashboardPage() {
                   />
                 </div>
 
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline">
+                    {t("tier.label")}: {profile?.tier === "student" ? t("tier.student_therapist") : t("tier.professional_therapist")}
+                  </Badge>
+                  {profile?.tier === "student" && (
+                    <Badge variant="secondary">
+                      {t("tier.student_cap_20")}
+                    </Badge>
+                  )}
+                </div>
+
                 <Separator />
 
                 <div className="space-y-2">
@@ -409,7 +465,7 @@ export default function TherapistDashboardPage() {
                   </label>
                   <div className="grid sm:grid-cols-3 gap-3">
                     <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Facebook</label>
+                      <label className="text-xs text-muted-foreground">{t("social.facebook")}</label>
                       <Input
                         value={socialLinks.facebook || ""}
                         onChange={(e) => setSocialLinks({ ...socialLinks, facebook: e.target.value })}
@@ -418,7 +474,7 @@ export default function TherapistDashboardPage() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Instagram</label>
+                      <label className="text-xs text-muted-foreground">{t("social.instagram")}</label>
                       <Input
                         value={socialLinks.instagram || ""}
                         onChange={(e) => setSocialLinks({ ...socialLinks, instagram: e.target.value })}
@@ -427,7 +483,7 @@ export default function TherapistDashboardPage() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">LinkedIn</label>
+                      <label className="text-xs text-muted-foreground">{t("social.linkedin")}</label>
                       <Input
                         value={socialLinks.linkedin || ""}
                         onChange={(e) => setSocialLinks({ ...socialLinks, linkedin: e.target.value })}
@@ -499,6 +555,78 @@ export default function TherapistDashboardPage() {
                     onCheckedChange={setAcceptingNewClients}
                     data-testid="switch-accepting-clients"
                   />
+                </div>
+
+                <Separator />
+
+                <div className="space-y-3">
+                  <label className="text-sm font-medium">{t("slots.published_title")}</label>
+                  <div className="grid sm:grid-cols-3 gap-3">
+                    <Input
+                      type="datetime-local"
+                      value={slotStartsAt}
+                      onChange={(e) => setSlotStartsAt(e.target.value)}
+                    />
+                    <Input
+                      type="number"
+                      min={1}
+                      value={slotDurationMinutes}
+                      onChange={(e) => setSlotDurationMinutes(Number(e.target.value))}
+                    />
+                    <Input
+                      type="number"
+                      min={0}
+                      value={slotPriceDinar}
+                      onChange={(e) => setSlotPriceDinar(Number(e.target.value))}
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => createSlotMutation.mutate()}
+                    disabled={
+                      createSlotMutation.isPending
+                      || !slotStartsAt
+                      || slotDurationMinutes <= 0
+                      || slotPriceDinar < 0
+                    }
+                  >
+                    <Calendar className="h-4 w-4 me-2" />
+                    {t("slots.publish")}
+                  </Button>
+
+                  <div className="space-y-2">
+                    {openSlots.length > 0 ? (
+                      openSlots.map((slot) => (
+                        <div
+                          key={slot.id}
+                          className="border rounded-md p-3 flex items-center justify-between gap-2"
+                        >
+                          <div>
+                            <p className="text-sm font-medium">
+                              {new Date(slot.startsAt).toLocaleDateString()}{" "}
+                              {new Date(slot.startsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              <Clock className="h-3 w-3 inline me-1" />
+                              {slot.durationMinutes} {t("common.minutes")} • {slot.priceDinar} {t("common.dinar")}
+                            </p>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-destructive"
+                            onClick={() => cancelSlotMutation.mutate(slot.id)}
+                            disabled={cancelSlotMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4 me-1" />
+                            {t("slots.cancel")}
+                          </Button>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">{t("slots.none_published")}</p>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>

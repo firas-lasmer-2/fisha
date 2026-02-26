@@ -32,7 +32,7 @@ const scrollReveal = {
 };
 
 export default function LandingPage() {
-  const { t, isRTL, language } = useI18n();
+  const { t, isRTL } = useI18n();
   const { user, isLoading } = useAuth();
   const Arrow = isRTL ? ArrowLeft : ArrowRight;
 
@@ -353,27 +353,21 @@ export default function LandingPage() {
           <div className="grid md:grid-cols-3 gap-6">
             {[
               {
-                text: language === "fr"
-                  ? "Shifa m'a aidé à trouver un thérapeute qui comprend vraiment ma situation. Je me sens enfin écoutée."
-                  : "شفاء ساعدتني نلقى معالج يفهم حالتي. أخيراً حسيت بالراحة.",
-                name: language === "fr" ? "Amira, 28 ans" : "أميرة، 28 سنة",
-                location: language === "fr" ? "Tunis" : "تونس العاصمة",
+                text: t("landing.testimonial.1.text"),
+                name: t("landing.testimonial.1.name"),
+                location: t("landing.testimonial.1.location"),
                 rating: 5,
               },
               {
-                text: language === "fr"
-                  ? "Le suivi d'humeur m'a permis de mieux comprendre mes émotions. C'est un outil précieux."
-                  : "تتبع المزاج خلاني نفهم مشاعري أكثر. أداة قيمة برشا.",
-                name: language === "fr" ? "Youssef, 34 ans" : "يوسف، 34 سنة",
-                location: language === "fr" ? "Sfax" : "صفاقس",
+                text: t("landing.testimonial.2.text"),
+                name: t("landing.testimonial.2.name"),
+                location: t("landing.testimonial.2.location"),
                 rating: 5,
               },
               {
-                text: language === "fr"
-                  ? "Le mode anonyme me donne le courage de parler librement sans être jugée."
-                  : "الوضع المجهول عطاني الشجاعة باش نحكي بحرية بلا ما نتحكم عليا.",
-                name: language === "fr" ? "Fatma, 25 ans" : "فاطمة، 25 سنة",
-                location: language === "fr" ? "Sousse" : "سوسة",
+                text: t("landing.testimonial.3.text"),
+                name: t("landing.testimonial.3.name"),
+                location: t("landing.testimonial.3.location"),
                 rating: 5,
               },
             ].map((testimonial, i) => (

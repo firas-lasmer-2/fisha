@@ -170,7 +170,7 @@ export default function MessagesPage() {
           try {
             resolved[msg.id] = await decryptMessageContent(msg.content, conversationKey);
           } catch {
-            resolved[msg.id] = "[Unable to decrypt message]";
+            resolved[msg.id] = t("messages.unable_to_decrypt");
           }
         } else {
           resolved[msg.id] = msg.content;
@@ -196,7 +196,7 @@ export default function MessagesPage() {
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
       if (!selectedConv || !conversationKey) {
-        throw new Error("Encryption key unavailable");
+        throw new Error(t("messages.encryption_key_unavailable"));
       }
 
       const encryptedContent = await encryptMessageContent(content, conversationKey);
@@ -286,7 +286,7 @@ export default function MessagesPage() {
               {!conversationKey && (
                 <div className="p-3 border-b bg-amber-50 text-amber-800 text-xs flex items-center gap-2">
                   <ShieldAlert className="h-4 w-4 shrink-0" />
-                  <span>Waiting for encryption key exchange in this conversation.</span>
+                  <span>{t("messages.encryption_waiting")}</span>
                 </div>
               )}
 
@@ -363,4 +363,3 @@ export default function MessagesPage() {
     </AppLayout>
   );
 }
-

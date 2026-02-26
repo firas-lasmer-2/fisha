@@ -8,37 +8,15 @@ import { Progress } from "@/components/ui/progress";
 import { Wind, Hand, Sparkles, Timer, Play, Pause, RotateCcw, Check, ChevronRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-const affirmationsAr = [
-  "أنا أستحق الحب والاحترام",
-  "أنا قادر على التغلب على التحديات",
-  "كل يوم أصبح أفضل",
-  "أنا أتقبل نفسي كما أنا",
-  "لدي القوة لتحقيق أهدافي",
-  "أنا جدير بالسعادة",
-  "أفكاري لا تعرفني، أنا أختار مساري",
-  "أنا ممتن لكل ما لدي",
-];
-
-const affirmationsFr = [
-  "Je mérite l'amour et le respect",
-  "Je suis capable de surmonter les défis",
-  "Chaque jour, je deviens meilleur",
-  "Je m'accepte tel que je suis",
-  "J'ai la force d'atteindre mes objectifs",
-  "Je mérite le bonheur",
-  "Mes pensées ne me définissent pas",
-  "Je suis reconnaissant pour tout ce que j'ai",
-];
-
-const affirmationsDarija = [
-  "أنا نستاهل الحب والاحترام",
-  "أنا نقدر نتغلب على الصعوبات",
-  "كل نهار نولي أحسن",
-  "أنا نقبل روحي كيما أنا",
-  "عندي القوة باش نحقق أهدافي",
-  "أنا نستاهل السعادة",
-  "أفكاري ما تعرفنيش، أنا نختار طريقي",
-  "أنا شاكر على كل شي عندي",
+const affirmationKeys = [
+  "selfcare.affirmation_1",
+  "selfcare.affirmation_2",
+  "selfcare.affirmation_3",
+  "selfcare.affirmation_4",
+  "selfcare.affirmation_5",
+  "selfcare.affirmation_6",
+  "selfcare.affirmation_7",
+  "selfcare.affirmation_8",
 ];
 
 function BreathingExercise({ t }: { t: (key: string) => string }) {
@@ -264,10 +242,9 @@ function GroundingExercise({ t }: { t: (key: string) => string }) {
   );
 }
 
-function AffirmationsCard({ t, language }: { t: (key: string) => string; language: string }) {
+function AffirmationsCard({ t }: { t: (key: string) => string }) {
   const [index, setIndex] = useState(0);
-
-  const affirmations = language === "fr" ? affirmationsFr : language === "darija" ? affirmationsDarija : affirmationsAr;
+  const affirmations = affirmationKeys.map((key) => t(key));
 
   const nextAffirmation = useCallback(() => {
     setIndex((prev) => (prev + 1) % affirmations.length);
@@ -447,7 +424,7 @@ function MeditationTimer({ t }: { t: (key: string) => string }) {
 }
 
 export default function SelfCarePage() {
-  const { t, language } = useI18n();
+  const { t } = useI18n();
 
   return (
     <AppLayout>
@@ -487,7 +464,7 @@ export default function SelfCarePage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
           >
-            <AffirmationsCard t={t} language={language} />
+            <AffirmationsCard t={t} />
           </motion.div>
 
           <motion.div

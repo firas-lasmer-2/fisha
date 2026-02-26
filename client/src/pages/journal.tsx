@@ -13,7 +13,7 @@ import { useState } from "react";
 import type { JournalEntry } from "@shared/schema";
 
 export default function JournalPage() {
-  const { t, isRTL } = useI18n();
+  const { t } = useI18n();
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -44,21 +44,13 @@ export default function JournalPage() {
     },
   });
 
-  const prompts = isRTL
-    ? [
-        "ما الذي أنا ممتن له اليوم؟",
-        "كيف أشعر في هذه اللحظة ولماذا؟",
-        "ما هو الشيء الذي تعلمته اليوم عن نفسي؟",
-        "ما الذي يقلقني الآن وكيف يمكنني التعامل معه؟",
-        "اكتب رسالة لنفسك في المستقبل",
-      ]
-    : [
-        "What am I grateful for today?",
-        "How am I feeling right now and why?",
-        "What is something I learned about myself today?",
-        "What is worrying me right now and how can I cope?",
-        "Write a letter to your future self",
-      ];
+  const prompts = [
+    t("journal.prompt_1"),
+    t("journal.prompt_2"),
+    t("journal.prompt_3"),
+    t("journal.prompt_4"),
+    t("journal.prompt_5"),
+  ];
 
   return (
     <AppLayout>
