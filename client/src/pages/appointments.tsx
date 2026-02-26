@@ -8,17 +8,33 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
-import { Calendar, Clock, CheckCircle, XCircle, AlertCircle, Loader2, CreditCard, Receipt } from "lucide-react";
-import { useEffect } from "react";
+import { Calendar, Clock, CheckCircle, XCircle, AlertCircle, Loader2, CreditCard, Video } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import type { Appointment, User, PaymentTransaction } from "@shared/schema";
+
+function isNearSessionTime(scheduledAt: string): boolean {
+  const sessionTime = new Date(scheduledAt).getTime();
+  const now = Date.now();
+  const fifteenMin = 15 * 60_000;
+  const thirtyMin = 30 * 60_000;
+  // Show button from 15 min before until 30 min after start
+  return now >= sessionTime - fifteenMin && now <= sessionTime + thirtyMin;
+}
 
 export default function AppointmentsPage() {
   const { t } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
   const [location] = useLocation();
+  const [now, setNow] = useState(() => Date.now());
+
+  // Tick every minute to re-evaluate "Join Meeting" eligibility
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const { data: appointments, isLoading } = useQuery<(Appointment & { otherUser: User })[]>({
     queryKey: ["/api/appointments"],
@@ -115,6 +131,7 @@ export default function AppointmentsPage() {
               const status = statusConfig[apt.status] || statusConfig.pending;
               const StatusIcon = status.icon;
               const aptPayment = payments.find((p) => p.appointmentId === apt.id);
+              const showJoinBtn = Boolean(apt.meetLink) && isNearSessionTime(apt.scheduledAt);
               return (
                 <Card key={apt.id} data-testid={`appointment-card-${apt.id}`}>
                   <CardContent className="p-5">
@@ -155,6 +172,33 @@ export default function AppointmentsPage() {
                             <span className="font-medium text-primary">{apt.priceDinar} {t("common.dinar")}</span>
                           )}
                         </div>
+                        {/* Join Meeting button */}
+                        {showJoinBtn && (
+                          <div className="mt-3">
+                            <a href={apt.meetLink!} target="_blank" rel="noopener noreferrer">
+                              <Button size="sm" className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white">
+                                <Video className="h-3.5 w-3.5" />
+                                {t("google.join_meeting")}
+                              </Button>
+                            </a>
+                          </div>
+                        )}
+
+                        {/* Show meet link passively even outside window */}
+                        {apt.meetLink && !showJoinBtn && (apt.status === "confirmed" || apt.status === "pending") && (
+                          <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Video className="h-3.5 w-3.5 shrink-0" />
+                            <a
+                              href={apt.meetLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="truncate underline underline-offset-2 hover:text-primary"
+                            >
+                              Google Meet
+                            </a>
+                          </div>
+                        )}
+
                         {apt.status === "pending" && (
                           <div className="flex gap-2 mt-3">
                             <Button

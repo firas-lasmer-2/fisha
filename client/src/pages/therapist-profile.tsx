@@ -373,7 +373,7 @@ export default function TherapistProfilePage() {
                       </Badge>
                     )}
                     <Badge variant="outline">
-                      {profile.tier === "student" ? t("tier.student_therapist") : t("tier.professional_therapist")}
+                      {profile.tier === "graduated_doctor" ? t("tier.graduated_doctor_therapist") : t("tier.premium_doctor_therapist")}
                     </Badge>
                   </div>
 
@@ -1292,6 +1292,7 @@ export default function TherapistProfilePage() {
             ? [profile.user?.firstName, profile.user?.lastName].filter(Boolean).join(" ") || "Therapist"
             : "Therapist"
         }
+        therapistTier={profile?.tier}
         isPending={confirmBookingMutation.isPending}
         onConfirm={async (method) => {
           const result = await confirmBookingMutation.mutateAsync(method);

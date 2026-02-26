@@ -12,7 +12,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
-import { Calendar, Clock, CreditCard, Loader2 } from "lucide-react";
+import { Calendar, Clock, CreditCard, Loader2, GraduationCap } from "lucide-react";
 
 export interface PaymentDialogSlot {
   id: number;
@@ -26,6 +26,7 @@ interface PaymentDialogProps {
   onClose: () => void;
   slot: PaymentDialogSlot | null;
   therapistName: string;
+  therapistTier?: "graduated_doctor" | "premium_doctor";
   onConfirm: (paymentMethod: "flouci" | "konnect") => Promise<void>;
   isPending?: boolean;
 }
@@ -35,6 +36,7 @@ export function PaymentDialog({
   onClose,
   slot,
   therapistName,
+  therapistTier,
   onConfirm,
   isPending,
 }: PaymentDialogProps) {
@@ -86,13 +88,21 @@ export function PaymentDialog({
             <Separator />
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">Total</span>
-              <span className="text-lg font-bold">
-                {isFree ? (
-                  <Badge variant="secondary">Free</Badge>
-                ) : (
-                  `${slot.priceDinar} د.ت`
+              <div className="flex items-center gap-2">
+                {therapistTier === "graduated_doctor" && !isFree && (
+                  <Badge variant="outline" className="text-xs gap-1 text-blue-600 border-blue-300">
+                    <GraduationCap className="h-3 w-3" />
+                    Cap 20 TND
+                  </Badge>
                 )}
-              </span>
+                <span className="text-lg font-bold">
+                  {isFree ? (
+                    <Badge variant="secondary">Free</Badge>
+                  ) : (
+                    `${slot.priceDinar} د.ت`
+                  )}
+                </span>
+              </div>
             </div>
           </div>
 

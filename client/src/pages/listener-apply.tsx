@@ -10,7 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "wouter";
-import type { ListenerApplication, ListenerProfile } from "@shared/schema";
+import { ClipboardList, CheckCircle, Lock } from "lucide-react";
+import type { ListenerApplication, ListenerProfile, ListenerQualificationTest } from "@shared/schema";
 
 interface ListenerApplicationPayload {
   application: ListenerApplication | null;
@@ -31,6 +32,12 @@ export default function ListenerApplyPage() {
   const { data, isLoading } = useQuery<ListenerApplicationPayload>({
     queryKey: ["/api/listener/application"],
   });
+
+  const { data: qualTest } = useQuery<ListenerQualificationTest | null>({
+    queryKey: ["/api/listener/qualification-test"],
+  });
+
+  const testPassed = qualTest?.passed === true;
 
   useEffect(() => {
     if (!data?.profile) return;
@@ -89,6 +96,37 @@ export default function ListenerApplyPage() {
           </CardContent>
         </Card>
 
+        {/* Qualification test gate */}
+        <Card>
+          <CardContent className="p-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              {testPassed ? (
+                <CheckCircle className="h-5 w-5 text-emerald-500 shrink-0" />
+              ) : (
+                <Lock className="h-5 w-5 text-muted-foreground shrink-0" />
+              )}
+              <div>
+                <p className="text-sm font-medium">{t("listener.test_title")}</p>
+                {testPassed ? (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                    {t("listener.test_passed")} — {qualTest?.score}%
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">{t("listener.test_required_gate")}</p>
+                )}
+              </div>
+            </div>
+            {!testPassed && (
+              <Link href="/listener/test">
+                <Button size="sm" className="shrink-0">
+                  <ClipboardList className="h-4 w-4 mr-1" />
+                  {t("listener.test_take_test")}
+                </Button>
+              </Link>
+            )}
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">{t("listener.apply_form")}</CardTitle>
@@ -96,6 +134,16 @@ export default function ListenerApplyPage() {
           <CardContent className="space-y-3">
             {isLoading ? (
               <p className="text-sm text-muted-foreground">{t("listener.loading")}</p>
+            ) : !testPassed ? (
+              <div className="text-sm text-muted-foreground text-center py-4 space-y-3">
+                <Lock className="h-8 w-8 mx-auto text-muted-foreground/50" />
+                <p>{t("listener.test_required_gate")}</p>
+                <Link href="/listener/test">
+                  <Button variant="outline" size="sm">
+                    {t("listener.test_take_test")}
+                  </Button>
+                </Link>
+              </div>
             ) : (
               <>
                 <Input

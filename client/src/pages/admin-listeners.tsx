@@ -8,12 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ClipboardCheck, ShieldAlert, UserRoundCog } from "lucide-react";
-import type { ListenerApplication, PeerReport, TherapistProfile, User } from "@shared/schema";
+import type { ListenerApplication, ListenerQualificationTest, PeerReport, TherapistProfile, User } from "@shared/schema";
 
 interface AdminListenersPayload {
   applications: ListenerApplication[];
   reports: PeerReport[];
   riskSnapshots: ListenerRiskSnapshot[];
+  qualificationTests: Record<string, ListenerQualificationTest>;
 }
 
 type TherapistRow = TherapistProfile & { user: User };
@@ -87,7 +88,7 @@ export default function AdminListenersPage() {
       tier,
     }: {
       therapistId: string;
-      tier: "student" | "professional";
+      tier: "graduated_doctor" | "premium_doctor";
     }) => {
       await apiRequest("PATCH", `/api/admin/therapists/${therapistId}/tier`, { tier });
     },
@@ -103,6 +104,7 @@ export default function AdminListenersPage() {
   const applications = data?.applications || [];
   const reports = data?.reports || [];
   const riskSnapshots = data?.riskSnapshots || [];
+  const qualificationTests = data?.qualificationTests || {};
   const riskByListenerId = new Map(riskSnapshots.map((risk) => [risk.listenerId, risk]));
   const highRiskCount = riskSnapshots.filter((risk) => risk.riskLevel === "high").length;
   const openApplications = applications.filter((application) =>
@@ -185,6 +187,8 @@ export default function AdminListenersPage() {
                         ? "secondary"
                         : "outline";
 
+                    const qualTest = qualificationTests[application.userId];
+
                     return (
                       <div key={application.id} className="border rounded-md p-3 space-y-2">
                         <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -199,7 +203,15 @@ export default function AdminListenersPage() {
                               </p>
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {qualTest ? (
+                              <Badge variant={qualTest.passed ? "default" : "destructive"}>
+                                {t("admin.qual_test_score")}: {qualTest.score}%
+                                {qualTest.passed ? ` ✓` : ""}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline">{t("admin.qual_test_not_taken")}</Badge>
+                            )}
                             {risk && (
                               <Badge variant={riskVariant}>
                                 {tr("admin.risk", "Risk")}: {risk.riskLevel} ({risk.riskScore})
@@ -366,7 +378,7 @@ export default function AdminListenersPage() {
                           </p>
                         </div>
                         <Badge variant="outline">
-                          {therapist.tier === "student" ? t("tier.student") : t("tier.professional")}
+                          {therapist.tier === "graduated_doctor" ? t("tier.graduated_doctor") : t("tier.premium_doctor")}
                         </Badge>
                       </div>
                       <div className="flex gap-2">
@@ -374,21 +386,21 @@ export default function AdminListenersPage() {
                           size="sm"
                           variant="outline"
                           onClick={() =>
-                            tierMutation.mutate({ therapistId: therapist.userId, tier: "student" })
+                            tierMutation.mutate({ therapistId: therapist.userId, tier: "graduated_doctor" })
                           }
                           disabled={tierMutation.isPending}
                         >
-                          {t("admin.set_student")}
+                          {t("admin.set_graduated_doctor")}
                         </Button>
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() =>
-                            tierMutation.mutate({ therapistId: therapist.userId, tier: "professional" })
+                            tierMutation.mutate({ therapistId: therapist.userId, tier: "premium_doctor" })
                           }
                           disabled={tierMutation.isPending}
                         >
-                          {t("admin.set_professional")}
+                          {t("admin.set_premium_doctor")}
                         </Button>
                       </div>
                     </div>

@@ -27,6 +27,11 @@ import {
   type AuditLog,
   type TreatmentGoal, type InsertTreatmentGoal, type UpdateTreatmentGoal,
   type SessionSummary, type UpsertSessionSummary,
+  type ListenerQualificationTest,
+  type TherapistGoogleToken,
+  type DoctorPayout,
+  mapTherapistGoogleToken,
+  mapDoctorPayout,
   mapProfile, mapTherapistProfile, mapTherapistReview,
   mapConversation, mapMessage, mapAppointment, mapTherapistSlot,
   mapMoodEntry, mapJournalEntry, mapResource,
@@ -35,6 +40,7 @@ import {
   mapListenerApplication, mapListenerQueueEntry,
   mapPeerSession, mapPeerMessage, mapPeerSessionFeedback, mapPeerReport,
   mapTherapistVerification, mapAuditLog, mapTreatmentGoal, mapSessionSummary,
+  mapListenerQualificationTest,
   toSnakeCase,
 } from "@shared/schema";
 
@@ -148,6 +154,22 @@ export interface IStorage {
     reviewerId: string,
   ): Promise<TherapistProfile | undefined>;
 
+  // Google OAuth tokens (raw values — server-internal only)
+  upsertGoogleTokens(
+    therapistId: string,
+    accessTokenEncrypted: string,
+    refreshTokenEncrypted: string,
+    expiresAt: Date,
+  ): Promise<void>;
+  getGoogleTokensRaw(therapistId: string): Promise<{
+    accessTokenEncrypted: string;
+    refreshTokenEncrypted: string;
+    expiresAt: string | null;
+  } | undefined>;
+  updateGoogleAccessToken(therapistId: string, accessTokenEncrypted: string, expiresAt: Date): Promise<void>;
+  deleteGoogleTokens(therapistId: string): Promise<void>;
+  getGoogleTokenMeta(therapistId: string): Promise<TherapistGoogleToken | undefined>;
+
   getConversation(id: number): Promise<TherapyConversation | undefined>;
   getConversationsByUser(userId: string): Promise<(TherapyConversation & { otherUser: User })[]>;
   createConversation(conv: InsertTherapyConversation): Promise<TherapyConversation>;
@@ -244,6 +266,15 @@ export interface IStorage {
     moderatorId: string,
   ): Promise<ListenerProgress>;
 
+  upsertListenerQualificationTest(
+    userId: string,
+    score: number,
+    passed: boolean,
+    answers: Record<string, string>,
+  ): Promise<ListenerQualificationTest>;
+  getListenerQualificationTest(userId: string): Promise<ListenerQualificationTest | undefined>;
+  listAllQualificationTests(): Promise<ListenerQualificationTest[]>;
+
   submitListenerApplication(data: InsertListenerApplication): Promise<ListenerApplication>;
   getListenerApplicationByUser(userId: string): Promise<ListenerApplication | undefined>;
   listListenerApplications(status?: string): Promise<ListenerApplication[]>;
@@ -319,6 +350,20 @@ export interface IStorage {
   // Admin user management (Phase 3.1)
   getUsersPaginated(page: number, limit: number, search?: string): Promise<{ users: User[]; total: number }>;
   getRevenueAnalytics(days: number): Promise<{ date: string; amount: number }[]>;
+
+  // Doctor payouts (Phase 4)
+  getDoctorPayouts(doctorId: string): Promise<DoctorPayout[]>;
+  getAllDoctorPayouts(): Promise<(DoctorPayout & { doctorName?: string })[]>;
+  createDoctorPayout(data: {
+    doctorId: string;
+    periodStart: string;
+    periodEnd: string;
+    totalSessions: number;
+    totalAmountDinar: number;
+    platformFeeDinar: number;
+    netAmountDinar: number;
+  }): Promise<DoctorPayout>;
+  updateDoctorPayoutStatus(id: number, status: "pending" | "processing" | "paid" | "failed"): Promise<DoctorPayout | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -2180,6 +2225,187 @@ export class DatabaseStorage implements IStorage {
       byDay[date] = (byDay[date] ?? 0) + (row.amount_dinar as number);
     }
     return Object.entries(byDay).map(([date, amount]) => ({ date, amount }));
+  }
+
+  // ---- Google OAuth Tokens ----
+
+  async upsertGoogleTokens(
+    therapistId: string,
+    accessTokenEncrypted: string,
+    refreshTokenEncrypted: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    const { error } = await supabase
+      .from("therapist_google_tokens")
+      .upsert(
+        {
+          therapist_id: therapistId,
+          access_token_encrypted: accessTokenEncrypted,
+          refresh_token_encrypted: refreshTokenEncrypted,
+          expires_at: expiresAt.toISOString(),
+          connected_at: new Date().toISOString(),
+        },
+        { onConflict: "therapist_id" },
+      );
+    if (error) throw error;
+  }
+
+  async getGoogleTokensRaw(therapistId: string): Promise<{
+    accessTokenEncrypted: string;
+    refreshTokenEncrypted: string;
+    expiresAt: string | null;
+  } | undefined> {
+    const { data, error } = await supabase
+      .from("therapist_google_tokens")
+      .select("access_token_encrypted, refresh_token_encrypted, expires_at")
+      .eq("therapist_id", therapistId)
+      .single();
+    if (error || !data) return undefined;
+    return {
+      accessTokenEncrypted: data.access_token_encrypted,
+      refreshTokenEncrypted: data.refresh_token_encrypted,
+      expiresAt: data.expires_at ?? null,
+    };
+  }
+
+  async updateGoogleAccessToken(therapistId: string, accessTokenEncrypted: string, expiresAt: Date): Promise<void> {
+    const { error } = await supabase
+      .from("therapist_google_tokens")
+      .update({
+        access_token_encrypted: accessTokenEncrypted,
+        expires_at: expiresAt.toISOString(),
+      })
+      .eq("therapist_id", therapistId);
+    if (error) throw error;
+  }
+
+  async deleteGoogleTokens(therapistId: string): Promise<void> {
+    const { error } = await supabase
+      .from("therapist_google_tokens")
+      .delete()
+      .eq("therapist_id", therapistId);
+    if (error) throw error;
+  }
+
+  async getGoogleTokenMeta(therapistId: string): Promise<TherapistGoogleToken | undefined> {
+    const { data, error } = await supabase
+      .from("therapist_google_tokens")
+      .select("therapist_id, expires_at, connected_at")
+      .eq("therapist_id", therapistId)
+      .single();
+    if (error || !data) return undefined;
+    return mapTherapistGoogleToken(data);
+  }
+
+  // ---- Listener Qualification Tests ----
+
+  async upsertListenerQualificationTest(
+    userId: string,
+    score: number,
+    passed: boolean,
+    answers: Record<string, string>,
+  ): Promise<ListenerQualificationTest> {
+    const { data, error } = await supabase
+      .from("listener_qualification_tests")
+      .upsert(
+        {
+          user_id: userId,
+          score,
+          passed,
+          answers,
+          attempted_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" },
+      )
+      .select("*")
+      .single();
+    if (error) throw error;
+    return mapListenerQualificationTest(data);
+  }
+
+  async getListenerQualificationTest(userId: string): Promise<ListenerQualificationTest | undefined> {
+    const { data, error } = await supabase
+      .from("listener_qualification_tests")
+      .select("*")
+      .eq("user_id", userId)
+      .single();
+    if (error || !data) return undefined;
+    return mapListenerQualificationTest(data);
+  }
+
+  async listAllQualificationTests(): Promise<ListenerQualificationTest[]> {
+    const { data, error } = await supabase
+      .from("listener_qualification_tests")
+      .select("*")
+      .order("attempted_at", { ascending: false });
+    if (error || !data) return [];
+    return data.map(mapListenerQualificationTest);
+  }
+
+  // ---- Doctor Payouts ----
+
+  async getDoctorPayouts(doctorId: string): Promise<DoctorPayout[]> {
+    const { data, error } = await supabase
+      .from("doctor_payouts")
+      .select("*")
+      .eq("doctor_id", doctorId)
+      .order("period_start", { ascending: false });
+    if (error || !data) return [];
+    return data.map(mapDoctorPayout);
+  }
+
+  async getAllDoctorPayouts(): Promise<(DoctorPayout & { doctorName?: string })[]> {
+    const { data, error } = await supabase
+      .from("doctor_payouts")
+      .select("*, profiles(first_name, last_name)")
+      .order("created_at", { ascending: false });
+    if (error || !data) return [];
+    return data.map((row: any) => ({
+      ...mapDoctorPayout(row),
+      doctorName: row.profiles
+        ? `${row.profiles.first_name ?? ""} ${row.profiles.last_name ?? ""}`.trim()
+        : undefined,
+    }));
+  }
+
+  async createDoctorPayout(data: {
+    doctorId: string;
+    periodStart: string;
+    periodEnd: string;
+    totalSessions: number;
+    totalAmountDinar: number;
+    platformFeeDinar: number;
+    netAmountDinar: number;
+  }): Promise<DoctorPayout> {
+    const { data: row, error } = await supabase
+      .from("doctor_payouts")
+      .insert({
+        doctor_id: data.doctorId,
+        period_start: data.periodStart,
+        period_end: data.periodEnd,
+        total_sessions: data.totalSessions,
+        total_amount_dinar: data.totalAmountDinar,
+        platform_fee_dinar: data.platformFeeDinar,
+        net_amount_dinar: data.netAmountDinar,
+        status: "pending",
+      })
+      .select("*")
+      .single();
+    if (error) throw error;
+    return mapDoctorPayout(row);
+  }
+
+  async updateDoctorPayoutStatus(id: number, status: "pending" | "processing" | "paid" | "failed"): Promise<DoctorPayout | undefined> {
+    const updateData: Record<string, any> = { status };
+    if (status === "paid") updateData.paid_at = new Date().toISOString();
+    const { data, error } = await supabase
+      .from("doctor_payouts")
+      .update(updateData)
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error || !data) return undefined;
+    return mapDoctorPayout(data);
   }
 
 }

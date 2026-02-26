@@ -18,6 +18,7 @@ import { Link } from "wouter";
 import { SlotCalendar } from "@/components/slot-calendar";
 import { FileUpload } from "@/components/file-upload";
 import { LandingPageBuilder } from "@/components/landing-page-builder";
+import { GoogleConnect } from "@/components/google-connect";
 import {
   Star,
   Save,
@@ -44,9 +45,10 @@ import {
   Upload,
   UserCircle,
   GraduationCap,
+  DollarSign,
 } from "lucide-react";
 import { useState, useEffect } from "react";
-import type { TherapistProfile, TherapistReview, TherapistSlot, TherapistVerification, Appointment, User } from "@shared/schema";
+import type { TherapistProfile, TherapistReview, TherapistSlot, TherapistVerification, Appointment, User, DoctorPayout } from "@shared/schema";
 
 interface DashboardData {
   profile: TherapistProfile;
@@ -99,6 +101,10 @@ export default function TherapistDashboardPage() {
   const [landingCtaUrl, setLandingCtaUrl] = useState("");
   const [landingFormLoaded, setLandingFormLoaded] = useState(false);
   const [landingSections, setLandingSections] = useState<import("@shared/schema").LandingSection[]>([]);
+  const [themeColor, setThemeColor] = useState("#6366f1");
+  const [themeFont, setThemeFont] = useState("Inter");
+  const [customBannerUrl, setCustomBannerUrl] = useState("");
+  const [consultationIntro, setConsultationIntro] = useState("");
   const [verificationDocUrl, setVerificationDocUrl] = useState("");
   const [verificationDocType, setVerificationDocType] = useState<"license" | "diploma" | "id_card" | "cv">("license");
 
@@ -117,6 +123,11 @@ export default function TherapistDashboardPage() {
 
   const { data: appointments = [] } = useQuery<(Appointment & { otherUser: User })[]>({
     queryKey: ["/api/appointments"],
+    enabled: !!user?.id,
+  });
+
+  const { data: payouts = [] } = useQuery<DoctorPayout[]>({
+    queryKey: ["/api/doctor/payouts"],
     enabled: !!user?.id,
   });
 
@@ -168,6 +179,10 @@ export default function TherapistDashboardPage() {
       setLandingEnabled(p.landingPageEnabled ?? false);
       setLandingCtaText(p.landingPageCtaText || "");
       setLandingCtaUrl(p.landingPageCtaUrl || "");
+      setThemeColor(p.profileThemeColor || "#6366f1");
+      setThemeFont((p.customCss as any)?.font || "Inter");
+      setCustomBannerUrl(p.customBannerUrl || "");
+      setConsultationIntro(p.consultationIntro || "");
       const secs = Array.isArray(p.landingPageSections) && p.landingPageSections.length > 0
         ? p.landingPageSections
         : [
@@ -454,6 +469,10 @@ export default function TherapistDashboardPage() {
               <Users className="h-4 w-4 me-1.5" />
               {tr("therapist_dash.clients_tab", "Clients")}
             </TabsTrigger>
+            <TabsTrigger value="earnings" data-testid="tab-earnings">
+              <DollarSign className="h-4 w-4 me-1.5" />
+              {tr("therapist_dash.earnings_tab", "Earnings")}
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="profile" className="space-y-4">
@@ -487,13 +506,34 @@ export default function TherapistDashboardPage() {
 
                 <div className="flex flex-wrap gap-2">
                   <Badge variant="outline">
-                    {t("tier.label")}: {profile?.tier === "student" ? t("tier.student_therapist") : t("tier.professional_therapist")}
+                    {t("tier.label")}: {profile?.tier === "graduated_doctor" ? t("tier.graduated_doctor_therapist") : t("tier.premium_doctor_therapist")}
                   </Badge>
-                  {profile?.tier === "student" && (
-                    <Badge variant="secondary">
-                      {t("tier.student_cap_20")}
+                  {profile?.badgeType === "verified" && (
+                    <Badge className="gap-1 bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300/50">
+                      {t("tier.badge_verified")}
                     </Badge>
                   )}
+                  {profile?.badgeType === "premium" && (
+                    <Badge className="gap-1 bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300/50">
+                      {t("tier.badge_premium")}
+                    </Badge>
+                  )}
+                  {profile?.tier === "graduated_doctor" && (
+                    <Badge variant="secondary">
+                      {t("tier.graduated_doctor_cap_20")}
+                    </Badge>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* Google Meet Integration */}
+                <div className="space-y-2">
+                  <p className="text-sm font-medium flex items-center gap-2">
+                    <Video className="h-4 w-4 text-primary" />
+                    {t("google.connect_title")}
+                  </p>
+                  <GoogleConnect />
                 </div>
 
                 <Separator />
@@ -1204,6 +1244,69 @@ export default function TherapistDashboardPage() {
                       </div>
                     );
                   })
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Earnings Tab */}
+          <TabsContent value="earnings" className="space-y-4">
+            <Card>
+              <CardHeader className="pb-4">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <DollarSign className="h-5 w-5" />
+                  {tr("therapist_dash.earnings_tab", "Earnings")}
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  {tr("therapist_dash.earnings_desc", "Your payout history from completed sessions.")}
+                </p>
+              </CardHeader>
+              <CardContent>
+                {payouts.length === 0 ? (
+                  <div className="text-center py-10 text-muted-foreground">
+                    <DollarSign className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">{tr("therapist_dash.no_payouts", "No payouts yet. Completed sessions will appear here.")}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {payouts.map((payout) => (
+                      <div key={payout.id} className="rounded-lg border p-4 space-y-2">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div>
+                            <p className="text-sm font-medium">
+                              {new Date(payout.periodStart).toLocaleDateString()} — {new Date(payout.periodEnd).toLocaleDateString()}
+                            </p>
+                            <p className="text-xs text-muted-foreground">{payout.totalSessions} sessions</p>
+                          </div>
+                          <Badge
+                            variant={payout.status === "paid" ? "default" : payout.status === "failed" ? "destructive" : "secondary"}
+                            className="capitalize"
+                          >
+                            {payout.status}
+                          </Badge>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-sm">
+                          <div>
+                            <p className="text-xs text-muted-foreground">{tr("payout.gross", "Gross")}</p>
+                            <p className="font-medium">{payout.totalAmountDinar} د.ت</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground">{tr("payout.fee", "Platform fee")}</p>
+                            <p className="font-medium text-red-500">-{payout.platformFeeDinar} د.ت</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground">{tr("payout.net", "Net payout")}</p>
+                            <p className="font-semibold text-emerald-600">{payout.netAmountDinar} د.ت</p>
+                          </div>
+                        </div>
+                        {payout.paidAt && (
+                          <p className="text-xs text-muted-foreground">
+                            {tr("payout.paid_on", "Paid on")} {new Date(payout.paidAt).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 )}
               </CardContent>
             </Card>

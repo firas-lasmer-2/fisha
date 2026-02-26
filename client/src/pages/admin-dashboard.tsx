@@ -25,6 +25,8 @@ import {
   Search,
   Flag,
   Activity,
+  DollarSign,
+  GraduationCap,
 } from "lucide-react";
 import {
   LineChart,
@@ -35,7 +37,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import type { TherapistVerification, AuditLog } from "@shared/schema";
+import type { TherapistVerification, AuditLog, DoctorPayout } from "@shared/schema";
 
 interface AdminAnalytics {
   totalUsers: number;
@@ -132,6 +134,28 @@ export default function AdminDashboardPage() {
       return res.json();
     },
     enabled: user?.role === "admin",
+  });
+
+  const { data: allPayouts = [], isLoading: payoutsLoading } = useQuery<(DoctorPayout & { doctorName?: string })[]>({
+    queryKey: ["/api/admin/doctor-payouts"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/admin/doctor-payouts");
+      return res.json();
+    },
+    enabled: user?.role === "admin",
+  });
+
+  const updatePayoutMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: number; status: string }) => {
+      await apiRequest("PATCH", `/api/admin/doctor-payouts/${id}`, { status });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/doctor-payouts"] });
+      toast({ title: "Payout status updated" });
+    },
+    onError: () => {
+      toast({ title: t("common.error"), variant: "destructive" });
+    },
   });
 
   const reviewMutation = useMutation({
@@ -239,6 +263,10 @@ export default function AdminDashboardPage() {
                 <TabsTrigger value="revenue">
                   <BarChart3 className="h-4 w-4 me-1.5" />
                   Revenue
+                </TabsTrigger>
+                <TabsTrigger value="payouts">
+                  <DollarSign className="h-4 w-4 me-1.5" />
+                  Payouts
                 </TabsTrigger>
               </>
             )}
@@ -425,8 +453,9 @@ export default function AdminDashboardPage() {
             </TabsContent>
           )}
 
-          {/* Revenue Tab (admin only) */}
+          {/* Revenue + Payouts Tabs (admin only) */}
           {user?.role === "admin" && (
+            <>
             <TabsContent value="revenue" className="mt-4">
               <Card>
                 <CardHeader>
@@ -464,6 +493,73 @@ export default function AdminDashboardPage() {
                 </CardContent>
               </Card>
             </TabsContent>
+
+            {/* Payouts Tab */}
+            <TabsContent value="payouts" className="space-y-4 mt-4">
+              {payoutsLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : allPayouts.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground">
+                  No payouts generated yet.
+                </div>
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-3 font-medium">Doctor</th>
+                        <th className="text-left p-3 font-medium">Period</th>
+                        <th className="text-left p-3 font-medium">Sessions</th>
+                        <th className="text-left p-3 font-medium">Gross</th>
+                        <th className="text-left p-3 font-medium">Fee</th>
+                        <th className="text-left p-3 font-medium">Net</th>
+                        <th className="text-left p-3 font-medium">Status</th>
+                        <th className="text-left p-3 font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allPayouts.map((payout) => (
+                        <tr key={payout.id} className="border-t">
+                          <td className="p-3">
+                            <p className="font-medium">{payout.doctorName || `Doctor ${payout.doctorId.slice(0, 8)}`}</p>
+                          </td>
+                          <td className="p-3 text-muted-foreground text-xs">
+                            {new Date(payout.periodStart).toLocaleDateString()} — {new Date(payout.periodEnd).toLocaleDateString()}
+                          </td>
+                          <td className="p-3">{payout.totalSessions}</td>
+                          <td className="p-3">{payout.totalAmountDinar} د.ت</td>
+                          <td className="p-3 text-red-500">-{payout.platformFeeDinar} د.ت</td>
+                          <td className="p-3 font-semibold text-emerald-600">{payout.netAmountDinar} د.ت</td>
+                          <td className="p-3">
+                            <Badge
+                              variant={payout.status === "paid" ? "default" : payout.status === "failed" ? "destructive" : "secondary"}
+                              className="capitalize"
+                            >
+                              {payout.status}
+                            </Badge>
+                          </td>
+                          <td className="p-3">
+                            {payout.status !== "paid" && (
+                              <select
+                                className="text-xs border rounded px-1 py-0.5 bg-background"
+                                value={payout.status}
+                                onChange={(e) => updatePayoutMutation.mutate({ id: payout.id, status: e.target.value })}
+                                disabled={updatePayoutMutation.isPending}
+                              >
+                                {["pending", "processing", "paid", "failed"].map((s) => (
+                                  <option key={s} value={s}>{s}</option>
+                                ))}
+                              </select>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </TabsContent>
+            </>
           )}
 
           {/* Moderation Tab */}

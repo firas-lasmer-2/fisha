@@ -26,6 +26,12 @@ const SECTION_LABELS: Record<string, string> = {
   office_photos: "Office Photos",
   social_links: "Social Links",
   custom_text: "Custom Text Block",
+  banner: "Custom Banner Image",
+  gallery: "Photo Gallery",
+  certifications: "Certifications & Education",
+  pricing: "Pricing Table",
+  contact_form: "Contact / Inquiry Form",
+  consultation_intro: "Before Your Session",
 };
 
 const SECTION_ICONS: Record<string, string> = {
@@ -39,7 +45,24 @@ const SECTION_ICONS: Record<string, string> = {
   office_photos: "🖼️",
   social_links: "🔗",
   custom_text: "📝",
+  banner: "🖼",
+  gallery: "🗃️",
+  certifications: "🎓",
+  pricing: "💰",
+  contact_form: "✉️",
+  consultation_intro: "💬",
 };
+
+// Section types that can be added (not always present by default)
+const ADDABLE_SECTIONS: { type: string; label: string }[] = [
+  { type: "banner", label: "Banner Image" },
+  { type: "gallery", label: "Photo Gallery" },
+  { type: "certifications", label: "Certifications" },
+  { type: "pricing", label: "Pricing Table" },
+  { type: "contact_form", label: "Contact Form" },
+  { type: "consultation_intro", label: "Before Your Session" },
+  { type: "custom_text", label: "Custom Text" },
+];
 
 const TEMPLATES: { name: string; sections: LandingSection[] }[] = [
   {
@@ -112,13 +135,15 @@ export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderPro
     if (expandedIndex === index) setExpandedIndex(null);
   };
 
-  const addCustomSection = () => {
-    const newSection: LandingSection = {
-      type: "custom_text",
-      enabled: true,
-      title: "Custom Section",
-      content: "",
-    };
+  const addSection = (type: string) => {
+    let newSection: LandingSection;
+    if (type === "custom_text") {
+      newSection = { type: "custom_text", enabled: true, title: "Custom Section", content: "" };
+    } else if (type === "banner") {
+      newSection = { type: "banner", enabled: true, imageUrl: "", altText: "" };
+    } else {
+      newSection = { type: type as any, enabled: true };
+    }
     onChange([...sections, newSection]);
     setExpandedIndex(sections.length);
   };
@@ -204,8 +229,8 @@ export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderPro
                   className="scale-75"
                 />
 
-                {/* Delete custom sections */}
-                {section.type === "custom_text" && (
+                {/* Delete non-core sections */}
+                {["custom_text", "banner", "gallery", "certifications", "pricing", "contact_form", "consultation_intro"].includes(section.type) && (
                   <Button
                     size="sm"
                     variant="ghost"
@@ -260,7 +285,37 @@ export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderPro
                     </>
                   )}
 
-                  {section.type !== "custom_text" && section.type !== "testimonials" && (
+                  {section.type === "banner" && (
+                    <>
+                      <div>
+                        <label className="text-xs text-muted-foreground">Banner Image URL</label>
+                        <Input
+                          className="mt-1"
+                          value={(section as any).imageUrl ?? ""}
+                          onChange={(e) => updateSection(index, { imageUrl: e.target.value } as any)}
+                          placeholder="https://example.com/banner.jpg"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground">Alt Text</label>
+                        <Input
+                          className="mt-1"
+                          value={(section as any).altText ?? ""}
+                          onChange={(e) => updateSection(index, { altText: e.target.value } as any)}
+                          placeholder="Describe the image..."
+                          maxLength={200}
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {["gallery", "certifications", "pricing", "contact_form", "consultation_intro"].includes(section.type) && (
+                    <p className="text-xs text-muted-foreground">
+                      Content is pulled from your profile data. Toggle to show/hide on your page.
+                    </p>
+                  )}
+
+                  {!["custom_text", "testimonials", "banner", "gallery", "certifications", "pricing", "contact_form", "consultation_intro"].includes(section.type) && (
                     <p className="text-xs text-muted-foreground">
                       This section has no configurable settings. Toggle it on/off above.
                     </p>
@@ -272,18 +327,26 @@ export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderPro
         })}
       </div>
 
-      <Button
-        variant="outline"
-        size="sm"
-        className="gap-1.5"
-        onClick={addCustomSection}
-      >
-        <Plus className="h-3.5 w-3.5" />
-        Add Custom Text Section
-      </Button>
+      <div className="space-y-1">
+        <p className="text-xs font-medium text-muted-foreground">Add Section</p>
+        <div className="flex flex-wrap gap-2">
+          {ADDABLE_SECTIONS.map((s) => (
+            <Button
+              key={s.type}
+              variant="outline"
+              size="sm"
+              className="gap-1 text-xs"
+              onClick={() => addSection(s.type)}
+            >
+              <Plus className="h-3 w-3" />
+              {s.label}
+            </Button>
+          ))}
+        </div>
+      </div>
 
       <p className="text-xs text-muted-foreground">
-        Drag sections up/down to reorder. Toggle to show/hide on your public page.
+        Reorder sections with the arrows. Toggle to show/hide on your public page.
       </p>
     </div>
   );

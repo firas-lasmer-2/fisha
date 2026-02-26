@@ -11,6 +11,17 @@ import { mapProfile, type User,
   paymentInitiateRequestSchema, queueJoinRequestSchema, peerMessageRequestSchema,
 } from "@shared/schema";
 import { authLimiter, webhookLimiter } from "./middleware/rate-limit";
+import { QUALIFICATION_QUESTIONS, scoreAnswers } from "@shared/qualification-questions";
+import {
+  generateGoogleAuthUrl,
+  exchangeCodeForTokens,
+  refreshAccessToken,
+  revokeGoogleToken,
+  createCalendarEvent,
+  encryptToken,
+  decryptToken,
+  isGoogleConfigured,
+} from "./google-meet";
 import { validateBody } from "./middleware/validate";
 import { logAudit } from "./audit";
 import { createFlouciPayment } from "./payments/flouci";
@@ -112,13 +123,20 @@ function verifyWebhookSignature(req: Request, secret: string | undefined, header
   return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
-const STUDENT_THERAPIST_CAP_DINAR = Number(process.env.STUDENT_THERAPIST_CAP_DINAR || "20");
+const GRADUATED_DOCTOR_CAP_DINAR = Number(
+  process.env.GRADUATED_DOCTOR_CAP_DINAR || process.env.STUDENT_THERAPIST_CAP_DINAR || "20"
+);
 
-function studentTherapistCapDinar(): number {
-  if (!Number.isFinite(STUDENT_THERAPIST_CAP_DINAR) || STUDENT_THERAPIST_CAP_DINAR <= 0) {
+function graduatedDoctorCapDinar(): number {
+  if (!Number.isFinite(GRADUATED_DOCTOR_CAP_DINAR) || GRADUATED_DOCTOR_CAP_DINAR <= 0) {
     return 20;
   }
-  return STUDENT_THERAPIST_CAP_DINAR;
+  return GRADUATED_DOCTOR_CAP_DINAR;
+}
+
+// Keep old name as alias so nothing breaks during partial rollout
+function studentTherapistCapDinar(): number {
+  return graduatedDoctorCapDinar();
 }
 
 export async function registerRoutes(
@@ -456,8 +474,8 @@ export async function registerRoutes(
         minPrice: req.query.minPrice ? Number(req.query.minPrice) : undefined,
         maxPrice: req.query.maxPrice ? Number(req.query.maxPrice) : undefined,
         tier:
-          req.query.tier === "student" || req.query.tier === "professional"
-            ? (req.query.tier as "student" | "professional")
+          req.query.tier === "graduated_doctor" || req.query.tier === "premium_doctor"
+            ? (req.query.tier as "graduated_doctor" | "premium_doctor")
             : undefined,
       };
       const therapists = await storage.getTherapistProfiles(filters);
@@ -508,10 +526,10 @@ export async function registerRoutes(
         payload.rateDinar !== undefined && payload.rateDinar !== null
           ? Number(payload.rateDinar)
           : currentProfile.rateDinar;
-      const isStudentTier = currentProfile.tier === "student";
-      if (isStudentTier && Number.isFinite(Number(nextRate)) && Number(nextRate) > studentTherapistCapDinar()) {
+      const isGraduatedDoctor = currentProfile.tier === "graduated_doctor";
+      if (isGraduatedDoctor && Number.isFinite(Number(nextRate)) && Number(nextRate) > graduatedDoctorCapDinar()) {
         return res.status(400).json({
-          message: `Student therapist rate cannot exceed ${studentTherapistCapDinar()} TND`,
+          message: `Graduated doctor rate cannot exceed ${graduatedDoctorCapDinar()} TND`,
         });
       }
 
@@ -530,23 +548,23 @@ export async function registerRoutes(
       try {
         const therapistUserId = req.params.id;
         const tier = String(req.body.tier || "").trim();
-        if (!["student", "professional"].includes(tier)) {
-          return res.status(400).json({ message: "tier must be student or professional" });
+        if (!["graduated_doctor", "premium_doctor"].includes(tier)) {
+          return res.status(400).json({ message: "tier must be graduated_doctor or premium_doctor" });
         }
 
         const reviewerId = req.user.id;
         const existingProfile = await storage.getTherapistProfile(therapistUserId);
         if (!existingProfile) return res.status(404).json({ message: "Therapist profile not found" });
 
-        if (tier === "student" && (existingProfile.rateDinar || 0) > studentTherapistCapDinar()) {
+        if (tier === "graduated_doctor" && (existingProfile.rateDinar || 0) > graduatedDoctorCapDinar()) {
           return res.status(400).json({
-            message: `Current therapist rate exceeds student cap (${studentTherapistCapDinar()} TND)`,
+            message: `Current therapist rate exceeds graduated doctor cap (${graduatedDoctorCapDinar()} TND)`,
           });
         }
 
         const updated = await storage.updateTherapistTier(
           therapistUserId,
-          tier as "student" | "professional",
+          tier as "graduated_doctor" | "premium_doctor",
           reviewerId,
         );
         if (!updated) return res.status(500).json({ message: "Failed to update therapist tier" });
@@ -723,12 +741,12 @@ export async function registerRoutes(
         priceDinar = therapistProfile.rateDinar;
       }
       if (
-        therapistProfile.tier === "student"
+        therapistProfile.tier === "graduated_doctor"
         && Number.isFinite(Number(priceDinar))
-        && Number(priceDinar) > studentTherapistCapDinar()
+        && Number(priceDinar) > graduatedDoctorCapDinar()
       ) {
         return res.status(400).json({
-          message: `Student therapist appointment price cannot exceed ${studentTherapistCapDinar()} TND`,
+          message: `Graduated doctor appointment price cannot exceed ${graduatedDoctorCapDinar()} TND`,
         });
       }
 
@@ -833,9 +851,9 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Invalid slot payload" });
       }
 
-      if (therapistProfile.tier === "student" && priceDinar > studentTherapistCapDinar()) {
+      if (therapistProfile.tier === "graduated_doctor" && priceDinar > graduatedDoctorCapDinar()) {
         return res.status(400).json({
-          message: `Student therapist slot price cannot exceed ${studentTherapistCapDinar()} TND`,
+          message: `Graduated doctor slot price cannot exceed ${graduatedDoctorCapDinar()} TND`,
         });
       }
 
@@ -881,9 +899,9 @@ export async function registerRoutes(
       if (req.body.priceDinar !== undefined) payload.priceDinar = Number(req.body.priceDinar);
       if (req.body.status !== undefined) payload.status = String(req.body.status);
 
-      if (payload.priceDinar !== undefined && therapistProfile.tier === "student" && payload.priceDinar > studentTherapistCapDinar()) {
+      if (payload.priceDinar !== undefined && therapistProfile.tier === "graduated_doctor" && payload.priceDinar > graduatedDoctorCapDinar()) {
         return res.status(400).json({
-          message: `Student therapist slot price cannot exceed ${studentTherapistCapDinar()} TND`,
+          message: `Graduated doctor slot price cannot exceed ${graduatedDoctorCapDinar()} TND`,
         });
       }
 
@@ -943,10 +961,43 @@ export async function registerRoutes(
         { type: "appointment", appointmentId: String(result.appointment.id) },
       );
 
-      // Inherit meet link from slot if appointment doesn't have one
-      if (result.slot.meetLink && !result.appointment.meetLink) {
-        await storage.updateAppointment(result.appointment.id, { meetLink: result.slot.meetLink });
-        result.appointment.meetLink = result.slot.meetLink;
+      // Try to create a Google Meet event (if therapist has Google connected)
+      let meetLink: string | null = result.slot.meetLink ?? null;
+      if (isGoogleConfigured()) {
+        try {
+          const accessToken = await getValidAccessToken(result.appointment.therapistId);
+          if (accessToken) {
+            const [clientUser, therapistUser] = await Promise.all([
+              storage.getUser(clientId),
+              storage.getUser(result.appointment.therapistId),
+            ]);
+            const attendeeEmails: string[] = [];
+            if (clientUser?.email) attendeeEmails.push(clientUser.email);
+            if (therapistUser?.email) attendeeEmails.push(therapistUser.email);
+
+            const meetResult = await createCalendarEvent(accessToken, {
+              title: `Shifa — ${therapistUser?.firstName ?? "Therapist"} & ${clientUser?.firstName ?? "Client"}`,
+              description: `Session booked via Shifa. Appointment #${result.appointment.id}.`,
+              startIso: result.appointment.scheduledAt,
+              durationMinutes: result.appointment.durationMinutes ?? 50,
+              attendeeEmails,
+            });
+            meetLink = meetResult.meetLink;
+          }
+        } catch (meetErr: any) {
+          console.error("[google-meet] Failed to create Meet event:", meetErr?.message);
+          // Non-fatal: fall through to slot meetLink fallback
+        }
+      }
+
+      // Fallback: inherit meet link from slot if Google Meet wasn't created
+      if (!meetLink && result.slot.meetLink) {
+        meetLink = result.slot.meetLink;
+      }
+
+      if (meetLink) {
+        await storage.updateAppointment(result.appointment.id, { meetLink });
+        result.appointment.meetLink = meetLink;
       }
 
       // Auto-initiate payment if price > 0
@@ -1528,11 +1579,64 @@ export async function registerRoutes(
     }
   });
 
+  // ---- Listener Qualification Test ----
+
+  // GET own test result
+  app.get("/api/listener/qualification-test", isAuthenticated, async (req: any, res) => {
+    try {
+      const result = await storage.getListenerQualificationTest(req.user.id);
+      res.json(result || null);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch qualification test result" });
+    }
+  });
+
+  // POST submit answers & auto-score
+  app.post("/api/listener/qualification-test", isAuthenticated, async (req: any, res) => {
+    try {
+      const answers = req.body?.answers;
+      if (!answers || typeof answers !== "object" || Array.isArray(answers)) {
+        return res.status(400).json({ message: "answers must be an object mapping question id to chosen option index" });
+      }
+
+      // Validate keys are known question ids
+      const knownIds = new Set(QUALIFICATION_QUESTIONS.map((q) => q.id));
+      for (const key of Object.keys(answers)) {
+        if (!knownIds.has(key)) {
+          return res.status(400).json({ message: `Unknown question id: ${key}` });
+        }
+      }
+
+      const { score, passed, total, correct } = scoreAnswers(answers);
+
+      const result = await storage.upsertListenerQualificationTest(
+        req.user.id,
+        score,
+        passed,
+        answers,
+      );
+
+      res.json({ ...result, total, correct });
+    } catch {
+      res.status(500).json({ message: "Failed to submit qualification test" });
+    }
+  });
+
   // ---- Listener (7 Cups-style) ----
 
   app.post("/api/listener/apply", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
+
+      // Must pass the qualification test first
+      const testResult = await storage.getListenerQualificationTest(userId);
+      if (!testResult || !testResult.passed) {
+        return res.status(403).json({
+          message: "You must pass the qualification test before applying.",
+          code: "QUALIFICATION_TEST_REQUIRED",
+        });
+      }
+
       const languages = normalizeStringArray(req.body.languages);
       const topics = normalizeStringArray(req.body.topics);
 
@@ -2092,21 +2196,120 @@ export async function registerRoutes(
     }
   });
 
+  // ---- Google Meet / Calendar integration ----
+
+  /** Get a fresh access token, refreshing if < 5 min to expiry. */
+  async function getValidAccessToken(therapistId: string): Promise<string | null> {
+    const raw = await storage.getGoogleTokensRaw(therapistId);
+    if (!raw) return null;
+
+    const expiresAt = raw.expiresAt ? new Date(raw.expiresAt) : null;
+    const fiveMinFromNow = new Date(Date.now() + 5 * 60_000);
+
+    if (expiresAt && expiresAt > fiveMinFromNow) {
+      return decryptToken(raw.accessTokenEncrypted);
+    }
+
+    // Need to refresh
+    const refreshToken = decryptToken(raw.refreshTokenEncrypted);
+    const refreshed = await refreshAccessToken(refreshToken);
+    await storage.updateGoogleAccessToken(therapistId, encryptToken(refreshed.accessToken), refreshed.expiresAt);
+    return refreshed.accessToken;
+  }
+
+  // GET /api/doctor/google/status — is Google connected?
+  app.get("/api/doctor/google/status", isAuthenticated, requireRoles(["therapist"]), async (req: any, res) => {
+    try {
+      if (!isGoogleConfigured()) {
+        return res.json({ connected: false, configured: false });
+      }
+      const meta = await storage.getGoogleTokenMeta(req.user.id);
+      res.json({
+        connected: Boolean(meta),
+        configured: true,
+        connectedAt: meta?.connectedAt ?? null,
+      });
+    } catch {
+      res.status(500).json({ message: "Failed to get Google status" });
+    }
+  });
+
+  // POST /api/doctor/google/connect — return OAuth URL
+  app.post("/api/doctor/google/connect", isAuthenticated, requireRoles(["therapist"]), async (req: any, res) => {
+    try {
+      if (!isGoogleConfigured()) {
+        return res.status(503).json({ message: "Google integration is not configured on this server." });
+      }
+      const authUrl = generateGoogleAuthUrl(req.user.id);
+      res.json({ authUrl });
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to generate Google auth URL" });
+    }
+  });
+
+  // GET /api/doctor/google/callback — OAuth callback (redirect-based)
+  app.get("/api/doctor/google/callback", async (req: any, res) => {
+    const code = typeof req.query.code === "string" ? req.query.code : null;
+    const therapistId = typeof req.query.state === "string" ? req.query.state : null;
+    const origin = req.headers.origin || `${req.protocol}://${req.headers.host}`;
+
+    if (!code || !therapistId) {
+      return res.redirect(`${origin}/therapist-dashboard?google=error&msg=missing_params`);
+    }
+
+    try {
+      const tokens = await exchangeCodeForTokens(code);
+      await storage.upsertGoogleTokens(
+        therapistId,
+        encryptToken(tokens.accessToken),
+        encryptToken(tokens.refreshToken),
+        tokens.expiresAt,
+      );
+      res.redirect(`${origin}/therapist-dashboard?google=connected`);
+    } catch (err: any) {
+      console.error("[google/callback] token exchange failed:", err?.message);
+      res.redirect(`${origin}/therapist-dashboard?google=error&msg=exchange_failed`);
+    }
+  });
+
+  // DELETE /api/doctor/google/disconnect — revoke + delete tokens
+  app.delete("/api/doctor/google/disconnect", isAuthenticated, requireRoles(["therapist"]), async (req: any, res) => {
+    try {
+      const raw = await storage.getGoogleTokensRaw(req.user.id);
+      if (raw) {
+        // Revoke both tokens (best-effort)
+        const accessToken = decryptToken(raw.accessTokenEncrypted);
+        const refreshToken = decryptToken(raw.refreshTokenEncrypted);
+        await Promise.allSettled([revokeGoogleToken(accessToken), revokeGoogleToken(refreshToken)]);
+        await storage.deleteGoogleTokens(req.user.id);
+      }
+      res.json({ disconnected: true });
+    } catch {
+      res.status(500).json({ message: "Failed to disconnect Google account" });
+    }
+  });
+
   // ---- Admin moderation ----
 
   app.get("/api/admin/listeners", isAuthenticated, requireRoles(["moderator", "admin"]), async (req, res) => {
     try {
       const status = typeof req.query.status === "string" ? req.query.status : undefined;
-      const [applications, reports] = await Promise.all([
+      const [applications, reports, allTests] = await Promise.all([
         storage.listListenerApplications(status),
         storage.listOpenPeerReports(),
+        storage.listAllQualificationTests(),
       ]);
       const listenerIds = Array.from(new Set([
         ...applications.map((application) => application.userId),
         ...reports.map((report) => report.targetUserId).filter((id): id is string => Boolean(id)),
       ]));
       const riskSnapshots = await storage.getListenerRiskSnapshots(listenerIds);
-      res.json({ applications, reports, riskSnapshots });
+      // Index tests by userId for O(1) lookup on the frontend
+      const qualificationTests: Record<string, typeof allTests[0]> = {};
+      for (const test of allTests) {
+        qualificationTests[test.userId] = test;
+      }
+      res.json({ applications, reports, riskSnapshots, qualificationTests });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch listener moderation data" });
     }
@@ -2278,6 +2481,15 @@ export async function registerRoutes(
       res.json(verifications);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch verifications" });
+    }
+  });
+
+  app.get("/api/admin/qualification-tests", isAuthenticated, requireRoles(["moderator", "admin"]), async (_req, res) => {
+    try {
+      const tests = await storage.listAllQualificationTests();
+      res.json(tests);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch qualification tests" });
     }
   });
 
@@ -2564,6 +2776,81 @@ export async function registerRoutes(
       res.status(201).json({ created, count: created.length });
     } catch (error) {
       res.status(500).json({ message: "Failed to create slots" });
+    }
+  });
+
+  // ---- Doctor Payouts (Phase 4) ----
+
+  // GET /api/doctor/payouts — therapist views own payout history
+  app.get("/api/doctor/payouts", isAuthenticated, requireRoles(["therapist"]), async (req: any, res) => {
+    try {
+      const payouts = await storage.getDoctorPayouts(req.user.id);
+      res.json(payouts);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch payouts" });
+    }
+  });
+
+  // GET /api/admin/doctor-payouts — admin views all payouts
+  app.get("/api/admin/doctor-payouts", isAuthenticated, requireRoles(["admin"]), async (_req, res) => {
+    try {
+      const payouts = await storage.getAllDoctorPayouts();
+      res.json(payouts);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch payouts" });
+    }
+  });
+
+  // POST /api/admin/doctor-payouts/generate — admin generates a payout for a doctor
+  app.post("/api/admin/doctor-payouts/generate", isAuthenticated, requireRoles(["admin"]), async (req: any, res) => {
+    try {
+      const { doctorId, periodStart, periodEnd, platformFeePct = 15 } = req.body;
+      if (!doctorId || !periodStart || !periodEnd) {
+        return res.status(400).json({ message: "doctorId, periodStart, and periodEnd required" });
+      }
+      // Calculate totals from completed payment transactions in that period
+      const supabase = supabaseAdmin;
+      const { data: txns } = await supabase
+        .from("payment_transactions")
+        .select("amount_dinar, appointment_id")
+        .eq("therapist_id", doctorId)
+        .eq("status", "paid")
+        .gte("created_at", new Date(periodStart).toISOString())
+        .lte("created_at", new Date(periodEnd + "T23:59:59").toISOString());
+
+      const totalAmount = (txns ?? []).reduce((sum: number, t: any) => sum + (t.amount_dinar || 0), 0);
+      const platformFee = Math.round(totalAmount * platformFeePct) / 100;
+      const netAmount = Math.round((totalAmount - platformFee) * 100) / 100;
+
+      const payout = await storage.createDoctorPayout({
+        doctorId,
+        periodStart,
+        periodEnd,
+        totalSessions: (txns ?? []).length,
+        totalAmountDinar: totalAmount,
+        platformFeeDinar: platformFee,
+        netAmountDinar: netAmount,
+      });
+      res.status(201).json(payout);
+    } catch {
+      res.status(500).json({ message: "Failed to generate payout" });
+    }
+  });
+
+  // PATCH /api/admin/doctor-payouts/:id — admin updates payout status
+  app.patch("/api/admin/doctor-payouts/:id", isAuthenticated, requireRoles(["admin"]), async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) return res.status(400).json({ message: "Invalid payout id" });
+      const { status } = req.body;
+      if (!["pending", "processing", "paid", "failed"].includes(status)) {
+        return res.status(400).json({ message: "Invalid status" });
+      }
+      const payout = await storage.updateDoctorPayoutStatus(id, status);
+      if (!payout) return res.status(404).json({ message: "Payout not found" });
+      res.json(payout);
+    } catch {
+      res.status(500).json({ message: "Failed to update payout" });
     }
   });
 

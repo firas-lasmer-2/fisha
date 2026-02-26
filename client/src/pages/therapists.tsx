@@ -66,7 +66,7 @@ export default function TherapistsPage() {
   const [tier, setTier] = useState<string>(() => {
     if (typeof window === "undefined") return "";
     const tierParam = new URLSearchParams(window.location.search).get("tier");
-    return tierParam === "student" || tierParam === "professional" ? tierParam : "";
+    return tierParam === "graduated_doctor" || tierParam === "premium_doctor" ? tierParam : "";
   });
   const [budget, setBudget] = useState<string>("");
   const [onlineOnly, setOnlineOnly] = useState(false);
@@ -127,8 +127,8 @@ export default function TherapistsPage() {
   ];
 
   const tierOptions = [
-    { value: "student", label: t("tier.student_therapist") },
-    { value: "professional", label: t("tier.professional_therapist") },
+    { value: "graduated_doctor", label: t("tier.graduated_doctor_therapist") },
+    { value: "premium_doctor", label: t("tier.premium_doctor_therapist") },
   ];
 
   const budgetOptions = [
@@ -227,8 +227,8 @@ export default function TherapistsPage() {
 
       if (onlineTherapists.has(therapist.userId)) score += 8;
 
-      if (therapist.tier === "student" && maxBudget <= 80) score += 5;
-      if (therapist.tier === "professional" && specializationHits >= 2) score += 3;
+      if (therapist.tier === "graduated_doctor" && maxBudget <= 80) score += 5;
+      if (therapist.tier === "premium_doctor" && specializationHits >= 2) score += 3;
 
       return {
         therapist,
@@ -539,7 +539,7 @@ export default function TherapistsPage() {
                             </span>
                           )}
                           <Badge variant="outline" className="text-[10px]">
-                            {tp.tier === "student" ? t("tier.student_therapist") : t("tier.professional_therapist")}
+                            {tp.tier === "graduated_doctor" ? t("tier.graduated_doctor_therapist") : t("tier.premium_doctor_therapist")}
                           </Badge>
                           {tp.hasOpenSlots === true && (
                             <Badge variant="secondary" className="text-[10px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">

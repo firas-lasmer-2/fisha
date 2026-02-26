@@ -21,7 +21,7 @@ export interface User {
   updatedAt: string | null;
 }
 
-export type TherapistTier = "student" | "professional";
+export type TherapistTier = "graduated_doctor" | "premium_doctor";
 
 export interface TherapistProfile {
   id: number;
@@ -53,8 +53,14 @@ export interface TherapistProfile {
   profileThemeColor: string | null;
   acceptingNewClients: boolean | null;
   tier: TherapistTier;
+  badgeType: "verified" | "premium" | null;
   tierApprovedBy: string | null;
   tierApprovedAt: string | null;
+  customBannerUrl: string | null;
+  customCss: any;
+  galleryImages: string[] | null;
+  certifications: any;
+  consultationIntro: string | null;
   landingPageEnabled: boolean | null;
   landingPageSections: any;
   landingPageCtaText: string | null;
@@ -362,9 +368,15 @@ export const insertTherapistProfileSchema = z.object({
   slug: z.string().optional().nullable(),
   profileThemeColor: z.string().optional().nullable(),
   acceptingNewClients: z.boolean().default(true).optional(),
-  tier: z.enum(["student", "professional"]).default("professional").optional(),
+  tier: z.enum(["graduated_doctor", "premium_doctor"]).default("premium_doctor").optional(),
   tierApprovedBy: z.string().optional().nullable(),
   tierApprovedAt: z.string().optional().nullable(),
+  badgeType: z.enum(["verified", "premium"]).optional().nullable(),
+  customBannerUrl: z.string().optional().nullable(),
+  customCss: z.any().optional().nullable(),
+  galleryImages: z.array(z.string()).optional().nullable(),
+  certifications: z.any().optional().nullable(),
+  consultationIntro: z.string().optional().nullable(),
   landingPageEnabled: z.boolean().default(false).optional(),
   landingPageSections: z.any().optional().nullable(),
   landingPageCtaText: z.string().max(80).optional().nullable(),
@@ -711,6 +723,82 @@ export function mapSessionSummary(row: any): SessionSummary {
   };
 }
 
+// ---- Therapist Google Token (metadata only — never expose raw tokens) ----
+
+export interface TherapistGoogleToken {
+  therapistId: string;
+  expiresAt: string | null;
+  connectedAt: string | null;
+}
+
+export function mapTherapistGoogleToken(row: any): TherapistGoogleToken {
+  return {
+    therapistId: row.therapist_id,
+    expiresAt: row.expires_at ?? null,
+    connectedAt: row.connected_at ?? null,
+  };
+}
+
+// ---- Listener Qualification Test ----
+
+export interface ListenerQualificationTest {
+  id: number;
+  userId: string;
+  score: number;
+  passed: boolean;
+  answers: any;
+  attemptedAt: string | null;
+}
+
+export const submitQualificationTestSchema = z.object({
+  answers: z.record(z.string(), z.string()),
+});
+
+export type SubmitQualificationTest = z.infer<typeof submitQualificationTestSchema>;
+
+export function mapListenerQualificationTest(row: any): ListenerQualificationTest {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    score: row.score,
+    passed: row.passed,
+    answers: row.answers,
+    attemptedAt: row.attempted_at,
+  };
+}
+
+// ---- Doctor Payout ----
+
+export interface DoctorPayout {
+  id: number;
+  doctorId: string;
+  periodStart: string;
+  periodEnd: string;
+  totalSessions: number;
+  totalAmountDinar: number;
+  platformFeeDinar: number;
+  netAmountDinar: number;
+  status: "pending" | "processing" | "paid" | "failed";
+  paidAt: string | null;
+  createdAt: string | null;
+}
+
+export function mapDoctorPayout(row: any): DoctorPayout {
+  return {
+    id: row.id,
+    doctorId: row.doctor_id,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    totalSessions: row.total_sessions,
+    totalAmountDinar: row.total_amount_dinar,
+    platformFeeDinar: row.platform_fee_dinar,
+    netAmountDinar: row.net_amount_dinar,
+    status: row.status,
+    paidAt: row.paid_at ?? null,
+    createdAt: row.created_at ?? null,
+  };
+}
+
 // ---- Audit log type ----
 
 export interface AuditLog {
@@ -878,9 +966,15 @@ export function mapTherapistProfile(row: any): TherapistProfile {
     slug: row.slug,
     profileThemeColor: row.profile_theme_color,
     acceptingNewClients: row.accepting_new_clients,
-    tier: row.tier || "professional",
+    tier: row.tier || "premium_doctor",
+    badgeType: row.badge_type ?? null,
     tierApprovedBy: row.tier_approved_by,
     tierApprovedAt: row.tier_approved_at,
+    customBannerUrl: row.custom_banner_url ?? null,
+    customCss: row.custom_css ?? null,
+    galleryImages: row.gallery_images ?? null,
+    certifications: row.certifications ?? null,
+    consultationIntro: row.consultation_intro ?? null,
     landingPageEnabled: row.landing_page_enabled ?? null,
     landingPageSections: row.landing_page_sections ?? [],
     landingPageCtaText: row.landing_page_cta_text ?? null,
@@ -1200,7 +1294,13 @@ export type LandingSection =
   | { type: "video"; enabled: boolean }
   | { type: "office_photos"; enabled: boolean }
   | { type: "social_links"; enabled: boolean }
-  | { type: "custom_text"; enabled: boolean; title: string; content: string };
+  | { type: "custom_text"; enabled: boolean; title: string; content: string }
+  | { type: "banner"; enabled: boolean; imageUrl?: string; altText?: string }
+  | { type: "gallery"; enabled: boolean }
+  | { type: "certifications"; enabled: boolean }
+  | { type: "pricing"; enabled: boolean }
+  | { type: "contact_form"; enabled: boolean }
+  | { type: "consultation_intro"; enabled: boolean };
 
 export const DEFAULT_LANDING_SECTIONS: LandingSection[] = [
   { type: "hero", enabled: true },

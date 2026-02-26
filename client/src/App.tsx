@@ -33,6 +33,7 @@ import OnboardingPage from "@/pages/onboarding";
 import CrisisPage from "@/pages/crisis";
 import ListenPage from "@/pages/listen";
 import ListenerApplyPage from "@/pages/listener-apply";
+import ListenerTestPage from "@/pages/listener-test";
 import ListenerDashboardPage from "@/pages/listener-dashboard";
 import AdminListenersPage from "@/pages/admin-listeners";
 import WelcomePage from "@/pages/welcome";
@@ -170,6 +171,9 @@ function Router() {
           </Route>
           <Route path="/peer-support">
             <AuthGuard><ListenPage /></AuthGuard>
+          </Route>
+          <Route path="/listener/test">
+            <AuthGuard allowIncompleteOnboarding><ListenerTestPage /></AuthGuard>
           </Route>
           <Route path="/listener/apply">
             <AuthGuard allowIncompleteOnboarding><ListenerApplyPage /></AuthGuard>

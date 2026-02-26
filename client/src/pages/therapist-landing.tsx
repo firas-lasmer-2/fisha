@@ -124,8 +124,11 @@ export default function TherapistLandingPage() {
                     Verified
                   </Badge>
                 )}
-                {profile.tier === "student" && (
-                  <Badge variant="secondary">Student Therapist</Badge>
+                {profile.tier === "graduated_doctor" && (
+                  <Badge variant="secondary">Graduated Doctor</Badge>
+                )}
+                {profile.tier === "premium_doctor" && (
+                  <Badge className="gap-1 bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300/50">Premium Doctor</Badge>
                 )}
               </div>
               {profile.headline && (
