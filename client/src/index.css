@@ -43,6 +43,9 @@
   --chart-3: 142 50% 45%;
   --chart-4: 38 80% 55%;
   --chart-5: 280 45% 55%;
+  --color-calm: 168 55% 38%;
+  --color-warm: 34 88% 60%;
+  --color-safe: 198 70% 56%;
 
   --font-sans: 'Inter', 'Tajawal', sans-serif;
   --font-serif: Georgia, serif;
@@ -117,6 +120,9 @@
   --chart-3: 142 45% 50%;
   --chart-4: 38 75% 60%;
   --chart-5: 280 40% 60%;
+  --color-calm: 168 50% 45%;
+  --color-warm: 34 82% 68%;
+  --color-safe: 198 68% 62%;
 
   --shadow-2xs: 0px 1px 2px 0px hsl(0 0% 0% / 0.2);
   --shadow-xs: 0px 1px 3px 0px hsl(0 0% 0% / 0.3);
@@ -214,15 +220,40 @@
   }
 
   .gradient-calm {
-    background: linear-gradient(135deg, hsl(168 55% 38%) 0%, hsl(200 60% 50%) 100%);
+    background: linear-gradient(135deg, hsl(var(--color-calm)) 0%, hsl(var(--color-safe)) 100%);
   }
 
   .gradient-warm {
-    background: linear-gradient(135deg, hsl(168 55% 38%) 0%, hsl(142 50% 45%) 100%);
+    background: linear-gradient(135deg, hsl(var(--color-warm)) 0%, hsl(var(--color-calm)) 100%);
+  }
+
+  .gradient-safe {
+    background: linear-gradient(135deg, hsl(var(--color-safe) / 0.92) 0%, hsl(var(--color-calm) / 0.92) 100%);
+  }
+
+  .gradient-safe-soft {
+    background: linear-gradient(150deg, hsl(var(--color-safe) / 0.18) 0%, hsl(var(--color-calm) / 0.08) 100%);
+  }
+
+  .safe-surface {
+    background: linear-gradient(
+      145deg,
+      hsl(var(--color-safe) / 0.16) 0%,
+      hsl(var(--color-calm) / 0.09) 100%
+    );
+    border: 1px solid hsl(var(--color-safe) / 0.3);
+  }
+
+  .safe-muted {
+    background-color: hsl(var(--color-safe) / 0.12);
+  }
+
+  .text-safe {
+    color: hsl(var(--color-safe));
   }
 
   .text-gradient {
-    background: linear-gradient(135deg, hsl(168 55% 38%) 0%, hsl(200 60% 50%) 100%);
+    background: linear-gradient(135deg, hsl(var(--color-calm)) 0%, hsl(var(--color-safe)) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -316,12 +347,12 @@
   }
 
   .pattern-dots {
-    background-image: radial-gradient(circle, hsl(168 55% 38% / 0.06) 1px, transparent 1px);
+    background-image: radial-gradient(circle, hsl(var(--color-calm) / 0.08) 1px, transparent 1px);
     background-size: 24px 24px;
   }
 
   .gradient-hero {
-    background: linear-gradient(160deg, hsl(160 30% 98%) 0%, hsl(168 40% 94%) 40%, hsl(200 30% 95%) 100%);
+    background: linear-gradient(160deg, hsl(160 30% 98%) 0%, hsl(var(--color-calm) / 0.2) 40%, hsl(var(--color-safe) / 0.18) 100%);
   }
 
   .dark .gradient-hero {
@@ -329,7 +360,7 @@
   }
 
   .gradient-feature {
-    background: linear-gradient(135deg, hsl(168 55% 38% / 0.05) 0%, hsl(200 60% 50% / 0.05) 100%);
+    background: linear-gradient(135deg, hsl(var(--color-calm) / 0.06) 0%, hsl(var(--color-safe) / 0.06) 100%);
   }
 
   .trust-icon {
@@ -362,5 +393,29 @@
   .mood-btn.selected {
     transform: scale(1.15);
     box-shadow: 0 0 0 3px hsl(168 55% 38% / 0.3);
+  }
+
+  @keyframes page-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .page-transition-enter {
+    animation: page-fade-up 0.24s ease-out both;
+  }
+
+  .tap-feedback {
+    transition: transform 0.16s ease, opacity 0.16s ease;
+  }
+
+  .tap-feedback:active {
+    transform: scale(0.98);
+    opacity: 0.92;
   }
 }

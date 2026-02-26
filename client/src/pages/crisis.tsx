@@ -1,20 +1,43 @@
+import { useEffect, useState } from "react";
+import { Link } from "wouter";
+import { useMutation } from "@tanstack/react-query";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { useMutation } from "@tanstack/react-query";
-import { Link } from "wouter";
-import { useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import {
-  Phone, Heart, Shield, Wind, ArrowLeft, CheckCircle, AlertTriangle,
+  AlertCircle,
+  ArrowLeft,
+  CheckCircle,
+  Heart,
+  Phone,
+  Shield,
+  Wind,
 } from "lucide-react";
+
+const groundingSteps = ["see", "touch", "hear", "smell", "taste"] as const;
+
+const breathingPhases = [
+  { key: "inhale", seconds: 4 },
+  { key: "hold", seconds: 7 },
+  { key: "exhale", seconds: 8 },
+] as const;
 
 export default function CrisisPage() {
   const { t } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
+
+  const tr = (key: string, fallback: string) => {
+    const value = t(key);
+    return value === key ? fallback : value;
+  };
+
+  const [groundingDone, setGroundingDone] = useState<number[]>([]);
+  const [breathingIndex, setBreathingIndex] = useState(0);
 
   const reportMutation = useMutation({
     mutationFn: async () => {
@@ -37,107 +60,147 @@ export default function CrisisPage() {
     reportMutation.mutate();
   }, [reportMutation, user]);
 
+  const currentBreathingPhase = breathingPhases[breathingIndex];
+  const groundingProgress = Math.round((groundingDone.length / groundingSteps.length) * 100);
+
+  const toggleGroundingStep = (index: number) => {
+    setGroundingDone((prev) =>
+      prev.includes(index)
+        ? prev.filter((item) => item !== index)
+        : [...prev, index],
+    );
+  };
+
+  const advanceBreathing = () => {
+    setBreathingIndex((prev) => (prev + 1) % breathingPhases.length);
+  };
+
   return (
-    <div className="min-h-screen bg-background p-4 flex flex-col">
-      <div className="max-w-lg mx-auto w-full flex-1 flex flex-col justify-center space-y-6">
-        {/* Header */}
-        <div className="text-center space-y-3">
-          <div className="w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto">
-            <AlertTriangle className="h-8 w-8 text-red-600 dark:text-red-400" />
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,hsl(var(--color-safe)/0.22),transparent_45%),linear-gradient(180deg,hsl(var(--background)),hsl(var(--background)))] p-4 sm:p-6">
+      <div className="max-w-3xl mx-auto space-y-4 sm:space-y-5">
+        <div className="text-center space-y-3 py-2">
+          <div className="w-14 h-14 rounded-full safe-surface flex items-center justify-center mx-auto">
+            <Shield className="h-7 w-7 text-safe" />
           </div>
-          <h1 className="text-2xl font-bold" data-testid="text-crisis-title">
-            {t("crisis.title")}
-          </h1>
-          <p className="text-muted-foreground">{t("crisis.subtitle")}</p>
+          <div>
+            <h1 className="text-2xl font-bold" data-testid="text-crisis-title">
+              {t("crisis.title")}
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">{t("crisis.subtitle")}</p>
+          </div>
+          <Badge variant="secondary" className="safe-muted text-safe border-transparent">
+            {tr("crisis.stay_present", "Take one small step at a time")}
+          </Badge>
         </div>
 
-        {/* Emergency Numbers */}
-        <Card className="border-red-200 dark:border-red-800" data-testid="section-emergency-numbers">
-          <CardHeader className="pb-3">
+        <Card className="safe-surface" data-testid="section-emergency-numbers">
+          <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
-              <Phone className="h-4 w-4 text-red-600" />
+              <AlertCircle className="h-4 w-4 text-destructive" />
               {t("crisis.emergency_numbers")}
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="grid gap-2 sm:grid-cols-2">
             <a
               href="tel:190"
-              className="flex items-center justify-between p-3 rounded-lg bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+              className="rounded-lg border border-destructive/30 bg-destructive/10 hover:bg-destructive hover:text-destructive-foreground transition-colors p-3"
               data-testid="link-call-samu"
             >
-              <div>
-                <p className="font-semibold text-red-700 dark:text-red-400">{t("crisis.samu_label")}</p>
-                <p className="text-xs text-muted-foreground">{t("crisis.samu_desc")}</p>
+              <p className="font-semibold text-sm">{t("crisis.samu_label")}</p>
+              <p className="text-xs opacity-90">{t("crisis.samu_desc")}</p>
+              <div className="mt-2 text-xs flex items-center gap-1">
+                <Phone className="h-3.5 w-3.5" />
+                {tr("crisis.call_now", "Call now")}
               </div>
-              <Phone className="h-5 w-5 text-red-600" />
             </a>
             <a
               href="tel:197"
-              className="flex items-center justify-between p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+              className="rounded-lg border border-blue-300/50 bg-blue-500/10 hover:bg-blue-500/20 transition-colors p-3"
               data-testid="link-call-police"
             >
-              <div>
-                <p className="font-semibold text-blue-700 dark:text-blue-400">{t("crisis.police_label")}</p>
-                <p className="text-xs text-muted-foreground">{t("crisis.police_desc")}</p>
+              <p className="font-semibold text-sm">{t("crisis.police_label")}</p>
+              <p className="text-xs text-muted-foreground">{t("crisis.police_desc")}</p>
+              <div className="mt-2 text-xs text-muted-foreground flex items-center gap-1">
+                <Phone className="h-3.5 w-3.5" />
+                {tr("crisis.call_now", "Call now")}
               </div>
-              <Phone className="h-5 w-5 text-blue-600" />
             </a>
           </CardContent>
         </Card>
 
-        {/* Grounding Exercise */}
-        <Card data-testid="section-grounding">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Wind className="h-4 w-4 text-primary" />
-              {t("crisis.grounding_title")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">{t("crisis.grounding_intro")}</p>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card data-testid="section-grounding" className="h-full">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Wind className="h-4 w-4 text-primary" />
+                {t("crisis.grounding_title")}
+              </CardTitle>
+              <p className="text-xs text-muted-foreground">{t("crisis.grounding_intro")}</p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="h-2 rounded-full bg-muted overflow-hidden" aria-hidden>
+                <div className="h-full gradient-safe" style={{ width: `${groundingProgress}%` }} />
+              </div>
               <div className="space-y-2">
-                {[
-                  { num: 5, sense: t("crisis.see") },
-                  { num: 4, sense: t("crisis.touch") },
-                  { num: 3, sense: t("crisis.hear") },
-                  { num: 2, sense: t("crisis.smell") },
-                  { num: 1, sense: t("crisis.taste") },
-                ].map(({ num, sense }) => (
-                  <div key={num} className="flex items-center gap-3 text-sm">
-                    <span className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0">
-                      {num}
-                    </span>
-                    <span>{sense}</span>
+                {groundingSteps.map((sense, index) => {
+                  const isDone = groundingDone.includes(index);
+                  return (
+                    <button
+                      key={sense}
+                      type="button"
+                      onClick={() => toggleGroundingStep(index)}
+                      className={`w-full rounded-lg border p-2.5 flex items-center gap-2 text-start transition-colors ${
+                        isDone ? "bg-primary/10 border-primary/30" : "hover:bg-muted/40"
+                      }`}
+                    >
+                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold ${isDone ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                        {index + 1}
+                      </span>
+                      <span className="text-sm flex-1">{t(`crisis.${sense}`)}</span>
+                      {isDone && <CheckCircle className="h-4 w-4 text-primary" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card data-testid="section-breathing" className="h-full">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Heart className="h-4 w-4 text-primary" />
+                {t("crisis.breathing_title")}
+              </CardTitle>
+              <p className="text-xs text-muted-foreground">{t("crisis.breathing_instruction")}</p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-center py-4">
+                <div className="w-36 h-36 rounded-full safe-surface flex flex-col items-center justify-center text-center px-4 animate-pulse-soft">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">{t(`selfcare.${currentBreathingPhase.key}`)}</p>
+                  <p className="text-2xl font-semibold">{currentBreathingPhase.seconds}s</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                {breathingPhases.map((phase, index) => (
+                  <div
+                    key={phase.key}
+                    className={`rounded-md px-2 py-1.5 ${
+                      index === breathingIndex ? "safe-muted text-safe" : "bg-muted/50 text-muted-foreground"
+                    }`}
+                  >
+                    <p>{t(`selfcare.${phase.key}`)}</p>
+                    <p>{phase.seconds}s</p>
                   </div>
                 ))}
               </div>
-            </div>
-          </CardContent>
-        </Card>
+              <Button variant="outline" className="w-full" onClick={advanceBreathing}>
+                {tr("crisis.next_breath", "Next breath step")}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
 
-        {/* Breathing Exercise */}
-        <Card data-testid="section-breathing">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Heart className="h-4 w-4 text-primary" />
-              {t("crisis.breathing_title")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-center py-6">
-              <div className="breathing-circle w-32 h-32 rounded-full gradient-calm flex items-center justify-center">
-                <span className="text-white text-sm font-medium">{t("crisis.breathe")}</span>
-              </div>
-            </div>
-            <p className="text-sm text-muted-foreground text-center">
-              {t("crisis.breathing_instruction")}
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Actions */}
-        <div className="space-y-3">
+        <div className="grid gap-2 sm:grid-cols-2">
           <Button
             className="w-full bg-emerald-600 hover:bg-emerald-700"
             size="lg"

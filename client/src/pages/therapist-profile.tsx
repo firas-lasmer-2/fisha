@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -43,16 +44,16 @@ import {
   Send,
   Play,
   Image,
-  ExternalLink,
   Share2,
-  Loader2,
+  CreditCard,
+  Receipt,
 } from "lucide-react";
 import { useState } from "react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useOnlineTherapists } from "@/hooks/use-online-therapists";
 import { motion } from "framer-motion";
-import type { TherapistProfile, TherapistSlot, User, TherapistReview } from "@shared/schema";
+import type { Appointment, TherapistProfile, TherapistSlot, User, TherapistReview } from "@shared/schema";
 
 const sectionVariants = {
   hidden: { opacity: 0, y: 30 },
@@ -116,6 +117,10 @@ export default function TherapistProfilePage() {
   const { t, isRTL, language } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
+  const tr = (key: string, fallback: string) => {
+    const value = t(key);
+    return value === key ? fallback : value;
+  };
   const params = useParams<{ userId: string }>();
   const userId = params.userId;
   const onlineTherapists = useOnlineTherapists();
@@ -126,6 +131,14 @@ export default function TherapistProfilePage() {
   const [communicationRating, setCommunicationRating] = useState(0);
   const [reviewComment, setReviewComment] = useState("");
   const [isAnonymous, setIsAnonymous] = useState(true);
+  const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
+  const [bookingStep, setBookingStep] = useState(0);
+  const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
+  const [selectedSessionType, setSelectedSessionType] = useState<"chat" | "video" | "audio">("chat");
+  const [bookingNotes, setBookingNotes] = useState("");
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<"flouci" | "konnect" | null>(null);
+  const [paymentRedirectUrl, setPaymentRedirectUrl] = useState<string | null>(null);
+  const [bookingResult, setBookingResult] = useState<{ appointment: Appointment; slot: TherapistSlot } | null>(null);
 
   const { data: profile, isLoading: profileLoading } = useQuery<
     TherapistProfile & { user: User }
@@ -144,15 +157,45 @@ export default function TherapistProfilePage() {
     enabled: !!userId,
   });
 
-  const bookSlotMutation = useMutation({
-    mutationFn: async (slotId: number) => {
-      const res = await apiRequest("POST", `/api/appointments/from-slot/${slotId}`, {});
-      return res.json();
+  const confirmBookingMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedSlotId) throw new Error("No slot selected");
+      const res = await apiRequest("POST", `/api/appointments/from-slot/${selectedSlotId}`, {
+        sessionType: selectedSessionType,
+        notes: bookingNotes || null,
+      });
+      return res.json() as Promise<{ appointment: Appointment; slot: TherapistSlot }>;
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/therapists", userId, "slots"] });
       queryClient.invalidateQueries({ queryKey: ["/api/appointments"] });
+      setBookingResult(result);
+      setBookingStep(2);
       toast({ title: t("slots.booked_success") });
+    },
+    onError: () => {
+      toast({ title: t("common.error"), variant: "destructive" });
+    },
+  });
+
+  const paymentMutation = useMutation({
+    mutationFn: async (method: "flouci" | "konnect") => {
+      if (!bookingResult) throw new Error("No booking result");
+      const endpoint = method === "flouci"
+        ? "/api/payments/flouci/initiate"
+        : "/api/payments/konnect/initiate";
+      const amount = bookingResult.appointment.priceDinar || bookingResult.slot.priceDinar;
+      const response = await apiRequest("POST", endpoint, {
+        appointmentId: bookingResult.appointment.id,
+        therapistId: bookingResult.appointment.therapistId,
+        amount,
+      });
+      return response.json() as Promise<{ redirectUrl?: string }>;
+    },
+    onSuccess: (result, method) => {
+      setSelectedPaymentMethod(method);
+      setPaymentRedirectUrl(result.redirectUrl || null);
+      queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
     },
     onError: () => {
       toast({ title: t("common.error"), variant: "destructive" });
@@ -161,6 +204,33 @@ export default function TherapistProfilePage() {
 
   const isTherapistOnline = userId ? onlineTherapists.has(userId) : false;
   const openSlots = slots.filter((slot) => slot.status === "open");
+  const selectedSlot = openSlots.find((slot) => slot.id === selectedSlotId) || bookingResult?.slot || null;
+
+  const openBookingFlow = (slotId?: number) => {
+    if (!user) {
+      window.location.href = "/login";
+      return;
+    }
+    setBookingDialogOpen(true);
+    setBookingStep(0);
+    setSelectedSlotId(slotId || openSlots[0]?.id || null);
+    setSelectedSessionType("chat");
+    setBookingNotes("");
+    setBookingResult(null);
+    setSelectedPaymentMethod(null);
+    setPaymentRedirectUrl(null);
+  };
+
+  const closeBookingFlow = (open: boolean) => {
+    setBookingDialogOpen(open);
+    if (!open) {
+      setBookingStep(0);
+      setSelectedPaymentMethod(null);
+      setPaymentRedirectUrl(null);
+      setBookingResult(null);
+      setBookingNotes("");
+    }
+  };
 
   const reviewMutation = useMutation({
     mutationFn: async () => {
@@ -374,12 +444,15 @@ export default function TherapistProfilePage() {
                   )}
 
                   <div className="flex items-center gap-2 flex-wrap pt-1">
-                    <Link href={`/therapist/${userId}#slots`}>
-                      <Button size="sm" className="gap-1.5" data-testid="button-book-session-hero">
-                        <Calendar className="h-3.5 w-3.5" />
-                        {t("profile.book_session")}
-                      </Button>
-                    </Link>
+                    <Button
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => openBookingFlow()}
+                      data-testid="button-book-session-hero"
+                    >
+                      <Calendar className="h-3.5 w-3.5" />
+                      {t("profile.book_session")}
+                    </Button>
                     <Link href="/messages">
                       <Button size="sm" variant="outline" className="gap-1.5" data-testid="button-message-hero">
                         <MessageCircle className="h-3.5 w-3.5" />
@@ -619,8 +692,8 @@ export default function TherapistProfilePage() {
                       </div>
                       <Button
                         size="sm"
-                        onClick={() => bookSlotMutation.mutate(slot.id)}
-                        disabled={!user || bookSlotMutation.isPending}
+                        onClick={() => openBookingFlow(slot.id)}
+                        data-testid={`button-book-slot-${slot.id}`}
                       >
                         {t("profile.book_session")}
                       </Button>
@@ -633,6 +706,197 @@ export default function TherapistProfilePage() {
             </CardContent>
           </Card>
         </motion.div>
+
+        <Dialog open={bookingDialogOpen} onOpenChange={closeBookingFlow}>
+          <DialogContent className="sm:max-w-2xl" data-testid="dialog-booking-flow">
+            <DialogHeader>
+              <DialogTitle>{tr("booking.title", "Book your session")}</DialogTitle>
+              <DialogDescription>
+                {tr("booking.subtitle", "Pick a slot, confirm details, then complete payment.")}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="flex items-center gap-2 text-xs">
+              {[
+                tr("booking.step_pick", "Pick slot"),
+                tr("booking.step_confirm", "Confirm"),
+                tr("booking.step_pay", "Pay"),
+              ].map((label, index) => (
+                <Badge
+                  key={label}
+                  variant={bookingStep >= index ? "secondary" : "outline"}
+                  className="text-[11px]"
+                >
+                  {index + 1}. {label}
+                </Badge>
+              ))}
+            </div>
+
+            {bookingStep === 0 && (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  {tr("booking.pick_prompt", "Choose one available slot.")}
+                </p>
+                <div className="max-h-64 overflow-y-auto space-y-2">
+                  {openSlots.length > 0 ? (
+                    openSlots.map((slot) => {
+                      const selected = selectedSlotId === slot.id;
+                      return (
+                        <button
+                          key={slot.id}
+                          type="button"
+                          onClick={() => setSelectedSlotId(slot.id)}
+                          className={`w-full text-start rounded-md border p-3 transition-colors ${selected ? "bg-primary/10 border-primary/30" : "hover:bg-muted/40"}`}
+                        >
+                          <p className="text-sm font-medium">
+                            {new Date(slot.startsAt).toLocaleDateString()}{" "}
+                            {new Date(slot.startsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {slot.durationMinutes} {t("common.minutes")} • {slot.priceDinar} {t("common.dinar")}
+                          </p>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{t("slots.no_open_now")}</p>
+                  )}
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    onClick={() => setBookingStep(1)}
+                    disabled={!selectedSlotId}
+                    data-testid="button-booking-next-step"
+                  >
+                    {t("common.next")}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {bookingStep === 1 && selectedSlot && (
+              <div className="space-y-4">
+                <div className="rounded-lg border p-3">
+                  <p className="text-sm font-medium">
+                    {new Date(selectedSlot.startsAt).toLocaleDateString()}{" "}
+                    {new Date(selectedSlot.startsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {selectedSlot.durationMinutes} {t("common.minutes")} • {selectedSlot.priceDinar} {t("common.dinar")}
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">{tr("booking.session_type", "Session type")}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { value: "chat", label: t("appointment.chat") },
+                      { value: "video", label: t("appointment.video") },
+                      { value: "audio", label: t("appointment.audio") },
+                    ].map((option) => (
+                      <Button
+                        key={option.value}
+                        type="button"
+                        size="sm"
+                        variant={selectedSessionType === option.value ? "default" : "outline"}
+                        onClick={() => setSelectedSessionType(option.value as "chat" | "video" | "audio")}
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">{tr("booking.notes_optional", "Notes (optional)")}</p>
+                  <Textarea
+                    value={bookingNotes}
+                    onChange={(event) => setBookingNotes(event.target.value)}
+                    rows={3}
+                    placeholder={tr("booking.notes_placeholder", "Share anything the therapist should know before the session.")}
+                  />
+                </div>
+
+                <div className="flex justify-between gap-2">
+                  <Button variant="outline" onClick={() => setBookingStep(0)}>
+                    {t("common.back")}
+                  </Button>
+                  <Button
+                    onClick={() => confirmBookingMutation.mutate()}
+                    disabled={confirmBookingMutation.isPending}
+                    data-testid="button-booking-confirm"
+                  >
+                    {confirmBookingMutation.isPending ? t("common.loading") : tr("booking.confirm", "Confirm details")}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {bookingStep === 2 && bookingResult && (
+              <div className="space-y-4">
+                <div className="rounded-lg border p-3 bg-muted/40">
+                  <p className="text-sm font-medium">
+                    {tr("booking.payment_prompt", "Complete payment to finalize your booking.")}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {tr("booking.amount_due", "Amount due")}: {bookingResult.appointment.priceDinar || bookingResult.slot.priceDinar} {t("common.dinar")}
+                  </p>
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Button
+                    variant={selectedPaymentMethod === "flouci" ? "default" : "outline"}
+                    className="justify-start gap-2"
+                    onClick={() => paymentMutation.mutate("flouci")}
+                    disabled={paymentMutation.isPending}
+                    data-testid="button-pay-flouci"
+                  >
+                    <CreditCard className="h-4 w-4" />
+                    Flouci
+                  </Button>
+                  <Button
+                    variant={selectedPaymentMethod === "konnect" ? "default" : "outline"}
+                    className="justify-start gap-2"
+                    onClick={() => paymentMutation.mutate("konnect")}
+                    disabled={paymentMutation.isPending}
+                    data-testid="button-pay-konnect"
+                  >
+                    <Receipt className="h-4 w-4" />
+                    Konnect
+                  </Button>
+                </div>
+
+                {paymentRedirectUrl ? (
+                  <div className="space-y-2 rounded-lg border p-3">
+                    <p className="text-xs text-muted-foreground">{tr("booking.redirect_ready", "Payment link is ready.")}</p>
+                    <a href={paymentRedirectUrl} target="_blank" rel="noreferrer">
+                      <Button className="w-full" data-testid="button-open-payment-link">
+                        {tr("booking.open_payment", "Open payment page")}
+                      </Button>
+                    </a>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {tr("booking.select_provider", "Select a payment provider to continue.")}
+                  </p>
+                )}
+
+                <div className="flex justify-between gap-2">
+                  <Button variant="outline" onClick={() => setBookingStep(1)}>
+                    {t("common.back")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setBookingDialogOpen(false)}
+                    data-testid="button-booking-finish-later"
+                  >
+                    {tr("booking.finish_later", "Finish later")}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {profile.officePhotos && profile.officePhotos.length > 0 && (
           <motion.div
@@ -926,15 +1190,14 @@ export default function TherapistProfilePage() {
               {t("profile.send_message")}
             </Button>
           </Link>
-          <Link href={`/therapist/${userId}#slots`} className="flex-1">
-            <Button
-              className="w-full gap-1.5"
-              data-testid="button-cta-book"
-            >
-              <Calendar className="h-4 w-4" />
-              {t("profile.book_session")}
-            </Button>
-          </Link>
+          <Button
+            className="w-full gap-1.5 flex-1"
+            onClick={() => openBookingFlow()}
+            data-testid="button-cta-book"
+          >
+            <Calendar className="h-4 w-4" />
+            {t("profile.book_session")}
+          </Button>
         </div>
       </div>
 
@@ -950,15 +1213,14 @@ export default function TherapistProfilePage() {
               {t("profile.send_message")}
             </Button>
           </Link>
-          <Link href={`/therapist/${userId}#slots`}>
-            <Button
-              className="gap-1.5 shadow-lg"
-              data-testid="button-desktop-book"
-            >
-              <Calendar className="h-4 w-4" />
-              {t("profile.book_session")}
-            </Button>
-          </Link>
+          <Button
+            className="gap-1.5 shadow-lg"
+            onClick={() => openBookingFlow()}
+            data-testid="button-desktop-book"
+          >
+            <Calendar className="h-4 w-4" />
+            {t("profile.book_session")}
+          </Button>
         </div>
       </div>
     </AppLayout>

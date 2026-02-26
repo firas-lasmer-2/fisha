@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -27,10 +28,11 @@ import {
   Calendar,
   Clock,
   Video,
-  Palette,
   Link2,
   Send,
   CheckCircle,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import type { TherapistProfile, TherapistReview, TherapistSlot } from "@shared/schema";
@@ -56,34 +58,24 @@ interface SocialLinks {
   linkedin?: string;
 }
 
-const THEME_COLORS = [
-  "#6366f1",
-  "#8b5cf6",
-  "#a855f7",
-  "#ec4899",
-  "#f43f5e",
-  "#ef4444",
-  "#f97316",
-  "#eab308",
-  "#22c55e",
-  "#14b8a6",
-  "#06b6d4",
-  "#3b82f6",
-];
-
 export default function TherapistDashboardPage() {
   const { t, isRTL } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
+  const tr = (key: string, fallback: string) => {
+    const value = t(key);
+    return value === key ? fallback : value;
+  };
 
   const [headline, setHeadline] = useState("");
   const [aboutMe, setAboutMe] = useState("");
   const [approach, setApproach] = useState("");
   const [faqItems, setFaqItems] = useState<FaqItem[]>([]);
   const [videoIntroUrl, setVideoIntroUrl] = useState("");
+  const [officePhotosInput, setOfficePhotosInput] = useState("");
   const [socialLinks, setSocialLinks] = useState<SocialLinks>({});
   const [slug, setSlug] = useState("");
-  const [themeColor, setThemeColor] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [acceptingNewClients, setAcceptingNewClients] = useState(true);
   const [respondingTo, setRespondingTo] = useState<number | null>(null);
   const [responseText, setResponseText] = useState("");
@@ -109,9 +101,9 @@ export default function TherapistDashboardPage() {
       setApproach(p.approach || "");
       setFaqItems((p.faqItems as FaqItem[]) || []);
       setVideoIntroUrl(p.videoIntroUrl || "");
+      setOfficePhotosInput(((p.officePhotos as string[] | null) || []).join("\n"));
       setSocialLinks((p.socialLinks as SocialLinks) || {});
       setSlug(p.slug || "");
-      setThemeColor(p.profileThemeColor || "");
       setAcceptingNewClients(p.acceptingNewClients ?? true);
       setSlotPriceDinar(p.rateDinar || 20);
       setFormLoaded(true);
@@ -126,9 +118,12 @@ export default function TherapistDashboardPage() {
         approach,
         faqItems,
         videoIntroUrl: videoIntroUrl || null,
+        officePhotos: officePhotosInput
+          .split(/\r?\n/)
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0),
         socialLinks,
         slug: slug || null,
-        profileThemeColor: themeColor || null,
         acceptingNewClients,
       });
     },
@@ -389,113 +384,6 @@ export default function TherapistDashboardPage() {
 
                 <Separator />
 
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <label className="text-sm font-medium">{t("profile.faq")}</label>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={addFaqItem}
-                      data-testid="button-add-faq"
-                    >
-                      <Plus className="h-4 w-4 me-1" />
-                      {t("therapist_dash.add_question")}
-                    </Button>
-                  </div>
-                  {faqItems.length === 0 && (
-                    <p className="text-sm text-muted-foreground">
-                      {t("therapist_dash.no_faq")}
-                    </p>
-                  )}
-                  {faqItems.map((item, index) => (
-                    <Card key={index} className="p-4 space-y-2">
-                      <div className="flex items-start gap-2">
-                        <div className="flex-1 space-y-2">
-                          <Input
-                            value={item.question}
-                            onChange={(e) => updateFaqItem(index, "question", e.target.value)}
-                            placeholder={t("common.question")}
-                            data-testid={`input-faq-question-${index}`}
-                          />
-                          <Textarea
-                            value={item.answer}
-                            onChange={(e) => updateFaqItem(index, "answer", e.target.value)}
-                            placeholder={t("common.answer")}
-                            rows={2}
-                            data-testid={`input-faq-answer-${index}`}
-                          />
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeFaqItem(index)}
-                          className="text-destructive shrink-0"
-                          data-testid={`button-remove-faq-${index}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-
-                <Separator />
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium flex items-center gap-2" htmlFor="videoIntroUrl">
-                    <Video className="h-4 w-4" />
-                    {t("profile.video_intro")}
-                  </label>
-                  <Input
-                    id="videoIntroUrl"
-                    value={videoIntroUrl}
-                    onChange={(e) => setVideoIntroUrl(e.target.value)}
-                    placeholder="https://youtube.com/watch?v=..."
-                    type="url"
-                    data-testid="input-video-url"
-                  />
-                </div>
-
-                <Separator />
-
-                <div className="space-y-3">
-                  <label className="text-sm font-medium flex items-center gap-2">
-                    <Link2 className="h-4 w-4" />
-                    {t("therapist_dash.social_links")}
-                  </label>
-                  <div className="grid sm:grid-cols-3 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">{t("social.facebook")}</label>
-                      <Input
-                        value={socialLinks.facebook || ""}
-                        onChange={(e) => setSocialLinks({ ...socialLinks, facebook: e.target.value })}
-                        placeholder="https://facebook.com/..."
-                        data-testid="input-social-facebook"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">{t("social.instagram")}</label>
-                      <Input
-                        value={socialLinks.instagram || ""}
-                        onChange={(e) => setSocialLinks({ ...socialLinks, instagram: e.target.value })}
-                        placeholder="https://instagram.com/..."
-                        data-testid="input-social-instagram"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">{t("social.linkedin")}</label>
-                      <Input
-                        value={socialLinks.linkedin || ""}
-                        onChange={(e) => setSocialLinks({ ...socialLinks, linkedin: e.target.value })}
-                        placeholder="https://linkedin.com/in/..."
-                        data-testid="input-social-linkedin"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
                 <div className="space-y-2">
                   <label className="text-sm font-medium" htmlFor="slug">
                     {t("therapist_dash.custom_slug")}
@@ -515,27 +403,131 @@ export default function TherapistDashboardPage() {
 
                 <Separator />
 
-                <div className="space-y-3">
-                  <label className="text-sm font-medium flex items-center gap-2">
-                    <Palette className="h-4 w-4" />
-                    {t("therapist_dash.theme_color")}
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {THEME_COLORS.map((color) => (
-                      <button
-                        key={color}
-                        className={`w-8 h-8 rounded-md transition-all ${
-                          themeColor === color
-                            ? "ring-2 ring-offset-2 ring-foreground scale-110"
-                            : ""
-                        }`}
-                        style={{ backgroundColor: color }}
-                        onClick={() => setThemeColor(themeColor === color ? "" : color)}
-                        data-testid={`button-color-${color.replace("#", "")}`}
+                <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-between"
+                      data-testid="button-toggle-advanced-profile"
+                    >
+                      {tr("therapist_dash.advanced_options", "Advanced profile options")}
+                      {advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-4 space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium flex items-center gap-2" htmlFor="videoIntroUrl">
+                        <Video className="h-4 w-4" />
+                        {t("profile.video_intro")}
+                      </label>
+                      <Input
+                        id="videoIntroUrl"
+                        value={videoIntroUrl}
+                        onChange={(e) => setVideoIntroUrl(e.target.value)}
+                        placeholder="https://youtube.com/watch?v=..."
+                        type="url"
+                        data-testid="input-video-url"
                       />
-                    ))}
-                  </div>
-                </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">{t("profile.office_gallery")}</label>
+                      <Textarea
+                        value={officePhotosInput}
+                        onChange={(e) => setOfficePhotosInput(e.target.value)}
+                        rows={4}
+                        placeholder={tr("therapist_dash.office_photos_placeholder", "One image URL per line")}
+                        data-testid="textarea-office-photos"
+                      />
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className="text-sm font-medium flex items-center gap-2">
+                        <Link2 className="h-4 w-4" />
+                        {t("therapist_dash.social_links")}
+                      </label>
+                      <div className="grid sm:grid-cols-3 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-xs text-muted-foreground">{t("social.facebook")}</label>
+                          <Input
+                            value={socialLinks.facebook || ""}
+                            onChange={(e) => setSocialLinks({ ...socialLinks, facebook: e.target.value })}
+                            placeholder="https://facebook.com/..."
+                            data-testid="input-social-facebook"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs text-muted-foreground">{t("social.instagram")}</label>
+                          <Input
+                            value={socialLinks.instagram || ""}
+                            onChange={(e) => setSocialLinks({ ...socialLinks, instagram: e.target.value })}
+                            placeholder="https://instagram.com/..."
+                            data-testid="input-social-instagram"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs text-muted-foreground">{t("social.linkedin")}</label>
+                          <Input
+                            value={socialLinks.linkedin || ""}
+                            onChange={(e) => setSocialLinks({ ...socialLinks, linkedin: e.target.value })}
+                            placeholder="https://linkedin.com/in/..."
+                            data-testid="input-social-linkedin"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <label className="text-sm font-medium">{t("profile.faq")}</label>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={addFaqItem}
+                          data-testid="button-add-faq"
+                        >
+                          <Plus className="h-4 w-4 me-1" />
+                          {t("therapist_dash.add_question")}
+                        </Button>
+                      </div>
+                      {faqItems.length === 0 && (
+                        <p className="text-sm text-muted-foreground">
+                          {t("therapist_dash.no_faq")}
+                        </p>
+                      )}
+                      {faqItems.map((item, index) => (
+                        <Card key={index} className="p-4 space-y-2">
+                          <div className="flex items-start gap-2">
+                            <div className="flex-1 space-y-2">
+                              <Input
+                                value={item.question}
+                                onChange={(e) => updateFaqItem(index, "question", e.target.value)}
+                                placeholder={t("common.question")}
+                                data-testid={`input-faq-question-${index}`}
+                              />
+                              <Textarea
+                                value={item.answer}
+                                onChange={(e) => updateFaqItem(index, "answer", e.target.value)}
+                                placeholder={t("common.answer")}
+                                rows={2}
+                                data-testid={`input-faq-answer-${index}`}
+                              />
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removeFaqItem(index)}
+                              className="text-destructive shrink-0"
+                              data-testid={`button-remove-faq-${index}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
 
                 <Separator />
 

@@ -35,6 +35,7 @@ export default function LandingPage() {
   const { t, isRTL } = useI18n();
   const { user, isLoading } = useAuth();
   const Arrow = isRTL ? ArrowLeft : ArrowRight;
+  const currentYear = new Date().getFullYear();
 
   const quizCards = [
     { key: "anxiety", icon: Brain, label: t("onboarding.feeling_anxious"), spec: "anxiety" },
@@ -448,14 +449,14 @@ export default function LandingPage() {
             </div>
 
             <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
-              <span>{t("footer.about")}</span>
-              <span>{t("footer.privacy")}</span>
-              <span>{t("footer.terms")}</span>
-              <span>{t("footer.contact")}</span>
+              <Link href="/about" className="hover:text-foreground transition-colors">{t("footer.about")}</Link>
+              <Link href="/privacy" className="hover:text-foreground transition-colors">{t("footer.privacy")}</Link>
+              <Link href="/terms" className="hover:text-foreground transition-colors">{t("footer.terms")}</Link>
+              <Link href="/contact" className="hover:text-foreground transition-colors">{t("footer.contact")}</Link>
             </div>
 
             <div className="text-sm text-muted-foreground">
-              © 2025 Shifa. {t("footer.rights")}
+              © {currentYear} Shifa. {t("footer.rights")}
             </div>
           </div>
         </div>

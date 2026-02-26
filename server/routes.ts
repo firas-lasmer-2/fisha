@@ -5,6 +5,7 @@ import { supabaseAdmin } from "./supabase";
 import OpenAI from "openai";
 import crypto from "crypto";
 import { sendPushToTokens } from "./notifications";
+import { mapProfile, type User } from "@shared/schema";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -113,6 +114,24 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  const fallbackProfile = (authUser: { id: string; email?: string }, role: string = "client"): User => ({
+    id: authUser.id,
+    email: authUser.email || null,
+    firstName: null,
+    lastName: null,
+    profileImageUrl: null,
+    role,
+    phone: null,
+    publicKey: null,
+    languagePreference: "ar",
+    governorate: null,
+    bio: null,
+    isAnonymous: false,
+    onboardingCompleted: false,
+    createdAt: null,
+    updatedAt: null,
+  });
+
   const notifyUser = async (
     userId: string,
     title: string,
@@ -141,6 +160,22 @@ export async function registerRoutes(
       return role as "client" | "therapist" | "listener" | "moderator" | "admin";
     }
     return "client";
+  };
+
+  const markOnboardingCompleted = async (userId: string, preferredLanguage?: string | null) => {
+    const updatePayload: Record<string, any> = {
+      onboarding_completed: true,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (preferredLanguage && ["ar", "fr", "darija"].includes(preferredLanguage)) {
+      updatePayload.language_preference = preferredLanguage;
+    }
+
+    await supabaseAdmin
+      .from("profiles")
+      .update(updatePayload)
+      .eq("id", userId);
   };
 
   const upsertProfileSafely = async (payload: {
@@ -186,6 +221,19 @@ export async function registerRoutes(
       return insertedRow;
     }
 
+    // If email is already associated with a legacy profile row, retry without email.
+    if ((insertError as any)?.code === "23505" && String((insertError as any)?.message || "").includes("profiles_email_key")) {
+      const retryPayload = { ...insertPayload, email: null };
+      const { data: retryRow, error: retryError } = await supabaseAdmin
+        .from("profiles")
+        .insert(retryPayload)
+        .select("*")
+        .single();
+      if (!retryError && retryRow) {
+        return retryRow;
+      }
+    }
+
     if ((insertError as any)?.code === "23505") {
       const { data: existingRow, error: existingError } = await supabaseAdmin
         .from("profiles")
@@ -205,12 +253,12 @@ export async function registerRoutes(
     if (existing) return existing;
 
     try {
-      await upsertProfileSafely({
+      const row = await upsertProfileSafely({
         id: authUser.id,
         email: authUser.email || null,
         role: "client",
       });
-      return await storage.getUser(authUser.id);
+      return mapProfile(row);
     } catch (error: any) {
       console.error("Failed to ensure profile", {
         userId: authUser.id,
@@ -219,9 +267,38 @@ export async function registerRoutes(
         details: error?.details,
         hint: error?.hint,
       });
-      return undefined;
+      return fallbackProfile(authUser);
     }
   };
+
+  app.get("/api/health", async (_req, res) => {
+    try {
+      const { error } = await supabaseAdmin.from("profiles").select("id", { head: true, count: "estimated" }).limit(1);
+      if (error) {
+        return res.status(503).json({
+          ok: false,
+          status: "degraded",
+          service: "api",
+          db: "unreachable",
+          reason: error.message,
+        });
+      }
+      res.json({
+        ok: true,
+        status: "healthy",
+        service: "api",
+        db: "reachable",
+      });
+    } catch (error: any) {
+      res.status(503).json({
+        ok: false,
+        status: "degraded",
+        service: "api",
+        db: "unreachable",
+        reason: error?.message || "unknown",
+      });
+    }
+  });
 
   // ---- Auth routes ----
 
@@ -259,7 +336,7 @@ export async function registerRoutes(
         email: data.user?.email || email,
       });
       res.json({
-        user: profile,
+        user: profile || fallbackProfile({ id: data.user!.id, email: data.user?.email || email }, normalizeRole(role)),
         session: session.session,
       });
     } catch (error) {
@@ -282,7 +359,7 @@ export async function registerRoutes(
         email: data.user.email || email,
       });
       res.json({
-        user: profile,
+        user: profile || fallbackProfile({ id: data.user.id, email: data.user.email || email }),
         session: data.session,
       });
     } catch (error) {
@@ -315,7 +392,7 @@ export async function registerRoutes(
         ? await ensureProfile({ id: data.user.id, email: data.user.email || undefined })
         : null;
       res.json({
-        user: profile,
+        user: profile || (data.user ? fallbackProfile({ id: data.user.id, email: data.user.email || undefined }) : null),
         session: data.session,
       });
     } catch (error) {
@@ -328,7 +405,6 @@ export async function registerRoutes(
       const authUser = await extractUser(req);
       if (!authUser) return res.status(401).json({ message: "Unauthorized" });
       const profile = await ensureProfile(authUser);
-      if (!profile) return res.status(500).json({ message: "Failed to resolve profile" });
       res.json(profile);
     } catch (error) {
       res.status(500).json({ message: "Failed to get user" });
@@ -362,6 +438,10 @@ export async function registerRoutes(
         gender: req.query.gender as string | undefined,
         minPrice: req.query.minPrice ? Number(req.query.minPrice) : undefined,
         maxPrice: req.query.maxPrice ? Number(req.query.maxPrice) : undefined,
+        tier:
+          req.query.tier === "student" || req.query.tier === "professional"
+            ? (req.query.tier as "student" | "professional")
+            : undefined,
       };
       const therapists = await storage.getTherapistProfiles(filters);
       res.json(therapists);
@@ -1266,9 +1346,57 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
         budgetRange: req.body.budgetRange,
         howDidYouHear: req.body.howDidYouHear,
       });
+      await markOnboardingCompleted(
+        userId,
+        typeof req.body.preferredLanguage === "string" ? req.body.preferredLanguage : null,
+      );
       res.status(201).json(response);
     } catch (error) {
       res.status(500).json({ message: "Failed to save onboarding" });
+    }
+  });
+
+  app.post("/api/onboarding/quick-start", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const response = await storage.saveOnboardingResponse({
+        userId,
+        primaryConcerns: normalizeStringArray(req.body.primaryConcerns),
+        preferredLanguage: typeof req.body.preferredLanguage === "string" ? req.body.preferredLanguage : null,
+        genderPreference: null,
+        budgetRange: null,
+        howDidYouHear: "quick_start",
+      });
+      await markOnboardingCompleted(
+        userId,
+        typeof req.body.preferredLanguage === "string" ? req.body.preferredLanguage : null,
+      );
+      res.status(201).json(response);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to save quick-start onboarding" });
+    }
+  });
+
+  app.post("/api/onboarding/preferences", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const existing = await storage.getOnboardingResponse(userId);
+      const preferredLanguage =
+        typeof req.body.preferredLanguage === "string"
+          ? req.body.preferredLanguage
+          : existing?.preferredLanguage || null;
+      const response = await storage.saveOnboardingResponse({
+        userId,
+        primaryConcerns: existing?.primaryConcerns || null,
+        preferredLanguage,
+        genderPreference: req.body.genderPreference || existing?.genderPreference || null,
+        budgetRange: req.body.budgetRange || existing?.budgetRange || null,
+        howDidYouHear: req.body.howDidYouHear || existing?.howDidYouHear || "follow_up",
+      });
+      await markOnboardingCompleted(userId, preferredLanguage);
+      res.status(201).json(response);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to save onboarding preferences" });
     }
   });
 
@@ -1350,6 +1478,54 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
       res.json(progress);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch listener progress" });
+    }
+  });
+
+  app.get("/api/listener/progress/details", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const summary = await storage.getListenerProgressSummary(userId);
+      res.json(summary);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch listener progress details" });
+    }
+  });
+
+  app.get("/api/listener/leaderboard", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const limitRaw = Number(req.query.limit);
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(50, Math.floor(limitRaw))) : 20;
+      const leaderboard = await storage.getListenerLeaderboard(limit);
+
+      let myRank: number | null = null;
+      const inTop = leaderboard.find((entry) => entry.listenerId === userId);
+      if (inTop) {
+        myRank = inTop.rank;
+      } else {
+        const { data: myProgress } = await supabaseAdmin
+          .from("listener_progress")
+          .select("points")
+          .eq("listener_id", userId)
+          .maybeSingle();
+        if (myProgress) {
+          const { data: allProgressRows } = await supabaseAdmin
+            .from("listener_progress")
+            .select("listener_id, points")
+            .order("points", { ascending: false });
+          if (allProgressRows) {
+            const sorted = allProgressRows
+              .map((row: any) => ({ listenerId: row.listener_id, points: Number(row.points || 0) }))
+              .sort((a, b) => b.points - a.points);
+            const index = sorted.findIndex((row) => row.listenerId === userId);
+            myRank = index >= 0 ? index + 1 : null;
+          }
+        }
+      }
+
+      res.json({ leaderboard, myRank });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch listener leaderboard" });
     }
   });
 
@@ -1448,6 +1624,53 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ message: "Failed to leave listener queue" });
+    }
+  });
+
+  app.get("/api/peer/queue/status", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const [activeQueueEntry, waitingEntries, availableListeners] = await Promise.all([
+        storage.getActiveQueueEntry(userId),
+        storage.listWaitingQueueEntries(),
+        storage.listAvailableListeners(),
+      ]);
+
+      if (!activeQueueEntry || activeQueueEntry.status !== "waiting") {
+        return res.json({
+          activeQueueEntry: activeQueueEntry || null,
+          queuePosition: null,
+          waitingCount: waitingEntries.length,
+          availableListeners: availableListeners.length,
+          availableForYou: availableListeners.length,
+          estimatedWaitMinutes: null,
+        });
+      }
+
+      const queuePositionIndex = waitingEntries.findIndex((entry) => entry.id === activeQueueEntry.id);
+      const queuePosition = queuePositionIndex >= 0 ? queuePositionIndex + 1 : null;
+
+      const matchedListeners = await storage.listAvailableListeners(
+        activeQueueEntry.preferredLanguage || undefined,
+        activeQueueEntry.topicTags || undefined,
+      );
+
+      const availableForYou = matchedListeners.length;
+      const positionForEstimate = queuePosition || waitingEntries.length || 1;
+      const estimatedWaitMinutes = availableForYou > 0
+        ? Math.max(1, Math.ceil(positionForEstimate / availableForYou) * 3)
+        : Math.max(3, positionForEstimate * 4);
+
+      res.json({
+        activeQueueEntry,
+        queuePosition,
+        waitingCount: waitingEntries.length,
+        availableListeners: availableListeners.length,
+        availableForYou,
+        estimatedWaitMinutes,
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch queue status" });
     }
   });
 
@@ -1666,19 +1889,30 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
         return res.status(400).json({ message: "rating must be between 1 and 5" });
       }
 
-      const feedback = await storage.createPeerSessionFeedback({
-        sessionId,
-        clientId: session.clientId,
-        listenerId: session.listenerId,
-        rating,
-        tags: normalizeStringArray(req.body.tags),
-        comment: req.body.comment || null,
-      });
+      const comment = typeof req.body.comment === "string" ? req.body.comment.trim() : "";
+
+      let feedback;
+      try {
+        feedback = await storage.createPeerSessionFeedback({
+          sessionId,
+          clientId: session.clientId,
+          listenerId: session.listenerId,
+          rating,
+          tags: normalizeStringArray(req.body.tags),
+          comment: comment || null,
+        });
+      } catch (error: any) {
+        if (error?.code === "23505") {
+          return res.status(409).json({ message: "Feedback already submitted for this session" });
+        }
+        throw error;
+      }
 
       const progress = await storage.applyListenerFeedbackOutcome({
         sessionId,
         listenerId: session.listenerId,
         rating,
+        hasDetailedComment: comment.length >= 40,
       });
 
       res.status(201).json({ feedback, listenerProgress: progress });
@@ -1740,7 +1974,12 @@ ${JSON.stringify(moods.map((m) => ({ score: m.moodScore, date: m.createdAt, emot
         storage.listListenerApplications(status),
         storage.listOpenPeerReports(),
       ]);
-      res.json({ applications, reports });
+      const listenerIds = Array.from(new Set([
+        ...applications.map((application) => application.userId),
+        ...reports.map((report) => report.targetUserId).filter((id): id is string => Boolean(id)),
+      ]));
+      const riskSnapshots = await storage.getListenerRiskSnapshots(listenerIds);
+      res.json({ applications, reports, riskSnapshots });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch listener moderation data" });
     }

@@ -6,18 +6,36 @@ import { useI18n } from "@/lib/i18n";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ClipboardCheck, ShieldAlert, UserRoundCog } from "lucide-react";
 import type { ListenerApplication, PeerReport, TherapistProfile, User } from "@shared/schema";
 
 interface AdminListenersPayload {
   applications: ListenerApplication[];
   reports: PeerReport[];
+  riskSnapshots: ListenerRiskSnapshot[];
 }
 
 type TherapistRow = TherapistProfile & { user: User };
+type ListenerRiskSnapshot = {
+  listenerId: string;
+  riskScore: number;
+  riskLevel: "low" | "medium" | "high";
+  openReports: number;
+  severeOpenReports: number;
+  recentLowRatings: number;
+  averageRating: number;
+  ratingCount: number;
+  penaltyPoints: number;
+};
 
 export default function AdminListenersPage() {
   const { t } = useI18n();
   const { toast } = useToast();
+  const tr = (key: string, fallback: string) => {
+    const value = t(key);
+    return value === key ? fallback : value;
+  };
 
   const { data, isLoading } = useQuery<AdminListenersPayload>({
     queryKey: ["/api/admin/listeners"],
@@ -84,174 +102,302 @@ export default function AdminListenersPage() {
 
   const applications = data?.applications || [];
   const reports = data?.reports || [];
+  const riskSnapshots = data?.riskSnapshots || [];
+  const riskByListenerId = new Map(riskSnapshots.map((risk) => [risk.listenerId, risk]));
+  const highRiskCount = riskSnapshots.filter((risk) => risk.riskLevel === "high").length;
+  const openApplications = applications.filter((application) =>
+    application.status === "pending" || application.status === "changes_requested",
+  );
+  const sortedApplications = [...applications].sort((a, b) => {
+    const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return bTime - aTime;
+  });
 
   return (
     <AppLayout>
       <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-4">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle>{t("admin.listeners_title")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {isLoading ? (
-              <p className="text-sm text-muted-foreground">{t("admin.loading")}</p>
-            ) : applications.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t("admin.no_applications")}</p>
-            ) : (
-              applications.map((application) => (
-                <div key={application.id} className="border rounded-md p-3 space-y-2">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div>
-                      <p className="text-sm font-medium">{t("admin.user_id")}: {application.userId}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {application.languages?.join(", ") || t("admin.no_languages")}
-                      </p>
+        <div className="grid gap-3 sm:grid-cols-4">
+          <Card>
+            <CardContent className="p-4 flex items-center gap-3">
+              <ClipboardCheck className="h-5 w-5 text-primary" />
+              <div>
+                <p className="text-xs text-muted-foreground">{t("admin.listeners_title")}</p>
+                <p className="text-lg font-semibold">{openApplications.length}</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4 flex items-center gap-3">
+              <ShieldAlert className="h-5 w-5 text-destructive" />
+              <div>
+                <p className="text-xs text-muted-foreground">{t("admin.open_reports")}</p>
+                <p className="text-lg font-semibold">{reports.length}</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4 flex items-center gap-3">
+              <UserRoundCog className="h-5 w-5 text-chart-2" />
+              <div>
+                <p className="text-xs text-muted-foreground">{t("admin.therapist_tiers")}</p>
+                <p className="text-lg font-semibold">{therapists.length}</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4 flex items-center gap-3">
+              <ShieldAlert className="h-5 w-5 text-amber-600" />
+              <div>
+                <p className="text-xs text-muted-foreground">{tr("admin.high_risk", "High risk listeners")}</p>
+                <p className="text-lg font-semibold">{highRiskCount}</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Tabs defaultValue="applications" className="space-y-4">
+          <TabsList className="grid grid-cols-3">
+            <TabsTrigger value="applications">{t("admin.listeners_title")}</TabsTrigger>
+            <TabsTrigger value="reports">{t("admin.open_reports")}</TabsTrigger>
+            <TabsTrigger value="tiers">{t("admin.therapist_tiers")}</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="applications">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle>{t("admin.listeners_title")}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {isLoading ? (
+                  <p className="text-sm text-muted-foreground">{t("admin.loading")}</p>
+                ) : sortedApplications.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{t("admin.no_applications")}</p>
+                ) : (
+                  sortedApplications.map((application) => {
+                    const canReview =
+                      application.status === "pending" || application.status === "changes_requested";
+                    const canActivate = application.status === "approved";
+                    const risk = riskByListenerId.get(application.userId);
+                    const riskVariant = risk?.riskLevel === "high"
+                      ? "destructive"
+                      : risk?.riskLevel === "medium"
+                        ? "secondary"
+                        : "outline";
+
+                    return (
+                      <div key={application.id} className="border rounded-md p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div>
+                            <p className="text-sm font-medium">{t("admin.user_id")}: {application.userId}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {application.languages?.join(", ") || t("admin.no_languages")}
+                            </p>
+                            {application.createdAt && (
+                              <p className="text-xs text-muted-foreground">
+                                {new Date(application.createdAt).toLocaleString()}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {risk && (
+                              <Badge variant={riskVariant}>
+                                {tr("admin.risk", "Risk")}: {risk.riskLevel} ({risk.riskScore})
+                              </Badge>
+                            )}
+                            <Badge variant="secondary">{application.status}</Badge>
+                          </div>
+                        </div>
+                        {risk && (
+                          <p className="text-xs text-muted-foreground">
+                            {tr("admin.risk_details", "Open reports")} {risk.openReports} • {tr("admin.low_ratings", "Low ratings (30d)")} {risk.recentLowRatings} • {tr("admin.penalty_points", "Penalty points")} {risk.penaltyPoints}
+                          </p>
+                        )}
+
+                        {application.motivation && (
+                          <p className="text-sm text-muted-foreground">{application.motivation}</p>
+                        )}
+                        {application.relevantExperience && (
+                          <p className="text-xs text-muted-foreground">{application.relevantExperience}</p>
+                        )}
+                        {application.moderationNotes && (
+                          <p className="text-xs text-muted-foreground">{application.moderationNotes}</p>
+                        )}
+
+                        <div className="flex flex-wrap gap-2">
+                          {canReview && (
+                            <>
+                              <Button
+                                size="sm"
+                                onClick={() =>
+                                  reviewMutation.mutate({ applicationId: application.id, status: "approved" })
+                                }
+                                disabled={reviewMutation.isPending}
+                              >
+                                {t("admin.approve")}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  reviewMutation.mutate({ applicationId: application.id, status: "changes_requested" })
+                                }
+                                disabled={reviewMutation.isPending}
+                              >
+                                {t("admin.request_changes")}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() =>
+                                  reviewMutation.mutate({ applicationId: application.id, status: "rejected" })
+                                }
+                                disabled={reviewMutation.isPending}
+                              >
+                                {t("admin.reject")}
+                              </Button>
+                            </>
+                          )}
+                          {canActivate && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() =>
+                                  activateMutation.mutate({ userId: application.userId, mode: "trial" })
+                                }
+                                disabled={activateMutation.isPending}
+                              >
+                                {t("admin.activate_trial")}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() =>
+                                  activateMutation.mutate({ userId: application.userId, mode: "live" })
+                                }
+                                disabled={activateMutation.isPending}
+                              >
+                                {t("admin.activate_live")}
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="reports">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">{t("admin.open_reports")}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {riskSnapshots.length > 0 && (
+                  <div className="border rounded-md p-3 space-y-2">
+                    <p className="text-sm font-medium">{tr("admin.risk_watchlist", "Risk watchlist")}</p>
+                    <div className="space-y-1.5">
+                      {riskSnapshots.slice(0, 5).map((risk) => (
+                        <div key={risk.listenerId} className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">{risk.listenerId}</span>
+                          <Badge variant={risk.riskLevel === "high" ? "destructive" : risk.riskLevel === "medium" ? "secondary" : "outline"}>
+                            {risk.riskLevel} ({risk.riskScore})
+                          </Badge>
+                        </div>
+                      ))}
                     </div>
-                    <Badge variant="secondary">{application.status}</Badge>
                   </div>
-
-                  {application.motivation && (
-                    <p className="text-sm text-muted-foreground">{application.motivation}</p>
-                  )}
-
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      onClick={() =>
-                        reviewMutation.mutate({ applicationId: application.id, status: "approved" })
-                      }
-                      disabled={reviewMutation.isPending}
-                    >
-                      {t("admin.approve")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        reviewMutation.mutate({ applicationId: application.id, status: "changes_requested" })
-                      }
-                      disabled={reviewMutation.isPending}
-                    >
-                      {t("admin.request_changes")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() =>
-                        reviewMutation.mutate({ applicationId: application.id, status: "rejected" })
-                      }
-                      disabled={reviewMutation.isPending}
-                    >
-                      {t("admin.reject")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() =>
-                        activateMutation.mutate({ userId: application.userId, mode: "trial" })
-                      }
-                      disabled={activateMutation.isPending}
-                    >
-                      {t("admin.activate_trial")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() =>
-                        activateMutation.mutate({ userId: application.userId, mode: "live" })
-                      }
-                      disabled={activateMutation.isPending}
-                    >
-                      {t("admin.activate_live")}
-                    </Button>
-                  </div>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">{t("admin.open_reports")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {reports.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t("admin.no_reports")}</p>
-            ) : (
-              reports.map((report) => (
-                <div key={report.id} className="border rounded-md p-3 space-y-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium">{report.reason}</p>
-                    <Badge variant="outline">{report.severity}</Badge>
-                  </div>
-                  {report.details && (
-                    <p className="text-sm text-muted-foreground">{report.details}</p>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => resolveReportMutation.mutate(report.id)}
-                    disabled={resolveReportMutation.isPending}
-                  >
-                    {t("admin.resolve")}
-                  </Button>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">{t("admin.therapist_tiers")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {therapists.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t("admin.no_therapists")}</p>
-            ) : (
-              therapists.map((therapist) => (
-                <div key={therapist.userId} className="border rounded-md p-3 space-y-2">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div>
-                      <p className="text-sm font-medium">
-                        {therapist.user.firstName} {therapist.user.lastName}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {therapist.rateDinar ?? "--"} {t("common.dinar")}
-                      </p>
+                )}
+                {reports.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{t("admin.no_reports")}</p>
+                ) : (
+                  reports.map((report) => (
+                    <div key={report.id} className="border rounded-md p-3 space-y-1">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <p className="text-sm font-medium">{report.reason}</p>
+                        <Badge variant={report.severity === "high" ? "destructive" : "outline"}>
+                          {report.severity}
+                        </Badge>
+                      </div>
+                      {report.details && (
+                        <p className="text-sm text-muted-foreground">{report.details}</p>
+                      )}
+                      <div className="flex justify-between gap-2 text-xs text-muted-foreground">
+                        <span>#{report.id}</span>
+                        {report.createdAt && <span>{new Date(report.createdAt).toLocaleString()}</span>}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => resolveReportMutation.mutate(report.id)}
+                        disabled={resolveReportMutation.isPending}
+                      >
+                        {t("admin.resolve")}
+                      </Button>
                     </div>
-                    <Badge variant="outline">
-                      {therapist.tier === "student" ? t("tier.student") : t("tier.professional")}
-                    </Badge>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        tierMutation.mutate({ therapistId: therapist.userId, tier: "student" })
-                      }
-                      disabled={tierMutation.isPending}
-                    >
-                      {t("admin.set_student")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        tierMutation.mutate({ therapistId: therapist.userId, tier: "professional" })
-                      }
-                      disabled={tierMutation.isPending}
-                    >
-                      {t("admin.set_professional")}
-                    </Button>
-                  </div>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="tiers">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">{t("admin.therapist_tiers")}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {therapists.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{t("admin.no_therapists")}</p>
+                ) : (
+                  therapists.map((therapist) => (
+                    <div key={therapist.userId} className="border rounded-md p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div>
+                          <p className="text-sm font-medium">
+                            {therapist.user.firstName} {therapist.user.lastName}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {therapist.rateDinar ?? "--"} {t("common.dinar")}
+                          </p>
+                        </div>
+                        <Badge variant="outline">
+                          {therapist.tier === "student" ? t("tier.student") : t("tier.professional")}
+                        </Badge>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            tierMutation.mutate({ therapistId: therapist.userId, tier: "student" })
+                          }
+                          disabled={tierMutation.isPending}
+                        >
+                          {t("admin.set_student")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            tierMutation.mutate({ therapistId: therapist.userId, tier: "professional" })
+                          }
+                          disabled={tierMutation.isPending}
+                        >
+                          {t("admin.set_professional")}
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
     </AppLayout>
   );

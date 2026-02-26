@@ -10,10 +10,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Progress } from "@/components/ui/progress";
 import type {
   ListenerApplication,
   ListenerProfile,
   ListenerProgress,
+  ListenerPointsLedger,
   PeerSession,
   User,
 } from "@shared/schema";
@@ -27,11 +29,40 @@ interface PeerSessionsPayload {
   sessions: (PeerSession & { otherUser: User })[];
 }
 
+interface ListenerProgressDetailsPayload {
+  progress: ListenerProgress;
+  nextLevel: number | null;
+  nextLevelThreshold: number | null;
+  pointsToNextLevel: number;
+  averageRating: number;
+  ratingCount: number;
+  positiveStreak: number;
+  recentLedger: ListenerPointsLedger[];
+}
+
+interface ListenerLeaderboardPayload {
+  leaderboard: Array<{
+    listenerId: string;
+    rank: number;
+    displayName: string;
+    level: number;
+    points: number;
+    averageRating: number;
+    ratingCount: number;
+    positiveStreak: number;
+  }>;
+  myRank: number | null;
+}
+
 export default function ListenerDashboardPage() {
   const { t } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
   const [isAvailable, setIsAvailable] = useState(false);
+  const tr = (key: string, fallback: string) => {
+    const value = t(key);
+    return value === key ? fallback : value;
+  };
 
   const { data: listenerData, isLoading } = useQuery<ListenerApplicationPayload>({
     queryKey: ["/api/listener/application"],
@@ -41,8 +72,12 @@ export default function ListenerDashboardPage() {
     queryKey: ["/api/peer/sessions"],
   });
 
-  const { data: listenerProgress } = useQuery<ListenerProgress>({
-    queryKey: ["/api/listener/progress"],
+  const { data: listenerProgressDetails } = useQuery<ListenerProgressDetailsPayload>({
+    queryKey: ["/api/listener/progress/details"],
+  });
+
+  const { data: leaderboardPayload } = useQuery<ListenerLeaderboardPayload>({
+    queryKey: ["/api/listener/leaderboard", "?limit=8"],
   });
 
   useEffect(() => {
@@ -70,6 +105,45 @@ export default function ListenerDashboardPage() {
   const application = listenerData?.application;
   const sessions = peerSessionsData?.sessions || [];
   const activeSessions = sessions.filter((session) => session.status === "active");
+  const listenerProgress = listenerProgressDetails?.progress;
+  const currentPoints = listenerProgress?.points ?? 0;
+  const nextLevelThreshold = listenerProgressDetails?.nextLevelThreshold ?? null;
+  const progressPct = nextLevelThreshold && nextLevelThreshold > 0
+    ? Math.max(0, Math.min(100, ((nextLevelThreshold - (listenerProgressDetails?.pointsToNextLevel ?? 0)) / nextLevelThreshold) * 100))
+    : 100;
+  const levelNameByIndex = [
+    tr("listener.level_name_1", "New Listener"),
+    tr("listener.level_name_2", "Supportive Presence"),
+    tr("listener.level_name_3", "Trusted Companion"),
+    tr("listener.level_name_4", "Compassion Guide"),
+    tr("listener.level_name_5", "Community Anchor"),
+    tr("listener.level_name_6", "Hope Builder"),
+    tr("listener.level_name_7", "Resilience Mentor"),
+    tr("listener.level_name_8", "Calm Leader"),
+    tr("listener.level_name_9", "Empathy Champion"),
+    tr("listener.level_name_10", "Master Listener"),
+  ];
+  const leaderboard = leaderboardPayload?.leaderboard || [];
+  const myRank = leaderboardPayload?.myRank ?? null;
+
+  const eventLabel = (eventType: string) => {
+    switch (eventType) {
+      case "session_base":
+        return tr("listener.event_session_base", "Completed session");
+      case "rating_bonus":
+        return tr("listener.event_rating_bonus", "Rating bonus");
+      case "low_rating_penalty":
+        return tr("listener.event_low_rating_penalty", "Low-rating penalty");
+      case "detailed_feedback_bonus":
+        return tr("listener.event_detailed_feedback_bonus", "Detailed-feedback bonus");
+      case "streak_bonus":
+        return tr("listener.event_streak_bonus", "Positive streak bonus");
+      case "report_penalty":
+        return tr("listener.event_report_penalty", "Moderation penalty");
+      default:
+        return eventType;
+    }
+  };
 
   return (
     <AppLayout>
@@ -94,9 +168,41 @@ export default function ListenerDashboardPage() {
                     {t("listener.level")}: {listenerProgress?.level ?? 1}
                   </Badge>
                   <Badge variant="outline">
-                    {t("listener.points")}: {listenerProgress?.points ?? 0}
+                    {t("listener.points")}: {currentPoints}
                   </Badge>
                   {user?.role && <Badge variant="outline">{t("listener.role")}: {user.role}</Badge>}
+                </div>
+
+                <div className="space-y-2 border rounded-md p-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <p className="text-sm font-medium">
+                      {levelNameByIndex[Math.max(0, Math.min((listenerProgress?.level ?? 1) - 1, levelNameByIndex.length - 1))]}
+                    </p>
+                    {listenerProgressDetails?.nextLevel ? (
+                      <p className="text-xs text-muted-foreground">
+                        {tr("listener.next_level", "Next level")} {listenerProgressDetails.nextLevel} • {listenerProgressDetails.pointsToNextLevel} {tr("listener.points_needed", "pts needed")}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        {tr("listener.max_level_reached", "Max level reached")}
+                      </p>
+                    )}
+                  </div>
+                  <Progress value={progressPct} className="h-2" />
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-md bg-muted/50 p-2">
+                      <p className="text-[11px] text-muted-foreground">{tr("listener.avg_rating", "Avg rating")}</p>
+                      <p className="text-sm font-semibold">{(listenerProgressDetails?.averageRating ?? 0).toFixed(2)}</p>
+                    </div>
+                    <div className="rounded-md bg-muted/50 p-2">
+                      <p className="text-[11px] text-muted-foreground">{tr("listener.rating_count", "Ratings")}</p>
+                      <p className="text-sm font-semibold">{listenerProgressDetails?.ratingCount ?? 0}</p>
+                    </div>
+                    <div className="rounded-md bg-muted/50 p-2">
+                      <p className="text-[11px] text-muted-foreground">{tr("listener.positive_streak", "Positive streak")}</p>
+                      <p className="text-sm font-semibold">{listenerProgressDetails?.positiveStreak ?? 0}</p>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between border rounded-md p-3">
@@ -128,7 +234,55 @@ export default function ListenerDashboardPage() {
                     </div>
                   </div>
                 )}
+
+                {listenerProgressDetails?.recentLedger && listenerProgressDetails.recentLedger.length > 0 && (
+                  <div className="border rounded-md p-3 space-y-2">
+                    <p className="text-sm font-medium">{tr("listener.recent_points_activity", "Recent points activity")}</p>
+                    <div className="space-y-1.5">
+                      {listenerProgressDetails.recentLedger.slice(0, 6).map((entry) => (
+                        <div key={entry.id} className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">{eventLabel(entry.eventType)}</span>
+                          <span className={entry.delta >= 0 ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-destructive font-medium"}>
+                            {entry.delta >= 0 ? `+${entry.delta}` : entry.delta}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">{tr("listener.leaderboard_title", "Listener leaderboard")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {myRank && (
+              <p className="text-xs text-muted-foreground">
+                {tr("listener.your_rank", "Your rank")}: #{myRank}
+              </p>
+            )}
+            {leaderboard.length > 0 ? (
+              leaderboard.map((entry) => (
+                <div key={entry.listenerId} className="border rounded-md p-2.5 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      #{entry.rank} {entry.displayName}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {t("listener.level")} {entry.level} • {entry.averageRating.toFixed(2)} ★
+                    </p>
+                  </div>
+                  <Badge variant={entry.listenerId === user?.id ? "secondary" : "outline"}>
+                    {entry.points} {tr("listener.pts", "pts")}
+                  </Badge>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">{tr("listener.no_leaderboard", "No leaderboard data yet.")}</p>
             )}
           </CardContent>
         </Card>
@@ -147,7 +301,7 @@ export default function ListenerDashboardPage() {
                     </p>
                     <p className="text-xs text-muted-foreground">{t("listener.session_id")} #{session.id}</p>
                   </div>
-                  <Link href={`/peer-support?session=${session.id}`}>
+                  <Link href={`/listen?session=${session.id}`}>
                     <Button size="sm">{t("listener.open_chat")}</Button>
                   </Link>
                 </div>

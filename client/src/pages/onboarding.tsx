@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -9,11 +9,35 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Heart, ArrowRight, ArrowLeft, Check, Loader2 } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 
 const CONCERNS = [
-  "anxiety", "depression", "stress", "relationships", "trauma",
-  "self_esteem", "grief", "family", "couples", "addiction",
-];
+  "anxiety",
+  "depression",
+  "stress",
+  "relationships",
+  "trauma",
+  "self_esteem",
+  "grief",
+  "family",
+  "couples",
+  "addiction",
+] as const;
+
+const CONCERN_EMOJI: Record<string, string> = {
+  anxiety: "😟",
+  depression: "🌧️",
+  stress: "🔥",
+  relationships: "🤝",
+  trauma: "🫂",
+  self_esteem: "🌱",
+  grief: "🕊️",
+  family: "🏠",
+  couples: "💞",
+  addiction: "🛡️",
+};
+
+type StarterPath = "peer" | "therapist" | "wellness";
 
 export default function OnboardingPage() {
   const { t, isRTL } = useI18n();
@@ -23,24 +47,40 @@ export default function OnboardingPage() {
   const [preferredLanguage, setPreferredLanguage] = useState("");
   const [genderPreference, setGenderPreference] = useState("");
   const [budgetRange, setBudgetRange] = useState("");
-  const [howDidYouHear, setHowDidYouHear] = useState("");
+  const [starterPath, setStarterPath] = useState<StarterPath>("peer");
+
+  const tr = (key: string, fallback: string) => {
+    const value = t(key);
+    return value === key ? fallback : value;
+  };
 
   const ArrowNext = isRTL ? ArrowLeft : ArrowRight;
   const ArrowBack = isRTL ? ArrowRight : ArrowLeft;
+  const totalSteps = 3;
+  const progressRatio = (step + 1) / totalSteps;
 
-  const submitMutation = useMutation({
-    mutationFn: async () => {
-      await apiRequest("POST", "/api/onboarding", {
+  const completeOnboardingMutation = useMutation({
+    mutationFn: async (includeOptional: boolean) => {
+      await apiRequest("POST", "/api/onboarding/quick-start", {
         primaryConcerns: concerns,
         preferredLanguage,
-        genderPreference,
-        budgetRange,
-        howDidYouHear,
       });
+
+      if (includeOptional && (genderPreference || budgetRange)) {
+        await apiRequest("POST", "/api/onboarding/preferences", {
+          preferredLanguage,
+          genderPreference: genderPreference || null,
+          budgetRange: budgetRange || null,
+        });
+      }
+
+      localStorage.setItem("shifa-show-welcome", "1");
+      localStorage.setItem("shifa-welcome-path", starterPath);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      window.location.href = "/dashboard";
+      queryClient.invalidateQueries({ queryKey: ["/api/onboarding"] });
+      window.location.href = "/welcome";
     },
     onError: () => {
       toast({ title: t("common.error"), variant: "destructive" });
@@ -51,211 +91,232 @@ export default function OnboardingPage() {
     setConcerns((prev) =>
       prev.includes(concern)
         ? prev.filter((c) => c !== concern)
-        : [...prev, concern]
+        : [...prev, concern],
     );
   };
 
-  const steps = [
-    // Step 0: Concerns
-    <div key="concerns" className="space-y-4">
-      <h2 className="text-lg font-semibold">{t("onboarding.concerns_title")}</h2>
-      <p className="text-sm text-muted-foreground">{t("onboarding.concerns_desc")}</p>
-      <div className="flex flex-wrap gap-2">
-        {CONCERNS.map((c) => (
-          <Badge
-            key={c}
-            variant={concerns.includes(c) ? "default" : "secondary"}
-            className="cursor-pointer text-sm py-1.5 px-3"
-            onClick={() => toggleConcern(c)}
-            data-testid={`badge-concern-${c}`}
-          >
-            {t(`specialization.${c}`)}
-          </Badge>
-        ))}
-      </div>
-    </div>,
-    // Step 1: Language
-    <div key="language" className="space-y-4">
-      <h2 className="text-lg font-semibold">{t("onboarding.language_title")}</h2>
-      <p className="text-sm text-muted-foreground">{t("onboarding.language_desc")}</p>
-      <RadioGroup value={preferredLanguage} onValueChange={setPreferredLanguage} className="space-y-2">
-        {[
-          { value: "ar", label: "العربية" },
-          { value: "fr", label: "Français" },
-          { value: "darija", label: "تونسي (Darija)" },
-        ].map((lang) => (
-          <Label
-            key={lang.value}
-            className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer ${
-              preferredLanguage === lang.value ? "border-primary bg-primary/5" : ""
-            }`}
-          >
-            <RadioGroupItem value={lang.value} />
-            <span>{lang.label}</span>
-          </Label>
-        ))}
-      </RadioGroup>
-    </div>,
-    // Step 2: Gender preference
-    <div key="gender" className="space-y-4">
-      <h2 className="text-lg font-semibold">{t("onboarding.gender_title")}</h2>
-      <p className="text-sm text-muted-foreground">{t("onboarding.gender_desc")}</p>
-      <RadioGroup value={genderPreference} onValueChange={setGenderPreference} className="space-y-2">
-        {[
-          { value: "female", label: t("common.female") },
-          { value: "male", label: t("common.male") },
-          { value: "any", label: t("onboarding.no_preference") },
-        ].map((g) => (
-          <Label
-            key={g.value}
-            className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer ${
-              genderPreference === g.value ? "border-primary bg-primary/5" : ""
-            }`}
-          >
-            <RadioGroupItem value={g.value} />
-            <span>{g.label}</span>
-          </Label>
-        ))}
-      </RadioGroup>
-    </div>,
-    // Step 3: Budget
-    <div key="budget" className="space-y-4">
-      <h2 className="text-lg font-semibold">{t("onboarding.budget_title")}</h2>
-      <p className="text-sm text-muted-foreground">{t("onboarding.budget_desc")}</p>
-      <RadioGroup value={budgetRange} onValueChange={setBudgetRange} className="space-y-2">
-        {[
-          { value: "50-80", label: `50-80 ${t("common.dinar")}` },
-          { value: "80-120", label: `80-120 ${t("common.dinar")}` },
-          { value: "120-200", label: `120-200 ${t("common.dinar")}` },
-          { value: "200+", label: `200+ ${t("common.dinar")}` },
-        ].map((b) => (
-          <Label
-            key={b.value}
-            className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer ${
-              budgetRange === b.value ? "border-primary bg-primary/5" : ""
-            }`}
-          >
-            <RadioGroupItem value={b.value} />
-            <span>{b.label}</span>
-          </Label>
-        ))}
-      </RadioGroup>
-    </div>,
-    // Step 4: Discovery channel
-    <div key="discover" className="space-y-4">
-      <h2 className="text-lg font-semibold">{t("onboarding.discovery_title")}</h2>
-      <p className="text-sm text-muted-foreground">{t("onboarding.discovery_desc")}</p>
-      <RadioGroup value={howDidYouHear} onValueChange={setHowDidYouHear} className="space-y-2">
-        {[
-          { value: "friend", label: t("onboarding.discovery_friend") },
-          { value: "social", label: t("onboarding.discovery_social") },
-          { value: "search", label: t("onboarding.discovery_search") },
-          { value: "therapist", label: t("onboarding.discovery_therapist") },
-          { value: "other", label: t("onboarding.discovery_other") },
-        ].map((item) => (
-          <Label
-            key={item.value}
-            className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer ${
-              howDidYouHear === item.value ? "border-primary bg-primary/5" : ""
-            }`}
-          >
-            <RadioGroupItem value={item.value} />
-            <span>{item.label}</span>
-          </Label>
-        ))}
-      </RadioGroup>
-    </div>,
-  ];
+  const canContinue = useMemo(() => {
+    if (step === 0) return concerns.length > 0;
+    if (step === 1) return preferredLanguage.length > 0;
+    return true;
+  }, [step, concerns.length, preferredLanguage]);
 
-  const canContinue = () => {
-    switch (step) {
-      case 0: return concerns.length > 0;
-      case 1: return !!preferredLanguage;
-      case 2: return !!genderPreference;
-      case 3: return !!budgetRange;
-      case 4: return !!howDidYouHear;
-      default: return false;
+  const blockedHelperText = useMemo(() => {
+    if (step === 0 && concerns.length === 0) {
+      return tr("onboarding.select_concern_required", "Choose at least one concern to continue.");
     }
-  };
+    if (step === 1 && preferredLanguage.length === 0) {
+      return tr("onboarding.select_language_required", "Pick your preferred language to continue.");
+    }
+    return "";
+  }, [step, concerns.length, preferredLanguage, tr]);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-b from-background to-muted/30">
-      <Card className="w-full max-w-lg">
+      <Card className="w-full max-w-xl">
         <CardHeader className="text-center space-y-3">
           <div className="w-12 h-12 rounded-xl gradient-calm flex items-center justify-center mx-auto">
             <Heart className="h-6 w-6 text-white" />
           </div>
           <CardTitle>{t("onboarding.title")}</CardTitle>
           <p className="text-sm text-muted-foreground">{t("onboarding.subtitle")}</p>
-          {/* Progress indicator */}
-          <div className="flex justify-center gap-1.5 pt-2">
-            {steps.map((_, i) => (
-              <div
-                key={i}
-                className={`h-1.5 rounded-full transition-all ${
-                  i === step ? "w-8 bg-primary" : i < step ? "w-4 bg-primary/50" : "w-4 bg-muted"
-                }`}
+
+          <div className="pt-2 space-y-2">
+            <div className="h-2 rounded-full bg-muted overflow-hidden">
+              <motion.div
+                className="h-full bg-primary"
+                animate={{ width: `${progressRatio * 100}%` }}
+                transition={{ type: "spring", stiffness: 140, damping: 18 }}
               />
-            ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {tr("onboarding.step_of", "Step")} {step + 1}/{totalSteps}
+            </p>
           </div>
         </CardHeader>
-        <CardContent className="space-y-6">
-          {steps[step]}
 
-          <div className="flex gap-2">
-            {step > 0 && (
-              <Button variant="outline" onClick={() => setStep(step - 1)} className="flex-1">
-                <ArrowBack className="h-4 w-4 me-1" />
-                {t("common.back")}
-              </Button>
+        <CardContent className="space-y-6">
+          {step === 0 && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold">{t("onboarding.concerns_title")}</h2>
+              <p className="text-sm text-muted-foreground">{t("onboarding.concerns_desc")}</p>
+              <div className="flex flex-wrap gap-2">
+                {CONCERNS.map((concern) => {
+                  const selected = concerns.includes(concern);
+                  return (
+                    <motion.button
+                      key={concern}
+                      type="button"
+                      whileTap={{ scale: 0.96 }}
+                      animate={selected ? { scale: [1, 1.03, 1] } : { scale: 1 }}
+                      transition={{ duration: 0.2 }}
+                      onClick={() => toggleConcern(concern)}
+                    >
+                      <Badge
+                        variant={selected ? "default" : "secondary"}
+                        className="cursor-pointer text-sm py-1.5 px-3"
+                        data-testid={`badge-concern-${concern}`}
+                      >
+                        <span className="me-1">{CONCERN_EMOJI[concern] || "✨"}</span>
+                        {t(`specialization.${concern}`)}
+                      </Badge>
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {step === 1 && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold">{t("onboarding.language_title")}</h2>
+              <p className="text-sm text-muted-foreground">{t("onboarding.language_desc")}</p>
+              <RadioGroup value={preferredLanguage} onValueChange={setPreferredLanguage} className="space-y-2">
+                {[
+                  { value: "ar", label: "العربية" },
+                  { value: "fr", label: "Français" },
+                  { value: "darija", label: "تونسي (Darija)" },
+                ].map((lang) => (
+                  <Label
+                    key={lang.value}
+                    className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer ${
+                      preferredLanguage === lang.value ? "border-primary bg-primary/5" : ""
+                    }`}
+                  >
+                    <RadioGroupItem value={lang.value} />
+                    <span>{lang.label}</span>
+                  </Label>
+                ))}
+              </RadioGroup>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-5">
+              <div className="space-y-1">
+                <h2 className="text-lg font-semibold">{tr("onboarding.optional_title", "Optional suggestions (recommended)")}</h2>
+                <p className="text-sm text-muted-foreground">
+                  {tr("onboarding.optional_desc", "These help us personalize your experience. You can skip for now.")}
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm font-medium">{t("onboarding.gender_title")}</p>
+                <RadioGroup value={genderPreference} onValueChange={setGenderPreference} className="space-y-2">
+                  {[
+                    { value: "female", label: t("common.female") },
+                    { value: "male", label: t("common.male") },
+                    { value: "any", label: t("onboarding.no_preference") },
+                  ].map((item) => (
+                    <Label
+                      key={item.value}
+                      className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer ${
+                        genderPreference === item.value ? "border-primary bg-primary/5" : ""
+                      }`}
+                    >
+                      <RadioGroupItem value={item.value} />
+                      <span>{item.label}</span>
+                    </Label>
+                  ))}
+                </RadioGroup>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm font-medium">{t("onboarding.budget_title")}</p>
+                <RadioGroup value={budgetRange} onValueChange={setBudgetRange} className="space-y-2">
+                  {[
+                    { value: "50-80", label: `50-80 ${t("common.dinar")}` },
+                    { value: "80-120", label: `80-120 ${t("common.dinar")}` },
+                    { value: "120-200", label: `120-200 ${t("common.dinar")}` },
+                    { value: "200+", label: `200+ ${t("common.dinar")}` },
+                  ].map((item) => (
+                    <Label
+                      key={item.value}
+                      className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer ${
+                        budgetRange === item.value ? "border-primary bg-primary/5" : ""
+                      }`}
+                    >
+                      <RadioGroupItem value={item.value} />
+                      <span>{item.label}</span>
+                    </Label>
+                  ))}
+                </RadioGroup>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium">{tr("onboarding.start_path", "How would you like to start?")}</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { value: "peer", label: tr("onboarding.start_peer", "Peer support first") },
+                    { value: "therapist", label: tr("onboarding.start_therapist", "Find a therapist") },
+                    { value: "wellness", label: tr("onboarding.start_wellness", "Self-care tools") },
+                  ].map((item) => (
+                    <Badge
+                      key={item.value}
+                      variant={starterPath === item.value ? "default" : "secondary"}
+                      className="cursor-pointer py-1.5 px-3"
+                      onClick={() => setStarterPath(item.value as StarterPath)}
+                    >
+                      {item.label}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              {step > 0 && (
+                <Button variant="outline" onClick={() => setStep(step - 1)} className="flex-1">
+                  <ArrowBack className="h-4 w-4 me-1" />
+                  {t("common.back")}
+                </Button>
+              )}
+
+              {step < totalSteps - 1 ? (
+                <Button
+                  onClick={() => setStep(step + 1)}
+                  disabled={!canContinue}
+                  className="flex-1"
+                  data-testid="button-onboarding-next"
+                >
+                  {t("common.next")}
+                  <ArrowNext className="h-4 w-4 ms-1" />
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => completeOnboardingMutation.mutate(true)}
+                  disabled={completeOnboardingMutation.isPending}
+                  className="flex-1"
+                  data-testid="button-onboarding-complete"
+                >
+                  {completeOnboardingMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 me-1 animate-spin" />
+                  ) : (
+                    <Check className="h-4 w-4 me-1" />
+                  )}
+                  {t("onboarding.complete")}
+                </Button>
+              )}
+            </div>
+
+            {blockedHelperText && !canContinue && (
+              <p className="text-xs text-amber-600 dark:text-amber-400" data-testid="text-onboarding-helper">
+                {blockedHelperText}
+              </p>
             )}
-            {step < steps.length - 1 ? (
-              <Button
-                onClick={() => setStep(step + 1)}
-                disabled={!canContinue()}
-                className="flex-1"
-                data-testid="button-onboarding-next"
+
+            {step === totalSteps - 1 && (
+              <button
+                onClick={() => completeOnboardingMutation.mutate(false)}
+                disabled={completeOnboardingMutation.isPending}
+                className="w-full text-center text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
-                {t("common.next")}
-                <ArrowNext className="h-4 w-4 ms-1" />
-              </Button>
-            ) : (
-              <Button
-                onClick={() => submitMutation.mutate()}
-                disabled={!canContinue() || submitMutation.isPending}
-                className="flex-1"
-                data-testid="button-onboarding-complete"
-              >
-                {submitMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 me-1 animate-spin" />
-                ) : (
-                  <Check className="h-4 w-4 me-1" />
-                )}
-                {t("onboarding.complete")}
-              </Button>
+                {tr("onboarding.skip_optional", "Skip optional suggestions")}
+              </button>
             )}
           </div>
-
-          <button
-            onClick={async () => {
-              try {
-                await apiRequest("POST", "/api/onboarding", {
-                  primaryConcerns: concerns,
-                  preferredLanguage: preferredLanguage || null,
-                  genderPreference: genderPreference || "any",
-                  budgetRange: budgetRange || null,
-                  howDidYouHear: howDidYouHear || "skipped",
-                });
-                queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-                window.location.href = "/dashboard";
-              } catch {
-                toast({ title: t("common.error"), variant: "destructive" });
-              }
-            }}
-            className="w-full text-center text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            {t("onboarding.skip")}
-          </button>
         </CardContent>
       </Card>
     </div>

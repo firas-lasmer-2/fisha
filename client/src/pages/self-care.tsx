@@ -5,7 +5,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Wind, Hand, Sparkles, Timer, Play, Pause, RotateCcw, Check, ChevronRight } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Wind, Hand, Sparkles, Timer, Play, Pause, RotateCcw, Check, ChevronRight, Moon, Heart } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const affirmationKeys = [
@@ -423,8 +424,258 @@ function MeditationTimer({ t }: { t: (key: string) => string }) {
   );
 }
 
+const BODY_SCAN_STEPS = [
+  "body_scan_step_1",
+  "body_scan_step_2",
+  "body_scan_step_3",
+  "body_scan_step_4",
+  "body_scan_step_5",
+] as const;
+
+function BodyScanCard({
+  t,
+  tr,
+}: {
+  t: (key: string) => string;
+  tr: (key: string, fallback: string) => string;
+}) {
+  const [stepIndex, setStepIndex] = useState(0);
+  const [started, setStarted] = useState(false);
+
+  const progressValue = started ? ((stepIndex + 1) / BODY_SCAN_STEPS.length) * 100 : 0;
+  const done = started && stepIndex >= BODY_SCAN_STEPS.length - 1;
+
+  const start = () => {
+    setStarted(true);
+    setStepIndex(0);
+  };
+
+  const next = () => {
+    setStepIndex((prev) => Math.min(BODY_SCAN_STEPS.length - 1, prev + 1));
+  };
+
+  const reset = () => {
+    setStarted(false);
+    setStepIndex(0);
+  };
+
+  return (
+    <Card data-testid="card-body-scan">
+      <CardContent className="p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-md safe-surface flex items-center justify-center">
+            <Hand className="h-5 w-5 text-safe" />
+          </div>
+          <div>
+            <h3 className="font-semibold">{tr("selfcare.body_scan", "Body scan")}</h3>
+            <p className="text-sm text-muted-foreground">
+              {tr("selfcare.body_scan.desc", "Gently check in with each part of your body.")}
+            </p>
+          </div>
+        </div>
+
+        <Progress value={progressValue} className="mb-4" />
+
+        {!started ? (
+          <Button onClick={start} data-testid="button-body-scan-start">
+            <Play className="h-4 w-4 me-2" />
+            {t("selfcare.start")}
+          </Button>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm">
+              {tr(
+                `selfcare.${BODY_SCAN_STEPS[stepIndex]}`,
+                [
+                  "Notice your breath and unclench your jaw.",
+                  "Relax your shoulders and arms.",
+                  "Soften your chest and stomach.",
+                  "Release tension in hips and legs.",
+                  "Feel your feet and reconnect to the room.",
+                ][stepIndex],
+              )}
+            </p>
+            <div className="flex gap-2">
+              {!done ? (
+                <Button onClick={next} data-testid="button-body-scan-next">
+                  <ChevronRight className="h-4 w-4 me-2" />
+                  {t("common.next")}
+                </Button>
+              ) : (
+                <Badge variant="secondary">{tr("selfcare.completed", "Completed")}</Badge>
+              )}
+              <Button variant="outline" onClick={reset} data-testid="button-body-scan-reset">
+                <RotateCcw className="h-4 w-4 me-2" />
+                {tr("common.restart", "Restart")}
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SleepMeditationCard({
+  tr,
+}: {
+  tr: (key: string, fallback: string) => string;
+}) {
+  const steps = [
+    tr("selfcare.sleep_step_1", "Dim lights and put your phone on silent."),
+    tr("selfcare.sleep_step_2", "Take 3 slow breaths with a longer exhale."),
+    tr("selfcare.sleep_step_3", "Relax your body from head to toe."),
+    tr("selfcare.sleep_step_4", "Repeat: I can rest safely tonight."),
+  ];
+
+  const [step, setStep] = useState(0);
+  const done = step >= steps.length - 1;
+
+  return (
+    <Card data-testid="card-sleep-meditation">
+      <CardContent className="p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-md bg-indigo-500/15 flex items-center justify-center">
+            <Moon className="h-5 w-5 text-indigo-500" />
+          </div>
+          <div>
+            <h3 className="font-semibold">{tr("selfcare.sleep_meditation", "Sleep wind-down")}</h3>
+            <p className="text-sm text-muted-foreground">
+              {tr("selfcare.sleep_meditation.desc", "A short routine to help your mind settle before sleep.")}
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-lg bg-muted/60 p-3 mb-3">
+          <p className="text-sm">{steps[step]}</p>
+        </div>
+
+        <div className="flex gap-2">
+          {!done ? (
+            <Button size="sm" onClick={() => setStep((prev) => prev + 1)} data-testid="button-sleep-next">
+              <ChevronRight className="h-4 w-4 me-2" />
+              {tr("selfcare.next_step", "Next step")}
+            </Button>
+          ) : (
+            <Badge variant="secondary">{tr("selfcare.ready_for_sleep", "Ready for sleep")}</Badge>
+          )}
+          <Button size="sm" variant="outline" onClick={() => setStep(0)} data-testid="button-sleep-reset">
+            <RotateCcw className="h-4 w-4 me-2" />
+            {tr("common.restart", "Restart")}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function GratitudePracticeCard({
+  tr,
+}: {
+  tr: (key: string, fallback: string) => string;
+}) {
+  const prompts = [
+    tr("selfcare.gratitude_prompt_1", "What gave you even 1% relief today?"),
+    tr("selfcare.gratitude_prompt_2", "Who made your day easier today?"),
+    tr("selfcare.gratitude_prompt_3", "Name one thing your body helped you do today."),
+  ];
+
+  const [draft, setDraft] = useState("");
+  const [entries, setEntries] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = window.localStorage.getItem("shifa-gratitude-entries");
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as string[];
+      if (Array.isArray(parsed)) {
+        setEntries(parsed.filter((item) => typeof item === "string"));
+      }
+    } catch {
+      // ignore local cache parsing issues
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("shifa-gratitude-entries", JSON.stringify(entries));
+  }, [entries]);
+
+  const prompt = prompts[new Date().getDay() % prompts.length];
+
+  const saveEntry = () => {
+    const value = draft.trim();
+    if (!value) return;
+    setEntries((prev) => [value, ...prev].slice(0, 6));
+    setDraft("");
+  };
+
+  return (
+    <Card data-testid="card-gratitude-practice">
+      <CardContent className="p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-md bg-rose-500/15 flex items-center justify-center">
+            <Heart className="h-5 w-5 text-rose-500" />
+          </div>
+          <div>
+            <h3 className="font-semibold">{tr("selfcare.gratitude", "Gratitude practice")}</h3>
+            <p className="text-sm text-muted-foreground">
+              {tr("selfcare.gratitude.desc", "Write one small thing you appreciate today.")}
+            </p>
+          </div>
+        </div>
+
+        <p className="text-sm mb-2">{prompt}</p>
+        <Textarea
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder={tr("selfcare.gratitude.placeholder", "Type your gratitude note...")}
+          rows={3}
+        />
+        <Button size="sm" className="mt-2" onClick={saveEntry} data-testid="button-gratitude-save">
+          {tr("selfcare.save_note", "Save note")}
+        </Button>
+
+        {entries.length > 0 && (
+          <div className="mt-4 space-y-2">
+            {entries.slice(0, 3).map((entry, index) => (
+              <div key={`${entry}-${index}`} className="rounded-lg bg-muted/60 p-2.5 text-sm">
+                {entry}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SelfCarePage() {
   const { t } = useI18n();
+  const tr = (key: string, fallback: string) => {
+    const value = t(key);
+    return value === key ? fallback : value;
+  };
+
+  const dailySuggestions = [
+    {
+      title: tr("selfcare.daily_breathing", "Breathing reset"),
+      desc: tr("selfcare.daily_breathing.desc", "Two calm minutes can reset your nervous system."),
+      target: "breathing",
+    },
+    {
+      title: tr("selfcare.daily_grounding", "5-4-3-2-1 grounding"),
+      desc: tr("selfcare.daily_grounding.desc", "Bring attention back to the present moment."),
+      target: "grounding",
+    },
+    {
+      title: tr("selfcare.daily_gratitude", "One gratitude note"),
+      desc: tr("selfcare.daily_gratitude.desc", "Small gratitude habits improve emotional resilience."),
+      target: "gratitude",
+    },
+  ];
+  const todaySuggestion = dailySuggestions[new Date().getDay() % dailySuggestions.length];
 
   return (
     <AppLayout>
@@ -442,11 +693,40 @@ export default function SelfCarePage() {
           </p>
         </motion.div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="mb-6"
+        >
+          <Card className="safe-surface" data-testid="card-selfcare-daily-suggestion">
+            <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="w-10 h-10 rounded-lg gradient-safe flex items-center justify-center">
+                <Sparkles className="h-5 w-5 text-white" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold">{todaySuggestion.title}</p>
+                <p className="text-xs text-muted-foreground">{todaySuggestion.desc}</p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  document.getElementById(todaySuggestion.target)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              >
+                {tr("selfcare.open_today", "Open today")}
+              </Button>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
+            id="breathing"
           >
             <BreathingExercise t={t} />
           </motion.div>
@@ -455,6 +735,7 @@ export default function SelfCarePage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
+            id="grounding"
           >
             <GroundingExercise t={t} />
           </motion.div>
@@ -473,6 +754,31 @@ export default function SelfCarePage() {
             transition={{ delay: 0.4 }}
           >
             <MeditationTimer t={t} />
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 }}
+          >
+            <BodyScanCard t={t} tr={tr} />
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.6 }}
+          >
+            <SleepMeditationCard tr={tr} />
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.7 }}
+            id="gratitude"
+          >
+            <GratitudePracticeCard tr={tr} />
           </motion.div>
         </div>
       </div>

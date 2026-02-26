@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Dialog,
   DialogContent,
@@ -25,11 +26,9 @@ import { Link } from "wouter";
 import {
   Search,
   Star,
-  MapPin,
   Globe,
   Shield,
   CheckCircle,
-  Video,
   Users,
   Brain,
   Filter,
@@ -38,14 +37,14 @@ import {
   Calendar,
   ArrowRight,
   ArrowLeft,
-  Clock,
+  WandSparkles,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useOnlineTherapists } from "@/hooks/use-online-therapists";
 import { motion } from "framer-motion";
-import type { TherapistProfile, User } from "@shared/schema";
+import type { OnboardingResponse, TherapistProfile, User } from "@shared/schema";
 
 const filterChipVariants = {
   hidden: { opacity: 0, y: 10 },
@@ -69,10 +68,19 @@ export default function TherapistsPage() {
   const { t, isRTL } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
+  const tr = (key: string, fallback: string) => {
+    const value = t(key);
+    return value === key ? fallback : value;
+  };
   const [searchQuery, setSearchQuery] = useState("");
   const [specialization, setSpecialization] = useState<string>("");
   const [language, setLanguage] = useState<string>("");
   const [gender, setGender] = useState<string>("");
+  const [tier, setTier] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    const tierParam = new URLSearchParams(window.location.search).get("tier");
+    return tierParam === "student" || tierParam === "professional" ? tierParam : "";
+  });
   const [aiDialogOpen, setAiDialogOpen] = useState(false);
   const [aiStep, setAiStep] = useState(0);
   const [aiConcerns, setAiConcerns] = useState<string[]>([]);
@@ -88,11 +96,17 @@ export default function TherapistsPage() {
     queryStr.set("specialization", specialization);
   if (language && language !== "all") queryStr.set("language", language);
   if (gender && gender !== "all") queryStr.set("gender", gender);
+  if (tier && tier !== "all") queryStr.set("tier", tier);
 
   const { data: therapists, isLoading } = useQuery<
     (TherapistProfile & { user: User })[]
   >({
     queryKey: ["/api/therapists", `?${queryStr.toString()}`],
+  });
+
+  const { data: onboarding } = useQuery<OnboardingResponse | null>({
+    queryKey: ["/api/onboarding"],
+    enabled: !!user && user.role === "client",
   });
 
   const aiMatchMutation = useMutation({
@@ -156,6 +170,11 @@ export default function TherapistsPage() {
     { value: "female", label: t("common.female") },
   ];
 
+  const tierOptions = [
+    { value: "student", label: t("tier.student_therapist") },
+    { value: "professional", label: t("tier.professional_therapist") },
+  ];
+
   const handleStartConversation = async (therapistId: string) => {
     if (!user) {
       window.location.href = "/login";
@@ -176,13 +195,15 @@ export default function TherapistsPage() {
   };
 
   const toggleFilter = (
-    type: "specialization" | "language" | "gender",
+    type: "specialization" | "language" | "gender" | "tier",
     value: string,
   ) => {
     if (type === "specialization") {
       setSpecialization(specialization === value ? "" : value);
     } else if (type === "language") {
       setLanguage(language === value ? "" : value);
+    } else if (type === "tier") {
+      setTier(tier === value ? "" : value);
     } else {
       setGender(gender === value ? "" : value);
     }
@@ -205,6 +226,58 @@ export default function TherapistsPage() {
     const specs = tp.specializations?.join(" ").toLowerCase() || "";
     return name.includes(query) || specs.includes(query);
   });
+
+  const recommendedMatches = useMemo(() => {
+    const list = filteredTherapists || [];
+    if (list.length === 0) return [];
+
+    const concerns = onboarding?.primaryConcerns || [];
+    const concernSet = new Set(concerns);
+    const preferredLang = onboarding?.preferredLanguage || "";
+    const budgetRange = onboarding?.budgetRange || "";
+
+    let minBudget = 0;
+    let maxBudget = Number.POSITIVE_INFINITY;
+    if (budgetRange.includes("-")) {
+      const [min, max] = budgetRange.split("-");
+      minBudget = Number(min) || 0;
+      maxBudget = Number(max) || Number.POSITIVE_INFINITY;
+    } else if (budgetRange.endsWith("+")) {
+      minBudget = Number(budgetRange.replace("+", "")) || 0;
+    }
+
+    const scored = list.map((therapist) => {
+      let score = 30;
+
+      const specializationHits = (therapist.specializations || []).filter((spec) => concernSet.has(spec)).length;
+      score += specializationHits * 18;
+
+      if (preferredLang && therapist.languages?.includes(preferredLang)) {
+        score += 12;
+      }
+
+      if (Number.isFinite(therapist.rateDinar || 0)) {
+        const rate = therapist.rateDinar || 0;
+        if (rate >= minBudget && rate <= maxBudget) score += 10;
+        else if (Math.abs(rate - minBudget) <= 20 || Math.abs(rate - maxBudget) <= 20) score += 5;
+      }
+
+      score += Math.min(20, (therapist.rating || 0) * 4);
+      score += Math.min(8, Math.floor((therapist.reviewCount || 0) / 5));
+
+      if (onlineTherapists.has(therapist.userId)) score += 8;
+
+      if (therapist.tier === "student" && maxBudget <= 80) score += 5;
+      if (therapist.tier === "professional" && specializationHits >= 2) score += 3;
+
+      return {
+        therapist,
+        score: Math.min(99, Math.max(30, Math.round(score))),
+      };
+    });
+
+    return scored.sort((a, b) => b.score - a.score).slice(0, 3);
+  }, [filteredTherapists, onboarding?.primaryConcerns, onboarding?.preferredLanguage, onboarding?.budgetRange, onlineTherapists]);
 
   const renderAiStep = () => {
     switch (aiStep) {
@@ -473,7 +546,21 @@ export default function TherapistsPage() {
                 </Badge>
               ))}
 
-              {(specialization || language || gender || onlineOnly) && (
+              <div className="w-px h-5 bg-border shrink-0" />
+
+              {tierOptions.map((tierOption) => (
+                <Badge
+                  key={tierOption.value}
+                  variant={tier === tierOption.value ? "default" : "secondary"}
+                  className="cursor-pointer shrink-0 whitespace-nowrap"
+                  onClick={() => toggleFilter("tier", tierOption.value)}
+                  data-testid={`filter-tier-${tierOption.value}`}
+                >
+                  {tierOption.label}
+                </Badge>
+              ))}
+
+              {(specialization || language || gender || tier || onlineOnly) && (
                 <Badge
                   variant="outline"
                   className="cursor-pointer shrink-0 text-destructive"
@@ -481,6 +568,7 @@ export default function TherapistsPage() {
                     setSpecialization("");
                     setLanguage("");
                     setGender("");
+                    setTier("");
                     setOnlineOnly(false);
                   }}
                   data-testid="button-clear-filters"
@@ -491,6 +579,69 @@ export default function TherapistsPage() {
             </div>
           </ScrollArea>
         </div>
+
+        {recommendedMatches.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35 }}
+          >
+            <Card className="safe-surface" data-testid="card-best-match">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className="text-sm font-semibold flex items-center gap-2">
+                      <WandSparkles className="h-4 w-4 text-safe" />
+                      {tr("therapist.best_match", "Best match for you")}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {tr(
+                        "therapist.best_match_desc",
+                        "Personalized from your onboarding concerns, language, and budget.",
+                      )}
+                    </p>
+                  </div>
+                  {onboarding?.primaryConcerns?.length ? (
+                    <Badge variant="outline" className="text-xs">
+                      {onboarding.primaryConcerns.length} {tr("therapist.concern_signals", "concern signals")}
+                    </Badge>
+                  ) : null}
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {recommendedMatches.map(({ therapist, score }) => (
+                    <Link key={`best-match-${therapist.userId}`} href={`/therapist/${therapist.userId}`}>
+                      <div className="rounded-lg border bg-background/70 p-3 hover:bg-muted/50 transition-colors cursor-pointer">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Avatar className="h-10 w-10 rounded-lg">
+                            {therapist.user.profileImageUrl && (
+                              <AvatarImage src={therapist.user.profileImageUrl} alt={`${therapist.user.firstName || ""} ${therapist.user.lastName || ""}`} />
+                            )}
+                            <AvatarFallback className="rounded-lg gradient-calm text-white">
+                              {(therapist.user.firstName?.[0] || "?").toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium truncate">
+                              {therapist.user.firstName} {therapist.user.lastName}
+                            </p>
+                            <p className="text-[11px] text-muted-foreground truncate">{therapist.headline || t("therapist.find_subtitle")}</p>
+                          </div>
+                          <Badge className="text-[10px] bg-primary/10 text-primary hover:bg-primary/10">
+                            {score}%
+                          </Badge>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span className="truncate">{(therapist.specializations || []).slice(0, 2).map((spec) => specializations.find((item) => item.value === spec)?.label || spec).join(" • ") || "-"}</span>
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
 
         {isLoading ? (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -534,144 +685,75 @@ export default function TherapistsPage() {
                   className="hover-elevate transition-all h-full"
                   data-testid={`card-therapist-${tp.userId}`}
                 >
-                  <CardContent className="p-5 flex flex-col h-full">
-                    <div className="flex items-start gap-3 mb-3">
+                  <CardContent className="p-4 flex flex-col h-full">
+                    <div className="flex items-start gap-3">
                       <Link href={`/therapist/${tp.userId}`}>
-                        <div className="relative w-14 h-14 shrink-0">
-                          <div className="w-14 h-14 rounded-xl gradient-calm flex items-center justify-center text-white text-lg font-bold cursor-pointer hover:opacity-90 transition-opacity">
-                            {(tp.user.firstName?.[0] || "?").toUpperCase()}
-                          </div>
-                          {onlineTherapists.has(tp.userId) && (
-                            <span
-                              className="absolute -top-1 -end-1 flex h-3.5 w-3.5"
-                              data-testid={`indicator-online-${tp.userId}`}
-                            >
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                              <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-card" />
-                            </span>
+                        <Avatar className="h-14 w-14 rounded-xl cursor-pointer">
+                          {tp.user.profileImageUrl && (
+                            <AvatarImage src={tp.user.profileImageUrl} alt={`${tp.user.firstName || ""} ${tp.user.lastName || ""}`} />
                           )}
-                        </div>
+                          <AvatarFallback className="rounded-xl gradient-calm text-white text-lg font-bold">
+                            {(tp.user.firstName?.[0] || "?").toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
                       </Link>
-                      <div className="min-w-0 flex-1">
+
+                      <div className="min-w-0 flex-1 space-y-1">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <Link href={`/therapist/${tp.userId}`}>
-                            <h3
-                              className="font-semibold truncate hover:text-primary transition-colors cursor-pointer"
-                              data-testid={`text-therapist-name-${tp.userId}`}
-                            >
+                            <h3 className="font-semibold truncate hover:text-primary transition-colors cursor-pointer" data-testid={`text-therapist-name-${tp.userId}`}>
                               {tp.user.firstName} {tp.user.lastName}
                             </h3>
                           </Link>
                           {tp.verified && (
-                            <Badge
-                              variant="secondary"
-                              className="text-xs bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                              data-testid={`badge-verified-${tp.userId}`}
-                            >
-                              <CheckCircle className="h-3 w-3 me-0.5" />
-                              {t("therapist.verified")}
-                            </Badge>
+                            <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
                           )}
-                          <Badge variant="outline" className="text-xs">
+                          <Badge variant="outline" className="text-[10px]">
                             {tp.tier === "student" ? t("tier.student_therapist") : t("tier.professional_therapist")}
                           </Badge>
                         </div>
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground mt-0.5 flex-wrap">
+                        <p className="text-xs text-muted-foreground line-clamp-1">
+                          {tp.headline || tr("therapist.simple_headline", "Warm, culturally-aware mental health support.")}
+                        </p>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <span className="flex items-center gap-0.5">
                             <Star className="h-3.5 w-3.5 fill-chart-4 text-chart-4" />
-                            {tp.rating?.toFixed(1)}
+                            {(tp.rating || 0).toFixed(1)}
                           </span>
-                          <span className="text-xs">
-                            ({tp.reviewCount || 0} {t("therapist.reviews")})
-                          </span>
+                          <span>({tp.reviewCount || 0})</span>
+                          {onlineTherapists.has(tp.userId) && (
+                            <Badge variant="secondary" className="text-[10px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                              {tr("therapist.online_badge", "Online")}
+                            </Badge>
+                          )}
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3 flex-wrap">
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {tp.yearsExperience} {t("therapist.experience")}
-                      </span>
+                    <div className="flex flex-wrap gap-1.5 mt-3 mb-3">
+                      {(tp.specializations || []).slice(0, 2).map((specializationKey) => (
+                        <Badge key={specializationKey} variant="secondary" className="text-xs" data-testid={`badge-spec-${tp.userId}-${specializationKey}`}>
+                          {specializations.find((item) => item.value === specializationKey)?.label || specializationKey}
+                        </Badge>
+                      ))}
                     </div>
 
-                    {tp.specializations && tp.specializations.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mb-3">
-                        {tp.specializations.slice(0, 3).map((s) => (
-                          <Badge
-                            key={s}
-                            variant="secondary"
-                            className="text-xs"
-                            data-testid={`badge-spec-${tp.userId}-${s}`}
-                          >
-                            {specializations.find((sp) => sp.value === s)
-                              ?.label || s}
-                          </Badge>
-                        ))}
-                        {tp.specializations.length > 3 && (
-                          <Badge variant="secondary" className="text-xs">
-                            +{tp.specializations.length - 3}
-                          </Badge>
-                        )}
-                      </div>
-                    )}
-
-                    {tp.languages && tp.languages.length > 0 && (
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-3 flex-wrap">
-                        <Globe className="h-3 w-3 shrink-0" />
-                        {tp.languages.join(" · ")}
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4 flex-wrap">
-                      {onlineTherapists.has(tp.userId) && (
-                        <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
-                          <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                          </span>
-                          {t("therapist.available_now")}
-                        </span>
-                      )}
-                      {tp.acceptsOnline && (
-                        <span className="flex items-center gap-1">
-                          <Video className="h-3 w-3 text-primary" />
-                          {t("therapist.online")}
-                        </span>
-                      )}
-                      {tp.acceptsInPerson && (
-                        <span className="flex items-center gap-1">
-                          <MapPin className="h-3 w-3 text-primary" />
-                          {t("therapist.in_person")}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="mt-auto pt-3 border-t flex items-center justify-between gap-2 flex-wrap">
+                    <div className="mt-auto pt-3 border-t flex items-center justify-between gap-2">
                       <div data-testid={`text-rate-${tp.userId}`}>
-                        <span className="font-bold text-primary text-lg">
-                          {tp.rateDinar}
-                        </span>
-                        <span className="text-xs text-muted-foreground ms-1">
-                          {t("common.dinar")} / {t("therapist.per_session")}
-                        </span>
+                        <span className="font-bold text-primary text-lg">{tp.rateDinar}</span>
+                        <span className="text-xs text-muted-foreground ms-1">{t("common.dinar")}</span>
                       </div>
                       <div className="flex gap-2">
                         <Button
                           size="icon"
                           variant="outline"
-                          onClick={() =>
-                            handleStartConversation(tp.userId)
-                          }
+                          onClick={() => handleStartConversation(tp.userId)}
                           data-testid={`button-message-${tp.userId}`}
                         >
                           <MessageCircle className="h-4 w-4" />
                         </Button>
                         <Link href={`/therapist/${tp.userId}#slots`}>
-                          <Button
-                            size="sm"
-                            data-testid={`button-book-${tp.userId}`}
-                          >
+                          <Button size="sm" data-testid={`button-book-${tp.userId}`}>
                             <Calendar className="h-3.5 w-3.5 me-1.5" />
                             {t("therapist.book")}
                           </Button>
