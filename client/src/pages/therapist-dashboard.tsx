@@ -1729,8 +1729,6 @@ function PrepViewPanel({ appointmentId, t }: { appointmentId: number; t: (k: str
     },
   });
 
-  if (!prep) return null;
-
   const MOOD_EMOJIS = ["😢", "😔", "😐", "🙂", "😊"];
 
   return (
@@ -1739,10 +1737,16 @@ function PrepViewPanel({ appointmentId, t }: { appointmentId: number; t: (k: str
         <ClipboardList className="h-3.5 w-3.5" />
         {t("therapist_dash.client_session_prep")}
       </p>
-      <p className="text-xs"><span className="font-medium">{t("therapist_dash.whats_on_mind")}</span> {prep.whatsOnMind}</p>
-      {prep.goalsForSession && <p className="text-xs"><span className="font-medium">{t("therapist_dash.goals_label")}</span> {prep.goalsForSession}</p>}
-      {prep.currentMood && (
-        <p className="text-xs"><span className="font-medium">{t("therapist_dash.pre_session_mood")}</span> {MOOD_EMOJIS[prep.currentMood - 1]} ({prep.currentMood}/5)</p>
+      {!prep ? (
+        <p className="text-xs text-muted-foreground italic">No prep submitted yet.</p>
+      ) : (
+        <>
+          <p className="text-xs"><span className="font-medium">{t("therapist_dash.whats_on_mind")}</span> {prep.whatsOnMind}</p>
+          {prep.goalsForSession && <p className="text-xs"><span className="font-medium">{t("therapist_dash.goals_label")}</span> {prep.goalsForSession}</p>}
+          {prep.currentMood && (
+            <p className="text-xs"><span className="font-medium">{t("therapist_dash.pre_session_mood")}</span> {MOOD_EMOJIS[prep.currentMood - 1]} ({prep.currentMood}/5)</p>
+          )}
+        </>
       )}
     </div>
   );

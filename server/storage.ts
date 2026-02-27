@@ -682,7 +682,10 @@ export class DatabaseStorage implements IStorage {
       .select("*")
       .single();
 
-    if (error || !data) return undefined;
+    if (error || !data) {
+      console.error("[setConversationEncryptionKeys] error:", error, "data:", data);
+      return undefined;
+    }
     return mapConversation(data);
   }
 
@@ -705,7 +708,10 @@ export class DatabaseStorage implements IStorage {
       .insert(row)
       .select()
       .single();
-    if (error) throw error;
+    if (error) {
+      console.error("[createMessage] Supabase error:", error, "row:", row);
+      throw error;
+    }
 
     // Update conversation's last_message_at
     await supabase
@@ -812,6 +818,7 @@ export class DatabaseStorage implements IStorage {
         status: "pending",
         notes: notes || null,
         price_dinar: slotRow.price_dinar,
+        meet_link: slotRow.meet_link || null,
       })
       .select("*")
       .single();
@@ -847,6 +854,21 @@ export class DatabaseStorage implements IStorage {
       .select()
       .single();
     if (error) return undefined;
+
+    // Keep linked slot status in sync
+    if (status === "confirmed") {
+      await supabase
+        .from("therapist_slots")
+        .update({ status: "booked" })
+        .eq("appointment_id", id);
+    } else if (status === "cancelled") {
+      // Re-open the slot so it's bookable again
+      await supabase
+        .from("therapist_slots")
+        .update({ status: "open", appointment_id: null })
+        .eq("appointment_id", id);
+    }
+
     return mapAppointment(data);
   }
 

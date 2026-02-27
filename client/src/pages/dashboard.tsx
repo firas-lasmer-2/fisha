@@ -189,7 +189,7 @@ export default function DashboardPage() {
                     >
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-lg">
-                          {new Date(appointment.scheduledAt).getHours().toString().padStart(2, "0")}:00
+                          {new Date(appointment.scheduledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                         </div>
                         <div>
                           <p className="font-semibold text-lg">

@@ -1048,6 +1048,7 @@ export const sendMessageRequestSchema = z.object({
   content: z.string().min(1).max(10000),
   messageType: z.string().default("text").optional(),
   crisisDetectedByClient: z.boolean().optional(),
+  encrypted: z.boolean().optional(),
 });
 
 export const moodEntryRequestSchema = z.object({

@@ -595,6 +595,16 @@ export async function registerRoutes(
       }
 
       const profile = await storage.updateTherapistProfile(userId, payload);
+
+      // Ensure therapist also has a listener profile (idempotent upsert)
+      storage.createOrUpdateListenerProfile({
+        userId,
+        verificationStatus: "approved",
+        activationStatus: "live",
+        isAvailable: true,
+        approvedAt: new Date().toISOString(),
+      }).catch(() => {});
+
       res.json(profile);
     } catch (error) {
       res.status(500).json({ message: "Failed to update therapist profile" });
@@ -687,9 +697,13 @@ export async function registerRoutes(
         keyVersion: typeof keyVersion === "number" ? keyVersion : 1,
       });
 
-      if (!updated) return res.status(500).json({ message: "Failed to store encryption keys" });
+      if (!updated) {
+        console.error("[encryption-keys] setConversationEncryptionKeys returned undefined for convId:", convId);
+        return res.status(500).json({ message: "Failed to store encryption keys" });
+      }
       res.json(updated);
     } catch (error) {
+      console.error("[encryption-keys] caught error:", error);
       res.status(500).json({ message: "Failed to store encryption keys" });
     }
   });
@@ -778,6 +792,7 @@ export async function registerRoutes(
       // With Supabase Realtime, message delivery is automatic via postgres_changes
       res.status(201).json({ ...msg, crisisDetected: hasCrisisKeyword });
     } catch (error) {
+      console.error("[send message] error:", error);
       res.status(500).json({ message: "Failed to send message" });
     }
   });
@@ -856,6 +871,13 @@ export async function registerRoutes(
 
       const apt = await storage.updateAppointmentStatus(aptId, req.body.status);
       if (apt) {
+        // Ensure the appointment has a meet link — generate one if missing
+        if (!apt.meetLink) {
+          const link = generateJitsiLink();
+          await storage.updateAppointment(aptId, { meetLink: link });
+          apt.meetLink = link;
+        }
+
         const recipientId = apt.clientId === userId ? apt.therapistId : apt.clientId;
         await notifyUser(
           recipientId,
@@ -2728,6 +2750,33 @@ export async function registerRoutes(
   });
 
   // ---- Admin moderation ----
+
+  // One-shot: provision listener profiles for all existing therapists
+  app.post("/api/admin/sync-therapist-listeners", isAuthenticated, requireRoles(["admin"]), async (_req, res) => {
+    try {
+      const { data: therapists } = await supabaseAdmin
+        .from("therapist_profiles")
+        .select("user_id");
+      const results = { synced: 0, errors: 0 };
+      for (const t of (therapists || [])) {
+        try {
+          await storage.createOrUpdateListenerProfile({
+            userId: t.user_id,
+            verificationStatus: "approved",
+            activationStatus: "live",
+            isAvailable: true,
+            approvedAt: new Date().toISOString(),
+          });
+          results.synced++;
+        } catch {
+          results.errors++;
+        }
+      }
+      res.json(results);
+    } catch {
+      res.status(500).json({ message: "Sync failed" });
+    }
+  });
 
   app.get("/api/admin/listeners", isAuthenticated, requireRoles(["moderator", "admin"]), async (req, res) => {
     try {
