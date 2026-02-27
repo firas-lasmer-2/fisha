@@ -9,12 +9,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Link } from "wouter";
-import { Heart, Loader2, Users, UserCircle, Headphones } from "lucide-react";
+import { Link, useLocation } from "wouter";
+import { Heart, Loader2, Users, Headphones } from "lucide-react";
 
 export default function SignupPage() {
   const { t } = useI18n();
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -55,8 +56,7 @@ export default function SignupPage() {
       }
 
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      const nextPath = postAuthRouteForUser(payload?.user) || (role === "therapist" ? "/therapist-dashboard" : role === "listener" ? "/onboarding" : "/onboarding");
-      window.location.href = nextPath;
+      navigate(postAuthRouteForUser(payload?.user));
     } catch {
       toast({ title: t("common.error"), variant: "destructive" });
     } finally {
@@ -67,7 +67,7 @@ export default function SignupPage() {
   const handleOAuth = async (provider: "google" | "facebook") => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo: `${window.location.origin}/dashboard` },
+      options: { redirectTo: `${window.location.origin}/workflow` },
     });
     if (error) toast({ title: error.message, variant: "destructive" });
   };
@@ -116,7 +116,7 @@ export default function SignupPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={6}
+              minLength={8}
               data-testid="input-signup-password"
             />
 
@@ -145,24 +145,19 @@ export default function SignupPage() {
                   <RadioGroupItem value="listener" id="role-listener" />
                   <Headphones className="h-4 w-4 shrink-0" />
                   <div>
-                    <p className="text-sm font-medium">Listener</p>
-                    <p className="text-xs text-muted-foreground">I want to help</p>
-                  </div>
-                </Label>
-                <Label
-                  htmlFor="role-therapist"
-                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                    role === "therapist" ? "border-primary bg-primary/5" : "border-border"
-                  }`}
-                >
-                  <RadioGroupItem value="therapist" id="role-therapist" />
-                  <UserCircle className="h-4 w-4 shrink-0" />
-                  <div>
-                    <p className="text-sm font-medium">{t("auth.role_therapist")}</p>
-                    <p className="text-xs text-muted-foreground">I'm a professional</p>
+                    <p className="text-sm font-medium">Peer Listener</p>
+                    <p className="text-xs text-muted-foreground">I want to volunteer and help others</p>
                   </div>
                 </Label>
               </RadioGroup>
+
+              <p className="text-xs text-muted-foreground pt-1 border-t mt-3">
+                Are you a licensed therapist?{" "}
+                <Link href="/contact" className="text-primary hover:underline">
+                  Contact us to apply
+                </Link>{" "}
+                — therapist accounts are created by the Shifa team after credential verification.
+              </p>
             </div>
 
             <Button type="submit" className="w-full" disabled={loading} data-testid="button-signup">

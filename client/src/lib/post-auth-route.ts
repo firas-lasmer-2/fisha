@@ -4,17 +4,17 @@ type AuthUserLike = {
 };
 
 export function homeRouteForRole(role: string | null | undefined): string {
-  if (role === "listener") return "/listener/dashboard";
   if (role === "therapist") return "/therapist-dashboard";
-  if (role === "moderator" || role === "admin") return "/admin/listeners";
-  return "/dashboard";
+  if (role === "listener") return "/listener/dashboard";
+  return "/workflow";
 }
 
 export function postAuthRouteForUser(user: AuthUserLike | null | undefined): string {
-  if (!user) return "/dashboard";
+  if (!user) return "/workflow";
   const role = user.role;
 
-  if (role === "client" && !user.onboardingCompleted) {
+  // Both clients and listeners go through onboarding before reaching their home
+  if ((role === "client" || role === "listener") && !user.onboardingCompleted) {
     return "/onboarding";
   }
 

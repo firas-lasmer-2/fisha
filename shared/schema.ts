@@ -262,6 +262,7 @@ export interface BrowsableListener {
   userId: string;
   displayAlias: string | null;
   headline: string | null;
+  aboutMe: string | null;
   avatarEmoji: string;
   languages: string[] | null;
   topics: string[] | null;
@@ -269,6 +270,8 @@ export interface BrowsableListener {
   totalSessions: number;
   averageRating: number | null;
   level: number;
+  trophyTier: "gold" | "silver" | "bronze" | null;
+  certificationTitle: string | null;
 }
 
 export interface ListenerProgress {
@@ -276,6 +279,9 @@ export interface ListenerProgress {
   points: number;
   level: number;
   sessionsRatedCount: number;
+  currentStreak: number;
+  longestStreak: number;
+  endorsementsCount: number;
   lastCalculatedAt: string | null;
 }
 
@@ -287,6 +293,64 @@ export interface ListenerPointsLedger {
   delta: number;
   meta: any;
   createdAt: string | null;
+}
+
+export interface ListenerBadge {
+  id: number;
+  listenerId: string;
+  badgeKey: string;
+  title: string;
+  description: string | null;
+  awardedAt: string;
+  meta: any;
+}
+
+export interface ListenerEndorsement {
+  id: number;
+  listenerId: string;
+  sessionId: number | null;
+  quote: string;
+  warmthScore: number | null;
+  createdAt: string;
+}
+
+export interface ListenerWellbeingCheckIn {
+  id: number;
+  listenerId: string;
+  sessionId: number | null;
+  stressLevel: number;
+  emotionalLoad: number;
+  needsBreak: boolean;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface ListenerCooldown {
+  listenerId: string;
+  sourceSessionId: number | null;
+  reason: string;
+  startsAt: string;
+  endsAt: string;
+  releasedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListenerHallOfFameEntry {
+  id: number;
+  seasonKey: string;
+  rank: number;
+  listenerId: string;
+  displayName: string;
+  points: number;
+  averageRating: number;
+  ratingCount: number;
+  positiveStreak: number;
+  trophyTier: "gold" | "silver" | "bronze" | null;
+  certificationTitle: string | null;
+  archivedAt: string;
+  certificateIssuedAt: string | null;
+  certificateCode: string | null;
 }
 
 export interface ListenerApplication {
@@ -552,6 +616,9 @@ export const insertListenerProgressSchema = z.object({
   points: z.number().int().default(0).optional(),
   level: z.number().int().default(1).optional(),
   sessionsRatedCount: z.number().int().default(0).optional(),
+  currentStreak: z.number().int().default(0).optional(),
+  longestStreak: z.number().int().default(0).optional(),
+  endorsementsCount: z.number().int().default(0).optional(),
   lastCalculatedAt: z.string().optional().nullable(),
 });
 
@@ -561,6 +628,40 @@ export const insertListenerPointsLedgerSchema = z.object({
   eventType: z.string(),
   delta: z.number().int(),
   meta: z.any().optional().nullable(),
+});
+
+export const insertListenerBadgeSchema = z.object({
+  listenerId: z.string(),
+  badgeKey: z.string().max(60),
+  title: z.string().max(120),
+  description: z.string().optional().nullable(),
+  awardedAt: z.string().optional(),
+  meta: z.any().optional().nullable(),
+});
+
+export const insertListenerEndorsementSchema = z.object({
+  listenerId: z.string(),
+  sessionId: z.number().optional().nullable(),
+  quote: z.string().min(3).max(280),
+  warmthScore: z.number().int().min(1).max(5).optional().nullable(),
+});
+
+export const insertListenerWellbeingCheckInSchema = z.object({
+  listenerId: z.string(),
+  sessionId: z.number().optional().nullable(),
+  stressLevel: z.number().int().min(1).max(5),
+  emotionalLoad: z.number().int().min(1).max(5),
+  needsBreak: z.boolean().default(false).optional(),
+  notes: z.string().max(1200).optional().nullable(),
+});
+
+export const insertListenerCooldownSchema = z.object({
+  listenerId: z.string(),
+  sourceSessionId: z.number().optional().nullable(),
+  reason: z.string().max(60),
+  startsAt: z.string().optional(),
+  endsAt: z.string(),
+  releasedAt: z.string().optional().nullable(),
 });
 
 export const insertListenerApplicationSchema = z.object({
@@ -682,6 +783,10 @@ export type InsertPaymentTransaction = z.infer<typeof insertPaymentTransactionSc
 export type InsertListenerProfile = z.infer<typeof insertListenerProfileSchema>;
 export type InsertListenerProgress = z.infer<typeof insertListenerProgressSchema>;
 export type InsertListenerPointsLedger = z.infer<typeof insertListenerPointsLedgerSchema>;
+export type InsertListenerBadge = z.infer<typeof insertListenerBadgeSchema>;
+export type InsertListenerEndorsement = z.infer<typeof insertListenerEndorsementSchema>;
+export type InsertListenerWellbeingCheckIn = z.infer<typeof insertListenerWellbeingCheckInSchema>;
+export type InsertListenerCooldown = z.infer<typeof insertListenerCooldownSchema>;
 export type InsertListenerApplication = z.infer<typeof insertListenerApplicationSchema>;
 export type InsertListenerQueueEntry = z.infer<typeof insertListenerQueueEntrySchema>;
 export type InsertPeerSession = z.infer<typeof insertPeerSessionSchema>;
@@ -1024,7 +1129,7 @@ export function mapAuditLog(row: any): AuditLog {
 export const signupRequestSchema = z.object({
   email: z.string().email("Invalid email address"),
   password: z.string().min(8, "Password must be at least 8 characters"),
-  role: z.enum(["client", "therapist"]).default("client"),
+  role: z.enum(["client", "listener"]).default("client"),
   firstName: z.string().min(1).max(50).optional(),
   lastName: z.string().min(1).max(50).optional(),
   phone: z.string().optional(),
@@ -1089,6 +1194,7 @@ export const slotCreateRequestSchema = z.object({
   startsAt: z.string().datetime({ message: "Must be ISO 8601 datetime" }),
   durationMinutes: z.number().int().min(15).max(180),
   priceDinar: z.number().nonnegative().max(1000),
+  meetLink: z.string().url().optional().nullable(),
 });
 
 export const paymentInitiateRequestSchema = z.object({
@@ -1116,7 +1222,7 @@ export function mapProfile(row: any): User {
     firstName: row.first_name,
     lastName: row.last_name,
     profileImageUrl: row.profile_image_url,
-    role: row.role,
+    role: row.role || "client",
     phone: row.phone,
     publicKey: row.public_key,
     languagePreference: row.language_preference,
@@ -1364,6 +1470,9 @@ export function mapListenerProgress(row: any): ListenerProgress {
     points: row.points,
     level: row.level,
     sessionsRatedCount: row.sessions_rated_count,
+    currentStreak: row.current_streak ?? 0,
+    longestStreak: row.longest_streak ?? 0,
+    endorsementsCount: row.endorsements_count ?? 0,
     lastCalculatedAt: row.last_calculated_at,
   };
 }
@@ -1377,6 +1486,74 @@ export function mapListenerPointsLedger(row: any): ListenerPointsLedger {
     delta: row.delta,
     meta: row.meta,
     createdAt: row.created_at,
+  };
+}
+
+export function mapListenerBadge(row: any): ListenerBadge {
+  return {
+    id: row.id,
+    listenerId: row.listener_id,
+    badgeKey: row.badge_key,
+    title: row.title,
+    description: row.description ?? null,
+    awardedAt: row.awarded_at,
+    meta: row.meta ?? null,
+  };
+}
+
+export function mapListenerEndorsement(row: any): ListenerEndorsement {
+  return {
+    id: row.id,
+    listenerId: row.listener_id,
+    sessionId: row.session_id ?? null,
+    quote: row.quote,
+    warmthScore: row.warmth_score ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapListenerWellbeingCheckIn(row: any): ListenerWellbeingCheckIn {
+  return {
+    id: row.id,
+    listenerId: row.listener_id,
+    sessionId: row.session_id ?? null,
+    stressLevel: row.stress_level,
+    emotionalLoad: row.emotional_load,
+    needsBreak: row.needs_break ?? false,
+    notes: row.notes ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapListenerCooldown(row: any): ListenerCooldown {
+  return {
+    listenerId: row.listener_id,
+    sourceSessionId: row.source_session_id ?? null,
+    reason: row.reason,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    releasedAt: row.released_at ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapListenerHallOfFameEntry(row: any): ListenerHallOfFameEntry {
+  return {
+    id: row.id,
+    seasonKey: row.season_key,
+    rank: row.rank,
+    listenerId: row.listener_id,
+    displayName: row.display_name,
+    points: row.points ?? 0,
+    averageRating: row.average_rating ?? 0,
+    ratingCount: row.rating_count ?? 0,
+    positiveStreak: row.positive_streak ?? 0,
+    trophyTier: row.trophy_tier ?? null,
+    certificationTitle: row.certification_title ?? null,
+    archivedAt: row.archived_at,
+    certificateIssuedAt: row.certificate_issued_at ?? null,
+    certificateCode: row.certificate_code ?? null,
   };
 }
 

@@ -36,6 +36,98 @@ const CRISIS_KEYWORDS = [
   // Darija
   "نقتل روحي", "نموت", "ما نحبش نعيش", "نكمل حياتي",
 ];
+const LISTENER_DIFFICULT_SESSION_COOLDOWN_MINUTES = 20;
+const LISTENER_HIGH_LOAD_COOLDOWN_MINUTES = 45;
+const PLATFORM_ROLES = ["client", "therapist", "listener", "moderator", "admin"] as const;
+
+type PlatformRole = (typeof PLATFORM_ROLES)[number];
+
+function normalizePlatformRole(value: unknown): PlatformRole {
+  const role = String(value || "").trim();
+  if ((PLATFORM_ROLES as readonly string[]).includes(role)) {
+    return role as PlatformRole;
+  }
+  return "client";
+}
+
+function listenerSeasonKeyForDate(date: Date): string {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function previousListenerSeasonKey(baseDate: Date = new Date()): string {
+  return listenerSeasonKeyForDate(new Date(Date.UTC(
+    baseDate.getUTCFullYear(),
+    baseDate.getUTCMonth() - 1,
+    1,
+  )));
+}
+
+function isValidListenerSeasonKey(value: string): boolean {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
+}
+
+function escapePdfText(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+function buildListenerCertificatePdf(input: {
+  seasonKey: string;
+  listenerName: string;
+  certificationTitle: string;
+  issueDate: string;
+  certificateCode: string;
+}): Buffer {
+  const title = "Shifa Listener Recognition Certificate";
+  const lines = [
+    title,
+    "",
+    "Awarded to:",
+    input.listenerName,
+    "",
+    `Achievement: ${input.certificationTitle}`,
+    `Season: ${input.seasonKey}`,
+    `Issued: ${input.issueDate}`,
+    `Certificate code: ${input.certificateCode}`,
+  ];
+
+  const streamLines: string[] = ["BT", "/F1 24 Tf 72 740 Td"];
+  lines.forEach((line, index) => {
+    const fontSize = index === 0 ? 24 : index === 3 ? 22 : 14;
+    if (index > 0) {
+      streamLines.push("0 -30 Td");
+    }
+    streamLines.push(`/F1 ${fontSize} Tf (${escapePdfText(line)}) Tj`);
+  });
+  streamLines.push("ET");
+  const content = streamLines.join("\n");
+
+  const objects = [
+    "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+    "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+    "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj",
+    `4 0 obj << /Length ${Buffer.byteLength(content, "utf8")} >> stream\n${content}\nendstream endobj`,
+    "5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj",
+  ];
+
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = [0];
+  for (const object of objects) {
+    offsets.push(Buffer.byteLength(pdf, "utf8"));
+    pdf += `${object}\n`;
+  }
+
+  const xrefStart = Buffer.byteLength(pdf, "utf8");
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  for (let i = 1; i <= objects.length; i += 1) {
+    pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+  }
+  pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+
+  return Buffer.from(pdf, "utf8");
+}
 
 // ---- Auth middleware ----
 
@@ -71,7 +163,18 @@ function requireRoles(roles: string[]) {
     if (!authUser?.id) return res.status(401).json({ message: "Unauthorized" });
 
     const profile = await storage.getUser(authUser.id);
-    if (!profile || !roles.includes(profile.role)) {
+    if (!profile) return res.status(403).json({ message: "Forbidden" });
+
+    const userRole = normalizePlatformRole(profile.role);
+    const allowedRoles = roles
+      .map((role) => String(role || "").trim())
+      .flatMap((role) => {
+        if (["therapist", "doctor", "graduated_doctor", "premium_doctor"].includes(role)) return ["therapist" as PlatformRole];
+        if ((PLATFORM_ROLES as readonly string[]).includes(role)) return [role as PlatformRole];
+        return [];
+      });
+
+    if (allowedRoles.length === 0 || !allowedRoles.includes(userRole)) {
       return res.status(403).json({ message: "Forbidden" });
     }
 
@@ -142,12 +245,12 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   const fallbackProfile = (authUser: { id: string; email?: string }, role: string = "client"): User => ({
+    role: normalizePlatformRole(role),
     id: authUser.id,
     email: authUser.email || null,
     firstName: null,
     lastName: null,
     profileImageUrl: null,
-    role,
     phone: null,
     publicKey: null,
     languagePreference: "ar",
@@ -178,20 +281,14 @@ export async function registerRoutes(
   };
 
   const listModeratorIds = async (): Promise<string[]> => {
-    const { data } = await supabaseAdmin
+    const { data: rows } = await supabaseAdmin
       .from("profiles")
       .select("id")
       .in("role", ["moderator", "admin"]);
-    return (data || []).map((row: any) => row.id);
+    return (rows || []).map((row) => String((row as any).id));
   };
 
-  const normalizeRole = (value: unknown): "client" | "therapist" | "listener" | "moderator" | "admin" => {
-    const role = String(value || "").trim();
-    if (["client", "therapist", "listener", "moderator", "admin"].includes(role)) {
-      return role as "client" | "therapist" | "listener" | "moderator" | "admin";
-    }
-    return "client";
-  };
+  const normalizeRole = (value: unknown): PlatformRole => normalizePlatformRole(value);
 
   const markOnboardingCompleted = async (userId: string, preferredLanguage?: string | null) => {
     const updatePayload: Record<string, any> = {
@@ -287,7 +384,8 @@ export async function registerRoutes(
 
   const ensureTherapistProfile = async (userId: string): Promise<void> => {
     const user = await storage.getUser(userId);
-    if (!user || user.role !== "therapist") return;
+    if (!user) return;
+    if (normalizePlatformRole(user.role) !== "therapist") return;
 
     const existing = await storage.getTherapistProfile(userId);
     if (existing) return;
@@ -337,6 +435,7 @@ export async function registerRoutes(
   app.post("/api/auth/signup", validateBody(signupRequestSchema), async (req, res) => {
     try {
       const { email, password, role, firstName, lastName, phone } = req.body;
+      const requestedRole = normalizeRole(role || "client");
       const { data, error } = await supabaseAdmin.auth.admin.createUser({
         email,
         password,
@@ -353,7 +452,7 @@ export async function registerRoutes(
           email: data.user.email || email || null,
           firstName,
           lastName,
-          role: role || "client",
+          role: requestedRole,
           phone,
         });
         profile = mapProfile(row);
@@ -373,15 +472,18 @@ export async function registerRoutes(
         });
       }
 
-      if (profile?.role === "therapist") {
-        await ensureTherapistProfile(profile.id);
+      const profileWithRoles = profile
+        ?? fallbackProfile({ id: data.user!.id, email: data.user?.email || email }, requestedRole);
+
+      if (normalizePlatformRole(profileWithRoles.role) === "therapist") {
+        await ensureTherapistProfile(profileWithRoles.id);
       }
 
       // Fire-and-forget welcome email
       sendWelcome(email, firstName || email.split("@")[0]);
 
       res.json({
-        user: profile || fallbackProfile({ id: data.user!.id, email: data.user?.email || email }, normalizeRole(role)),
+        user: profileWithRoles,
         session: session.session,
       });
     } catch (error) {
@@ -403,11 +505,12 @@ export async function registerRoutes(
         id: data.user.id,
         email: data.user.email || email,
       });
-      if (profile?.role === "therapist") {
-        await ensureTherapistProfile(profile.id);
+      const profileWithRoles = profile ?? fallbackProfile({ id: data.user.id, email: data.user.email || email });
+      if (normalizePlatformRole(profileWithRoles.role) === "therapist") {
+        await ensureTherapistProfile(profileWithRoles.id);
       }
       res.json({
-        user: profile || fallbackProfile({ id: data.user.id, email: data.user.email || email }),
+        user: profileWithRoles,
         session: data.session,
       });
     } catch (error) {
@@ -439,11 +542,14 @@ export async function registerRoutes(
       const profile = data.user
         ? await ensureProfile({ id: data.user.id, email: data.user.email || undefined })
         : null;
-      if (profile?.role === "therapist") {
-        await ensureTherapistProfile(profile.id);
+      const profileWithRoles = profile
+        ?? (data.user ? fallbackProfile({ id: data.user.id, email: data.user.email || undefined }) : null);
+
+      if (profileWithRoles && normalizePlatformRole(profileWithRoles.role) === "therapist") {
+        await ensureTherapistProfile(profileWithRoles.id);
       }
       res.json({
-        user: profile || (data.user ? fallbackProfile({ id: data.user.id, email: data.user.email || undefined }) : null),
+        user: profileWithRoles,
         session: data.session,
       });
     } catch (error) {
@@ -456,14 +562,16 @@ export async function registerRoutes(
       const authUser = await extractUser(req);
       if (!authUser) return res.status(401).json({ message: "Unauthorized" });
       const profile = await ensureProfile(authUser);
-      if (profile?.role === "therapist") {
-        await ensureTherapistProfile(profile.id);
+      const profileOut = profile ?? fallbackProfile(authUser);
+      if (normalizePlatformRole(profileOut.role) === "therapist") {
+        await ensureTherapistProfile(profileOut.id);
       }
-      res.json(profile);
+      res.json(profileOut);
     } catch (error) {
       res.status(500).json({ message: "Failed to get user" });
     }
   });
+
 
   app.post("/api/auth/logout", async (req, res) => {
     res.json({ message: "Logged out" });
@@ -479,6 +587,154 @@ export async function registerRoutes(
       res.json({ session: data.session });
     } catch (error) {
       res.status(500).json({ message: "Failed to refresh session" });
+    }
+  });
+
+  app.get("/api/workflow/overview", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id as string;
+      const profile = await ensureProfile({ id: userId, email: req.user.email });
+      const hydratedProfile = profile ?? fallbackProfile({ id: userId, email: req.user.email });
+      const activeRole = normalizePlatformRole(hydratedProfile.role);
+
+      const [appointments, peerSessions, unreadCount] = await Promise.all([
+        storage.getAppointments(userId),
+        storage.getPeerSessionsByUser(userId),
+        storage.getUnreadCount(userId),
+      ]);
+
+      const upcomingAppointments = (appointments || []).filter((apt) => {
+        const scheduled = Date.parse(apt.scheduledAt);
+        return Number.isFinite(scheduled) && scheduled > Date.now() && !["cancelled", "completed"].includes(apt.status);
+      }).length;
+
+      const activePeerSessions = (peerSessions || []).filter((session) => session.status === "active").length;
+      const completedPeerSessions = (peerSessions || []).filter((session) => ["completed", "ended"].includes(session.status)).length;
+
+      let listenerApplication: any = null;
+      let listenerProfile: any = null;
+      let activeCooldown: any = null;
+      if (activeRole === "listener") {
+        [listenerApplication, listenerProfile, activeCooldown] = await Promise.all([
+          storage.getListenerApplicationByUser(userId),
+          storage.getListenerProfile(userId),
+          storage.getActiveListenerCooldown(userId),
+        ]);
+      }
+
+      let pendingListenerApplications = 0;
+      let openPeerReports = 0;
+      if (activeRole === "moderator" || activeRole === "admin") {
+        const [applications, reports] = await Promise.all([
+          storage.listListenerApplications(),
+          storage.listOpenPeerReports(),
+        ]);
+        pendingListenerApplications = (applications || []).filter((app) => ["pending", "changes_requested"].includes(app.status)).length;
+        openPeerReports = (reports || []).length;
+      }
+
+      const recommendations: Array<{ id: string; title: string; description: string; href: string }> = [];
+      if (activeRole === "client") {
+        if (activePeerSessions > 0) {
+          recommendations.push({
+            id: "continue_peer_session",
+            title: "Continue active peer support",
+            description: "You already have an active chat session with a listener.",
+            href: "/peer-support",
+          });
+        } else {
+          recommendations.push({
+            id: "choose_support_path",
+            title: "Choose support path",
+            description: "Use the guided triage to pick listener, therapist, or self-care.",
+            href: "/support",
+          });
+        }
+        recommendations.push({
+          id: "review_appointments",
+          title: "Check upcoming appointments",
+          description: "Confirm schedule and prepare notes before your next session.",
+          href: "/appointments",
+        });
+      } else if (activeRole === "listener") {
+        if (activeCooldown) {
+          recommendations.push({
+            id: "listener_recovery",
+            title: "Complete wellbeing check-in",
+            description: "Cooldown is active. Submit your check-in to resume safely.",
+            href: "/peer-support",
+          });
+        } else if (!listenerProfile || !["trial", "live"].includes(listenerProfile.activationStatus)) {
+          recommendations.push({
+            id: "listener_readiness",
+            title: "Complete listener readiness",
+            description: "Finish your listener profile and activation workflow.",
+            href: "/listener/dashboard",
+          });
+        } else {
+          recommendations.push({
+            id: "go_online_listener",
+            title: "Go online for clients",
+            description: "Set availability and accept sessions from clients.",
+            href: "/listener/dashboard",
+          });
+        }
+        recommendations.push({
+          id: "peer_support_workspace",
+          title: "Open peer support workspace",
+          description: "Browse, connect, and manage active peer sessions.",
+          href: "/peer-support",
+        });
+      } else if (activeRole === "therapist") {
+        recommendations.push({
+          id: "therapist_schedule",
+          title: "Manage therapist schedule",
+          description: "Review slots, appointments, and client messages.",
+          href: "/therapist-dashboard",
+        });
+      } else if (activeRole === "moderator" || activeRole === "admin") {
+        if (openPeerReports > 0 || pendingListenerApplications > 0) {
+          recommendations.push({
+            id: "moderation_queue",
+            title: "Review moderation queue",
+            description: "Resolve open reports and pending listener applications.",
+            href: "/admin/listeners",
+          });
+        }
+        recommendations.push({
+          id: "admin_overview",
+          title: "Open admin dashboard",
+          description: "Track platform health, growth, and operations.",
+          href: "/admin/dashboard",
+        });
+      }
+
+      res.json({
+        user: {
+          id: hydratedProfile.id,
+          role: activeRole,
+        },
+        counts: {
+          unreadMessages: unreadCount,
+          upcomingAppointments,
+          activePeerSessions,
+          completedPeerSessions,
+        },
+        listener: {
+          applicationStatus: listenerApplication?.status || null,
+          verificationStatus: listenerProfile?.verificationStatus || null,
+          activationStatus: listenerProfile?.activationStatus || null,
+          isAvailable: typeof listenerProfile?.isAvailable === "boolean" ? listenerProfile.isAvailable : null,
+          cooldownEndsAt: activeCooldown?.endsAt || null,
+        },
+        moderation: {
+          pendingListenerApplications,
+          openPeerReports,
+        },
+        recommendations,
+      });
+    } catch {
+      res.status(500).json({ message: "Failed to build workflow overview" });
     }
   });
 
@@ -2176,7 +2432,6 @@ export async function registerRoutes(
   app.post("/api/listener/apply", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
-
       // Must pass the qualification test first
       const testResult = await storage.getListenerQualificationTest(userId);
       if (!testResult || !testResult.passed) {
@@ -2243,6 +2498,9 @@ export async function registerRoutes(
           points: 0,
           level: 1,
           sessionsRatedCount: 0,
+          currentStreak: 0,
+          longestStreak: 0,
+          endorsementsCount: 0,
           lastCalculatedAt: null,
         });
       }
@@ -2262,41 +2520,220 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/listener/wellbeing/checkin", isAuthenticated, async (req: any, res) => {
+    try {
+      const listenerId = req.user.id;
+      const profile = await storage.getListenerProfile(listenerId);
+      if (!profile) return res.status(403).json({ message: "Not a listener" });
+
+      const stressLevel = Number(req.body.stressLevel);
+      const emotionalLoad = Number(req.body.emotionalLoad);
+      if (!Number.isInteger(stressLevel) || stressLevel < 1 || stressLevel > 5) {
+        return res.status(400).json({ message: "stressLevel must be an integer between 1 and 5" });
+      }
+      if (!Number.isInteger(emotionalLoad) || emotionalLoad < 1 || emotionalLoad > 5) {
+        return res.status(400).json({ message: "emotionalLoad must be an integer between 1 and 5" });
+      }
+
+      const needsBreak = req.body.needsBreak === true;
+      const sessionId = Number.isInteger(Number(req.body.sessionId)) ? Number(req.body.sessionId) : null;
+      const notes = typeof req.body.notes === "string" ? req.body.notes.trim().slice(0, 1200) : null;
+
+      const checkIn = await storage.createListenerWellbeingCheckIn({
+        listenerId,
+        sessionId,
+        stressLevel,
+        emotionalLoad,
+        needsBreak,
+        notes: notes || null,
+      });
+
+      let cooldown = await storage.getActiveListenerCooldown(listenerId);
+      if (needsBreak || stressLevel >= 5 || emotionalLoad >= 5) {
+        const duration = needsBreak
+          ? LISTENER_HIGH_LOAD_COOLDOWN_MINUTES
+          : LISTENER_DIFFICULT_SESSION_COOLDOWN_MINUTES;
+        cooldown = await storage.upsertListenerCooldown(
+          listenerId,
+          sessionId,
+          needsBreak ? "self_requested_break" : "high_load_checkin",
+          duration,
+        );
+      }
+
+      res.status(201).json({ checkIn, cooldown: cooldown || null });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to save wellbeing check-in" });
+    }
+  });
+
   app.get("/api/listener/leaderboard", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
       const limitRaw = Number(req.query.limit);
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(50, Math.floor(limitRaw))) : 20;
-      const leaderboard = await storage.getListenerLeaderboard(limit);
+      const requestedSeasonKey = typeof req.query.season === "string" ? req.query.season : "";
+      const seasonKey = isValidListenerSeasonKey(requestedSeasonKey)
+        ? requestedSeasonKey
+        : listenerSeasonKeyForDate(new Date());
 
-      let myRank: number | null = null;
-      const inTop = leaderboard.find((entry) => entry.listenerId === userId);
-      if (inTop) {
-        myRank = inTop.rank;
-      } else {
-        const { data: myProgress } = await supabaseAdmin
-          .from("listener_progress")
-          .select("points")
-          .eq("listener_id", userId)
-          .maybeSingle();
-        if (myProgress) {
-          const { data: allProgressRows } = await supabaseAdmin
-            .from("listener_progress")
-            .select("listener_id, points")
-            .order("points", { ascending: false });
-          if (allProgressRows) {
-            const sorted = allProgressRows
-              .map((row: any) => ({ listenerId: row.listener_id, points: Number(row.points || 0) }))
-              .sort((a, b) => b.points - a.points);
-            const index = sorted.findIndex((row) => row.listenerId === userId);
-            myRank = index >= 0 ? index + 1 : null;
-          }
-        }
-      }
+      // Lazy monthly archive finalization for previous season.
+      storage.finalizeListenerSeason(previousListenerSeasonKey(), 3).catch(() => undefined);
 
-      res.json({ leaderboard, myRank });
+      const [leaderboard, allSeasonRows, hallOfFame] = await Promise.all([
+        storage.getListenerLeaderboard(limit, seasonKey),
+        storage.getListenerLeaderboard(5000, seasonKey),
+        storage.getListenerHallOfFame(6, 3),
+      ]);
+      const myEntry = allSeasonRows.find((entry) => entry.listenerId === userId) || null;
+      const myRank = myEntry?.rank ?? null;
+
+      res.json({
+        seasonKey,
+        leaderboard,
+        myRank,
+        myCertificationTitle: myEntry?.certificationTitle ?? null,
+        hallOfFame,
+      });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch listener leaderboard" });
+    }
+  });
+
+  app.get("/api/listener/hall-of-fame", isAuthenticated, async (_req: any, res) => {
+    try {
+      const hallOfFame = await storage.getListenerHallOfFame(12, 3);
+      res.json(hallOfFame);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch Hall of Fame" });
+    }
+  });
+
+  app.post("/api/admin/listener/season/finalize", isAuthenticated, requireRoles(["admin", "moderator"]), async (req: any, res) => {
+    try {
+      const rawSeasonKey = typeof req.body?.seasonKey === "string" ? req.body.seasonKey : "";
+      const seasonKey = isValidListenerSeasonKey(rawSeasonKey)
+        ? rawSeasonKey
+        : previousListenerSeasonKey();
+      const archived = await storage.finalizeListenerSeason(seasonKey, 3);
+      res.json({ seasonKey, archivedCount: archived.length, archived });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to finalize listener season" });
+    }
+  });
+
+  app.get("/api/listener/leaderboard/certificate", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id as string;
+      const now = new Date();
+      const currentSeasonKey = listenerSeasonKeyForDate(now);
+      const requestedSeasonKey = typeof req.query.season === "string" ? req.query.season : "";
+      const seasonKey = isValidListenerSeasonKey(requestedSeasonKey) ? requestedSeasonKey : currentSeasonKey;
+
+      let certificationTitle: string | null = null;
+      let certificateCode: string | null = null;
+      let issueDate = now.toISOString();
+
+      if (seasonKey === currentSeasonKey) {
+        const currentSeasonRows = await storage.getListenerLeaderboard(5000, seasonKey);
+        const mine = currentSeasonRows.find((entry) => entry.listenerId === userId) || null;
+        certificationTitle = mine?.certificationTitle ?? null;
+      }
+
+      const { data: hallRows } = await supabaseAdmin
+        .from("listener_hall_of_fame")
+        .select("id, certification_title, certificate_code, certificate_issued_at")
+        .eq("listener_id", userId)
+        .eq("season_key", seasonKey)
+        .not("certification_title", "is", null)
+        .order("rank", { ascending: true })
+        .limit(1);
+      const hallRow = (hallRows || [])[0];
+      if (!certificationTitle && hallRow?.certification_title) {
+        certificationTitle = String(hallRow.certification_title);
+      }
+      if (!certificationTitle) {
+        return res.status(403).json({ message: "Certificate is available only for certified top listeners." });
+      }
+
+      if (hallRow) {
+        certificateCode = hallRow.certificate_code || null;
+        issueDate = hallRow.certificate_issued_at || issueDate;
+        if (!certificateCode) {
+          certificateCode = `SHIFA-${seasonKey}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+          issueDate = new Date().toISOString();
+          await supabaseAdmin
+            .from("listener_hall_of_fame")
+            .update({
+              certificate_code: certificateCode,
+              certificate_issued_at: issueDate,
+            })
+            .eq("id", hallRow.id);
+        }
+      } else {
+        certificateCode = `SHIFA-${seasonKey}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+      }
+
+      const profile = await storage.getUser(userId);
+      const listenerName = [
+        profile?.firstName || "",
+        profile?.lastName || "",
+      ].join(" ").trim() || profile?.displayName || "Listener";
+      const issueDateText = new Date(issueDate).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+
+      const pdf = buildListenerCertificatePdf({
+        seasonKey,
+        listenerName,
+        certificationTitle,
+        issueDate: issueDateText,
+        certificateCode,
+      });
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename=\"shifa-listener-certificate-${seasonKey}.pdf\"`);
+      res.send(pdf);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to generate listener certificate" });
+    }
+  });
+
+  app.get("/api/public/listener/leaderboard", async (req, res) => {
+    try {
+      const limitRaw = Number(req.query.limit);
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(50, Math.floor(limitRaw))) : 20;
+      const requestedSeasonKey = typeof req.query.season === "string" ? req.query.season : "";
+      const seasonKey = isValidListenerSeasonKey(requestedSeasonKey)
+        ? requestedSeasonKey
+        : listenerSeasonKeyForDate(new Date());
+
+      // Keep archive updated passively.
+      storage.finalizeListenerSeason(previousListenerSeasonKey(), 3).catch(() => undefined);
+
+      const [leaderboard, hallOfFame] = await Promise.all([
+        storage.getListenerLeaderboard(limit, seasonKey),
+        storage.getListenerHallOfFame(12, 3),
+      ]);
+
+      res.json({
+        seasonKey,
+        leaderboard,
+        hallOfFame,
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch public listener leaderboard" });
+    }
+  });
+
+  app.get("/api/public/listener/hall-of-fame", async (_req, res) => {
+    try {
+      const hallOfFame = await storage.getListenerHallOfFame(12, 3);
+      res.json(hallOfFame);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch public Hall of Fame" });
     }
   });
 
@@ -2312,6 +2749,16 @@ export async function registerRoutes(
 
       if (desiredAvailability && !["trial", "live"].includes(profile.activationStatus)) {
         return res.status(403).json({ message: "Listener account is not activated yet" });
+      }
+
+      if (desiredAvailability) {
+        const activeCooldown = await storage.getActiveListenerCooldown(userId);
+        if (activeCooldown) {
+          return res.status(423).json({
+            message: "Cooldown active. Complete your recovery window before going online.",
+            cooldown: activeCooldown,
+          });
+        }
       }
 
       const updated = await storage.setListenerAvailability(userId, desiredAvailability);
@@ -2475,6 +2922,14 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Listener is not activated for sessions" });
       }
 
+      const activeCooldown = await storage.getActiveListenerCooldown(listenerId);
+      if (activeCooldown) {
+        return res.status(423).json({
+          message: "Listener cooldown active",
+          cooldown: activeCooldown,
+        });
+      }
+
       const waitingEntries = await storage.listWaitingQueueEntries();
       const queueEntry = waitingEntries.find((entry) => entry.id === queueEntryId);
       if (!queueEntry) return res.status(404).json({ message: "Queue entry not found or unavailable" });
@@ -2529,7 +2984,37 @@ export async function registerRoutes(
         ? Math.max(1, Math.ceil((Date.now() - new Date(ended.startedAt).getTime()) / 60000))
         : 1;
 
-      await storage.setListenerAvailability(ended.listenerId, true).catch(() => undefined);
+      const { data: reportSignals } = await supabaseAdmin
+        .from("peer_reports")
+        .select("severity")
+        .eq("session_id", ended.id);
+      const hasAnyReport = (reportSignals || []).length > 0;
+      const hasSevereReport = (reportSignals || []).some((row: any) =>
+        ["high", "critical"].includes(String(row.severity || "").toLowerCase()),
+      );
+      const difficultSession = Boolean(ended.escalatedToCrisis || hasAnyReport);
+      const cooldownMinutes = ended.escalatedToCrisis || hasSevereReport
+        ? LISTENER_HIGH_LOAD_COOLDOWN_MINUTES
+        : LISTENER_DIFFICULT_SESSION_COOLDOWN_MINUTES;
+      const cooldownReason = ended.escalatedToCrisis
+        ? "crisis_session"
+        : hasSevereReport
+          ? "severe_reported_session"
+          : hasAnyReport
+            ? "reported_session"
+            : "difficult_session";
+
+      let cooldown = null;
+      if (difficultSession) {
+        cooldown = await storage.upsertListenerCooldown(
+          ended.listenerId,
+          ended.id,
+          cooldownReason,
+          cooldownMinutes,
+        );
+      } else {
+        await storage.setListenerAvailability(ended.listenerId, true).catch(() => undefined);
+      }
 
       const otherUserId = userId === ended.clientId ? ended.listenerId : ended.clientId;
       await notifyUser(
@@ -2538,8 +3023,16 @@ export async function registerRoutes(
         "Your peer support session has ended.",
         { type: "peer_session", sessionId: String(ended.id) },
       );
+      if (cooldown) {
+        await notifyUser(
+          ended.listenerId,
+          "Cooldown started",
+          "Take a short recovery pause and complete your listener wellbeing check-in.",
+          { type: "listener_cooldown", sessionId: String(ended.id) },
+        );
+      }
 
-      res.json({ session: ended, durationMinutes });
+      res.json({ session: ended, durationMinutes, difficultSession, cooldown });
       // Fire-and-forget stat sync
       storage.syncListenerBrowseStats(ended.listenerId).catch(() => {});
     } catch (error) {
@@ -2697,7 +3190,17 @@ export async function registerRoutes(
         hasDetailedComment: comment.length >= 40,
       });
 
-      res.status(201).json({ feedback, listenerProgress: progress });
+      let endorsement = null;
+      if (rating >= 4 && comment.length >= 24) {
+        endorsement = await storage.createListenerEndorsement({
+          listenerId: session.listenerId,
+          sessionId,
+          quote: comment,
+          warmthScore: Math.max(1, Math.min(5, Math.round(rating))),
+        });
+      }
+
+      res.status(201).json({ feedback, listenerProgress: progress, endorsement });
       // Fire-and-forget stat sync
       storage.syncListenerBrowseStats(session.listenerId).catch(() => {});
     } catch (error) {
@@ -2752,7 +3255,7 @@ export async function registerRoutes(
   // ---- Admin moderation ----
 
   // One-shot: provision listener profiles for all existing therapists
-  app.post("/api/admin/sync-therapist-listeners", isAuthenticated, requireRoles(["admin"]), async (_req, res) => {
+  app.post("/api/admin/sync-therapist-listeners", isAuthenticated, requireRoles(["admin"]), async (req: any, res) => {
     try {
       const { data: therapists } = await supabaseAdmin
         .from("therapist_profiles")
@@ -2827,6 +3330,11 @@ export async function registerRoutes(
       if (status === "approved" && req.body.activationStatus && ["trial", "live", "inactive", "suspended"].includes(req.body.activationStatus)) {
         profile = await storage.setListenerActivation(application.userId, req.body.activationStatus, reviewerId);
       }
+      if (status === "approved") {
+        await storage.updateUser(application.userId, { role: "listener" });
+      } else if (status === "rejected") {
+        await storage.updateUser(application.userId, { role: "client" });
+      }
 
       await notifyUser(
         application.userId,
@@ -2866,6 +3374,7 @@ export async function registerRoutes(
 
       const profile = await storage.setListenerActivation(listenerUserId, "trial", reviewerId);
       if (!profile) return res.status(404).json({ message: "Listener profile not found" });
+      await storage.updateUser(listenerUserId, { role: "listener" });
 
       await notifyUser(
         listenerUserId,
@@ -2889,6 +3398,7 @@ export async function registerRoutes(
 
       const profile = await storage.setListenerActivation(listenerUserId, "live", reviewerId);
       if (!profile) return res.status(404).json({ message: "Listener profile not found" });
+      await storage.updateUser(listenerUserId, { role: "listener" });
 
       await notifyUser(
         listenerUserId,
@@ -3114,14 +3624,59 @@ export async function registerRoutes(
       const { id } = req.params;
       const { role } = req.body as { role?: string };
       if (!role) return res.status(400).json({ message: "role required" });
-      const allowed = ["user", "client", "therapist", "moderator", "admin"];
-      if (!allowed.includes(role)) return res.status(400).json({ message: "Invalid role" });
-      const updated = await storage.updateUser(id, { role });
+      const roleInput = String(role).trim();
+      const allowed = ["user", "client", "listener", "therapist", "moderator", "admin"];
+      if (!allowed.includes(roleInput)) return res.status(400).json({ message: "Invalid role" });
+      const normalizedRole = roleInput === "user" ? "client" : normalizeRole(roleInput);
+      const updated = await storage.updateUser(id, { role: normalizedRole });
       if (!updated) return res.status(404).json({ message: "User not found" });
-      logAudit(req.user.id, "admin.user_role_change", "user", id, { newRole: role }, req);
+
+      logAudit(req.user.id, "admin.user_role_change", "user", id, { newRole: normalizedRole }, req);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ message: "Failed to update user" });
+    }
+  });
+
+  app.post("/api/admin/roles/grant", isAuthenticated, requireRoles(["admin", "moderator"]), async (req: any, res) => {
+    try {
+      const actorId = req.user.id as string;
+      const userId = String(req.body?.userId || "");
+      const rawRole = String(req.body?.role || "").trim();
+
+      if (!userId) return res.status(400).json({ message: "userId is required" });
+      if (!(PLATFORM_ROLES as readonly string[]).includes(rawRole)) {
+        return res.status(400).json({ message: "Invalid role" });
+      }
+      const role = normalizeRole(rawRole);
+
+      const target = await storage.getUser(userId);
+      if (!target) return res.status(404).json({ message: "User not found" });
+
+      const updated = await storage.updateUser(userId, { role });
+      if (role === "therapist") {
+        await ensureTherapistProfile(userId);
+      }
+
+      logAudit(actorId, "admin.role_grant", "user", userId, { role }, req);
+      res.status(201).json({ user: updated, role, status: "active" });
+    } catch {
+      res.status(500).json({ message: "Failed to grant role" });
+    }
+  });
+
+  app.post("/api/admin/roles/revoke", isAuthenticated, requireRoles(["admin", "moderator"]), async (req: any, res) => {
+    try {
+      const actorId = req.user.id as string;
+      const userId = String(req.body?.userId || "");
+      if (!userId) return res.status(400).json({ message: "userId is required" });
+
+      const updated = await storage.updateUser(userId, { role: "client" });
+
+      logAudit(actorId, "admin.role_revoke", "user", userId, { newRole: "client" }, req);
+      res.json({ user: updated, revokedRole: req.body?.role, role: "client" });
+    } catch {
+      res.status(500).json({ message: "Failed to revoke role" });
     }
   });
 
@@ -3614,6 +4169,13 @@ export async function registerRoutes(
       }
       if (!["trial", "live"].includes(profile.activationStatus)) {
         return res.status(403).json({ message: "Listener is not active" });
+      }
+      const activeCooldown = await storage.getActiveListenerCooldown(listenerId);
+      if (activeCooldown) {
+        return res.status(409).json({
+          message: "Listener is in cooldown after a difficult session",
+          cooldown: activeCooldown,
+        });
       }
       if (!profile.isAvailable) {
         return res.status(409).json({ message: "Listener is currently busy" });

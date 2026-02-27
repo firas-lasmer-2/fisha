@@ -4,9 +4,40 @@
 -- ============================================================
 
 -- ── Appointment cancellation / reschedule ──────────────────
-ALTER TABLE appointments ADD COLUMN IF NOT EXISTS cancelled_by UUID REFERENCES profiles(id);
-ALTER TABLE appointments ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
-ALTER TABLE appointments ADD COLUMN IF NOT EXISTS original_appointment_id UUID REFERENCES appointments(id);
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS cancelled_by UUID REFERENCES public.profiles(id);
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS original_appointment_id INTEGER;
+
+DO $$
+BEGIN
+  -- If a prior attempt created this column as UUID, coerce to INTEGER (appointments.id type).
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'appointments'
+      AND column_name = 'original_appointment_id'
+      AND udt_name = 'uuid'
+  ) THEN
+    ALTER TABLE public.appointments
+      ALTER COLUMN original_appointment_id TYPE INTEGER
+      USING NULL;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'appointments_original_appointment_id_fkey'
+      AND conrelid = 'public.appointments'::regclass
+  ) THEN
+    ALTER TABLE public.appointments
+      ADD CONSTRAINT appointments_original_appointment_id_fkey
+      FOREIGN KEY (original_appointment_id) REFERENCES public.appointments(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 -- ── Webhook idempotency ────────────────────────────────────
 CREATE TABLE IF NOT EXISTS webhook_events (

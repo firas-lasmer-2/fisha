@@ -36,6 +36,7 @@ import ListenPage from "@/pages/listen";
 import ListenerApplyPage from "@/pages/listener-apply";
 import ListenerTestPage from "@/pages/listener-test";
 import ListenerDashboardPage from "@/pages/listener-dashboard";
+import ListenerHallOfFamePage from "@/pages/listener-hall-of-fame";
 import AdminListenersPage from "@/pages/admin-listeners";
 import WelcomePage from "@/pages/welcome";
 import NotFound from "@/pages/not-found";
@@ -43,12 +44,17 @@ import TherapistLandingPage from "@/pages/therapist-landing";
 import AdminDashboardPage from "@/pages/admin-dashboard";
 import ProgressPage from "@/pages/progress";
 import SupportPage from "@/pages/support";
+import PeerSupportPage from "@/pages/peer-support";
+import WorkflowHubPage from "@/pages/workflow-hub";
 
 function homeRouteForRole(role: string | null | undefined) {
-  if (role === "listener") return "/listener/dashboard";
   if (role === "therapist") return "/therapist-dashboard";
-  if (role === "moderator" || role === "admin") return "/admin/listeners";
-  return "/dashboard";
+  if (role === "listener") return "/listener/dashboard";
+  return "/workflow";
+}
+
+function effectiveRole(user: { role?: string | null } | null | undefined) {
+  return user?.role;
 }
 
 function shouldShowWelcome() {
@@ -79,7 +85,8 @@ function AuthGuard({
     return null;
   }
 
-  const requiresOnboarding = user.role === "client";
+  const role = effectiveRole(user);
+  const requiresOnboarding = role === "client";
   if (!allowIncompleteOnboarding && requiresOnboarding && !user.onboardingCompleted) {
     navigate("/onboarding");
     return null;
@@ -101,12 +108,13 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (user) {
-    const isClient = user.role === "client";
+    const role = effectiveRole(user);
+    const isClient = role === "client";
     const target = isClient && !user.onboardingCompleted
       ? "/onboarding"
       : shouldShowWelcome() && isClient
         ? "/welcome"
-      : homeRouteForRole(user.role);
+      : homeRouteForRole(role);
     navigate(target);
     return null;
   }
@@ -120,18 +128,15 @@ function DashboardRoute() {
 
   if (!user) return null;
 
-  if (user.role === "client" && shouldShowWelcome()) {
+  const role = effectiveRole(user);
+
+  if (role === "client" && shouldShowWelcome()) {
     navigate("/welcome");
     return null;
   }
 
-  const target = homeRouteForRole(user.role);
-  if (target !== "/dashboard") {
-    navigate(target);
-    return null;
-  }
-
-  return <DashboardPage />;
+  navigate(homeRouteForRole(role));
+  return null;
 }
 
 function Router() {
@@ -176,7 +181,7 @@ function Router() {
             <AuthGuard><ListenPage /></AuthGuard>
           </Route>
           <Route path="/peer-support">
-            <AuthGuard><ListenPage /></AuthGuard>
+            <AuthGuard><PeerSupportPage /></AuthGuard>
           </Route>
           <Route path="/listener/test">
             <AuthGuard allowIncompleteOnboarding><ListenerTestPage /></AuthGuard>
@@ -187,10 +192,14 @@ function Router() {
           <Route path="/listener/dashboard">
             <AuthGuard><ListenerDashboardPage /></AuthGuard>
           </Route>
+          <Route path="/hall-of-fame" component={ListenerHallOfFamePage} />
           <Route path="/admin/listeners">
             <AuthGuard><AdminListenersPage /></AuthGuard>
           </Route>
           <Route path="/support" component={SupportPage} />
+          <Route path="/workflow">
+            <AuthGuard><WorkflowHubPage /></AuthGuard>
+          </Route>
           <Route path="/therapists" component={TherapistsPage} />
           <Route path="/resources" component={ResourcesPage} />
           <Route path="/self-care" component={SelfCarePage} />

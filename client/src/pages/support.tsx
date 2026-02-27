@@ -3,7 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { Check, ArrowLeft, ArrowRight, MessageCircle, GraduationCap, Star } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Check, ArrowLeft, ArrowRight, AlertTriangle, Compass } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useI18n } from "@/lib/i18n";
 
@@ -108,10 +109,91 @@ const faqs = [
   },
 ];
 
+type TriageUrgency = "crisis_now" | "today" | "this_week" | null;
+type TriagePreference = "peer" | "therapist" | "both" | "selfcare" | null;
+type TriagePriority = "free_fast" | "structured" | "specialist" | null;
+
+type TriageRecommendation = {
+  title: string;
+  reason: string;
+  ctaHref: string;
+  ctaLabel: string;
+  requiresAuth?: boolean;
+  badge?: string;
+};
+
 export default function SupportPage() {
   const { user } = useAuth();
   const { isRTL } = useI18n();
   const Arrow = isRTL ? ArrowLeft : ArrowRight;
+
+  const [urgency, setUrgency] = useState<TriageUrgency>(null);
+  const [preference, setPreference] = useState<TriagePreference>(null);
+  const [priority, setPriority] = useState<TriagePriority>(null);
+
+  const recommendation = useMemo<TriageRecommendation | null>(() => {
+    if (!urgency || !preference || !priority) return null;
+
+    if (urgency === "crisis_now") {
+      return {
+        title: "Emergency support first",
+        reason: "Your answers suggest urgent risk. Start with crisis support immediately.",
+        ctaHref: "/crisis",
+        ctaLabel: "Open crisis support",
+        badge: "Urgent",
+      };
+    }
+
+    if (preference === "selfcare") {
+      return {
+        title: "Start with self-care tools",
+        reason: "A low-pressure step can help you regulate before speaking to someone.",
+        ctaHref: "/self-care",
+        ctaLabel: "Open self-care",
+        badge: "Gentle start",
+      };
+    }
+
+    if (preference === "peer" || priority === "free_fast") {
+      return {
+        title: "Peer listener is your best first step",
+        reason: "You prioritized immediate, free, human support.",
+        ctaHref: "/peer-support",
+        ctaLabel: user ? "Start peer session" : "Sign in to start peer session",
+        requiresAuth: true,
+        badge: "Fastest",
+      };
+    }
+
+    if (priority === "specialist") {
+      return {
+        title: "Premium therapist is recommended",
+        reason: "You asked for deeper specialist care.",
+        ctaHref: "/therapists?tier=premium_doctor",
+        ctaLabel: "Browse premium therapists",
+        badge: "Specialist",
+      };
+    }
+
+    if (preference === "both") {
+      return {
+        title: "Hybrid path: peer now, therapist next",
+        reason: "Start with a free listener now, then book structured clinical care.",
+        ctaHref: "/peer-support",
+        ctaLabel: user ? "Start with peer support" : "Sign in to start",
+        requiresAuth: true,
+        badge: "Hybrid",
+      };
+    }
+
+    return {
+      title: "Graduated therapist is recommended",
+      reason: "You want structured support with accessible pricing.",
+      ctaHref: "/therapists?tier=graduated_doctor",
+      ctaLabel: "Browse graduated therapists",
+      badge: "Structured care",
+    };
+  }, [urgency, preference, priority, user]);
 
   return (
     <AppLayout>
@@ -131,6 +213,134 @@ export default function SupportPage() {
             Choose the level of support that fits where you are right now.
             There is no wrong answer.
           </p>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.1 }}
+          className="rounded-2xl border bg-card/70 p-5 space-y-5"
+          data-testid="card-support-triage"
+        >
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-sm font-semibold flex items-center gap-2">
+                <Compass className="h-4 w-4 text-primary" />
+                Guided support triage
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                3 quick answers to recommend the best path for this moment.
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setUrgency(null);
+                setPreference(null);
+                setPriority(null);
+              }}
+            >
+              Reset
+            </Button>
+          </div>
+
+          <div className="space-y-3">
+            <p className="text-sm font-medium">1. How urgent is your situation?</p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: "crisis_now", label: "Crisis now" },
+                { value: "today", label: "Need to talk today" },
+                { value: "this_week", label: "Can plan this week" },
+              ].map((item) => (
+                <button
+                  key={item.value}
+                  onClick={() => setUrgency(item.value as TriageUrgency)}
+                  className={`px-3 py-1.5 rounded-full border text-xs ${
+                    urgency === item.value ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <p className="text-sm font-medium">2. What kind of support feels right?</p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: "peer", label: "Volunteer listener" },
+                { value: "therapist", label: "Licensed therapist" },
+                { value: "both", label: "Both paths" },
+                { value: "selfcare", label: "Self-guided tools first" },
+              ].map((item) => (
+                <button
+                  key={item.value}
+                  onClick={() => setPreference(item.value as TriagePreference)}
+                  className={`px-3 py-1.5 rounded-full border text-xs ${
+                    preference === item.value ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <p className="text-sm font-medium">3. What matters most right now?</p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: "free_fast", label: "Free + immediate" },
+                { value: "structured", label: "Structured therapy" },
+                { value: "specialist", label: "Deep specialist expertise" },
+              ].map((item) => (
+                <button
+                  key={item.value}
+                  onClick={() => setPriority(item.value as TriagePriority)}
+                  className={`px-3 py-1.5 rounded-full border text-xs ${
+                    priority === item.value ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {recommendation && (
+            <div className="rounded-xl border bg-muted/40 p-4 space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-sm font-semibold">{recommendation.title}</p>
+                {recommendation.badge && (
+                  <Badge variant="secondary">{recommendation.badge}</Badge>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">{recommendation.reason}</p>
+              {recommendation.ctaHref === "/crisis" && (
+                <p className="text-xs text-destructive flex items-center gap-1">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  If you are in immediate danger, contact local emergency services now.
+                </p>
+              )}
+              {recommendation.requiresAuth && !user ? (
+                <Link href="/login">
+                  <Button size="sm" className="gap-1.5">
+                    {recommendation.ctaLabel}
+                    <Arrow className="h-3.5 w-3.5" />
+                  </Button>
+                </Link>
+              ) : (
+                <Link href={recommendation.ctaHref}>
+                  <Button size="sm" className="gap-1.5" data-testid="btn-support-recommendation">
+                    {recommendation.ctaLabel}
+                    <Arrow className="h-3.5 w-3.5" />
+                  </Button>
+                </Link>
+              )}
+            </div>
+          )}
         </motion.div>
 
         {/* ── Three path cards ── */}

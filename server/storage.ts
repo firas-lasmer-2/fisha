@@ -16,7 +16,11 @@ import {
   type ListenerProfile, type InsertListenerProfile,
   type BrowsableListener,
   type ListenerProgress, type ListenerPointsLedger,
+  type ListenerBadge, type ListenerEndorsement,
+  type ListenerWellbeingCheckIn, type ListenerCooldown, type ListenerHallOfFameEntry,
   type InsertListenerProgress, type InsertListenerPointsLedger,
+  type InsertListenerBadge, type InsertListenerEndorsement,
+  type InsertListenerWellbeingCheckIn,
   type ListenerApplication, type InsertListenerApplication,
   type ListenerQueueEntry, type InsertListenerQueueEntry,
   type PeerSession, type InsertPeerSession,
@@ -42,6 +46,8 @@ import {
   mapMoodEntry, mapJournalEntry, mapResource,
   mapPaymentTransaction, mapCrisisReport, mapOnboardingResponse,
   mapListenerProfile, mapListenerProgress, mapListenerPointsLedger,
+  mapListenerBadge, mapListenerEndorsement, mapListenerWellbeingCheckIn, mapListenerCooldown,
+  mapListenerHallOfFameEntry,
   mapListenerApplication, mapListenerQueueEntry,
   mapPeerSession, mapPeerMessage, mapPeerSessionFeedback, mapPeerReport,
   mapTherapistVerification, mapAuditLog, mapTreatmentGoal, mapSessionSummary,
@@ -82,6 +88,63 @@ const REPORT_SEVERITY_PENALTY: Record<string, number> = {
   high: -80,
   critical: -120,
 };
+const DIFFICULT_SESSION_COOLDOWN_MINUTES = 20;
+
+const LISTENER_BADGE_DEFS: Record<string, { title: string; description: string }> = {
+  first_session: {
+    title: "First Light",
+    description: "Completed the first rated peer-support session.",
+  },
+  streak_3: {
+    title: "Steady Presence",
+    description: "Maintained a positive streak for 3 sessions.",
+  },
+  streak_7: {
+    title: "Anchor Heart",
+    description: "Maintained a positive streak for 7 sessions.",
+  },
+  level_5: {
+    title: "Community Guide",
+    description: "Reached listener level 5.",
+  },
+  empathy_star: {
+    title: "Empathy Star",
+    description: "Sustained exceptional ratings over multiple sessions.",
+  },
+  endorsed_voice: {
+    title: "Endorsed Voice",
+    description: "Received at least 3 anonymous endorsements.",
+  },
+};
+
+function trophyTierForRank(rank: number): "gold" | "silver" | "bronze" | null {
+  if (rank === 1) return "gold";
+  if (rank === 2) return "silver";
+  if (rank === 3) return "bronze";
+  return null;
+}
+
+function listenerSeasonKeyForDate(date: Date): string {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function isValidListenerSeasonKey(value: string): boolean {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
+}
+
+function listenerSeasonRangeFromKey(seasonKey: string): { startIso: string; endIso: string } {
+  const [yearText, monthText] = seasonKey.split("-");
+  const year = Number(yearText);
+  const monthIndex = Number(monthText) - 1;
+  const start = new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0, 0));
+  const end = new Date(Date.UTC(year, monthIndex + 1, 1, 0, 0, 0, 0));
+  return {
+    startIso: start.toISOString(),
+    endIso: end.toISOString(),
+  };
+}
 
 function listenerLevelForPoints(points: number): number {
   const safePoints = Math.max(0, points);
@@ -120,7 +183,19 @@ export interface ListenerProgressSummary {
   averageRating: number;
   ratingCount: number;
   positiveStreak: number;
+  longestStreak: number;
+  endorsementsCount: number;
   recentLedger: ListenerPointsLedger[];
+  badges: ListenerBadge[];
+  endorsements: ListenerEndorsement[];
+  wellbeing: {
+    latestCheckIn: ListenerWellbeingCheckIn | null;
+    checkInCount: number;
+    averageStressLevel: number | null;
+    averageEmotionalLoad: number | null;
+    suggestedCooldown: boolean;
+  };
+  cooldown: ListenerCooldown | null;
 }
 
 export interface ListenerLeaderboardEntry {
@@ -132,6 +207,8 @@ export interface ListenerLeaderboardEntry {
   averageRating: number;
   ratingCount: number;
   positiveStreak: number;
+  trophyTier: "gold" | "silver" | "bronze" | null;
+  certificationTitle: string | null;
 }
 
 export interface ListenerRiskSnapshot {
@@ -276,7 +353,20 @@ export interface IStorage {
   createOrUpdateListenerProfile(data: InsertListenerProfile): Promise<ListenerProfile>;
   getListenerProgress(userId: string): Promise<ListenerProgress | undefined>;
   getListenerProgressSummary(userId: string): Promise<ListenerProgressSummary>;
-  getListenerLeaderboard(limit?: number): Promise<ListenerLeaderboardEntry[]>;
+  listListenerBadges(listenerId: string, limit?: number): Promise<ListenerBadge[]>;
+  listListenerEndorsements(listenerId: string, limit?: number): Promise<ListenerEndorsement[]>;
+  createListenerEndorsement(data: InsertListenerEndorsement): Promise<ListenerEndorsement | undefined>;
+  createListenerWellbeingCheckIn(data: InsertListenerWellbeingCheckIn): Promise<ListenerWellbeingCheckIn>;
+  getActiveListenerCooldown(listenerId: string): Promise<ListenerCooldown | undefined>;
+  upsertListenerCooldown(
+    listenerId: string,
+    sourceSessionId: number | null,
+    reason: string,
+    durationMinutes?: number,
+  ): Promise<ListenerCooldown | undefined>;
+  getListenerLeaderboard(limit?: number, seasonKey?: string): Promise<ListenerLeaderboardEntry[]>;
+  getListenerHallOfFame(limitSeasons?: number, entriesPerSeason?: number): Promise<ListenerHallOfFameEntry[]>;
+  finalizeListenerSeason(seasonKey: string, topN?: number): Promise<ListenerHallOfFameEntry[]>;
   getListenerRiskSnapshots(listenerIds: string[]): Promise<ListenerRiskSnapshot[]>;
   upsertListenerProgress(data: InsertListenerProgress): Promise<ListenerProgress>;
   addListenerPointsLedgerEntry(data: InsertListenerPointsLedger): Promise<ListenerPointsLedger>;
@@ -1419,10 +1509,88 @@ export class DatabaseStorage implements IStorage {
     return Math.max(0, (sumRows || []).reduce((sum, row: any) => sum + Number(row.delta || 0), 0));
   }
 
+  private async getListenerEndorsementCount(listenerId: string): Promise<number> {
+    const { count } = await supabase
+      .from("listener_endorsements")
+      .select("id", { count: "exact", head: true })
+      .eq("listener_id", listenerId);
+    return count ?? 0;
+  }
+
+  private async awardListenerBadge(listenerId: string, badgeKey: string, meta?: Record<string, any>): Promise<void> {
+    const def = LISTENER_BADGE_DEFS[badgeKey];
+    if (!def) return;
+
+    const { error } = await supabase
+      .from("listener_badges")
+      .insert({
+        listener_id: listenerId,
+        badge_key: badgeKey,
+        title: def.title,
+        description: def.description,
+        meta: meta ?? null,
+      });
+
+    // Ignore duplicate badge grants.
+    if (error && error.code !== "23505") {
+      throw error;
+    }
+  }
+
+  private async syncListenerEndorsementCount(listenerId: string): Promise<void> {
+    const endorsementsCount = await this.getListenerEndorsementCount(listenerId);
+    await supabase
+      .from("listener_progress")
+      .upsert(
+        {
+          listener_id: listenerId,
+          endorsements_count: endorsementsCount,
+          last_calculated_at: new Date().toISOString(),
+        },
+        { onConflict: "listener_id" },
+      );
+  }
+
+  private async maybeAwardProgressBadges(
+    listenerId: string,
+    progress: ListenerProgress,
+    ratingSnapshot: {
+      averageRating: number;
+      ratingCount: number;
+      positiveStreak: number;
+      longestPositiveStreak: number;
+    },
+  ): Promise<void> {
+    if (progress.sessionsRatedCount >= 1) {
+      await this.awardListenerBadge(listenerId, "first_session");
+    }
+    if (progress.currentStreak >= 3) {
+      await this.awardListenerBadge(listenerId, "streak_3", { streak: progress.currentStreak });
+    }
+    if (progress.currentStreak >= 7) {
+      await this.awardListenerBadge(listenerId, "streak_7", { streak: progress.currentStreak });
+    }
+    if (progress.level >= 5) {
+      await this.awardListenerBadge(listenerId, "level_5", { level: progress.level });
+    }
+    if (ratingSnapshot.ratingCount >= 8 && ratingSnapshot.averageRating >= 4.8) {
+      await this.awardListenerBadge(listenerId, "empathy_star", {
+        averageRating: ratingSnapshot.averageRating,
+        ratingCount: ratingSnapshot.ratingCount,
+      });
+    }
+    if (progress.endorsementsCount >= 3) {
+      await this.awardListenerBadge(listenerId, "endorsed_voice", {
+        endorsementsCount: progress.endorsementsCount,
+      });
+    }
+  }
+
   private async getListenerRatingSnapshot(listenerId: string): Promise<{
     averageRating: number;
     ratingCount: number;
     positiveStreak: number;
+    longestPositiveStreak: number;
   }> {
     const { data: feedbackRows } = await supabase
       .from("peer_session_feedback")
@@ -1444,19 +1612,39 @@ export class DatabaseStorage implements IStorage {
       else break;
     }
 
-    return { averageRating, ratingCount, positiveStreak };
+    let currentRun = 0;
+    let longestPositiveStreak = 0;
+    for (const rating of [...ratings].reverse()) {
+      if (rating >= 4) {
+        currentRun += 1;
+        if (currentRun > longestPositiveStreak) longestPositiveStreak = currentRun;
+      } else {
+        currentRun = 0;
+      }
+    }
+
+    return { averageRating, ratingCount, positiveStreak, longestPositiveStreak };
   }
 
   private async recalculateListenerProgress(listenerId: string): Promise<ListenerProgress> {
     const totalPoints = await this.getListenerPointsTotal(listenerId);
     const nextLevel = listenerLevelForPoints(totalPoints);
     const ratingSnapshot = await this.getListenerRatingSnapshot(listenerId);
+    const existing = await this.getListenerProgress(listenerId);
+    const endorsementsCount = await this.getListenerEndorsementCount(listenerId);
+    const longestStreak = Math.max(
+      existing?.longestStreak ?? 0,
+      ratingSnapshot.longestPositiveStreak,
+    );
 
     return this.upsertListenerProgress({
       listenerId,
       points: totalPoints,
       level: nextLevel,
       sessionsRatedCount: ratingSnapshot.ratingCount,
+      currentStreak: ratingSnapshot.positiveStreak,
+      longestStreak,
+      endorsementsCount,
       lastCalculatedAt: new Date().toISOString(),
     });
   }
@@ -1477,17 +1665,46 @@ export class DatabaseStorage implements IStorage {
       points: 0,
       level: 1,
       sessionsRatedCount: 0,
+      currentStreak: 0,
+      longestStreak: 0,
+      endorsementsCount: 0,
       lastCalculatedAt: null,
     };
 
     const ratingSnapshot = await this.getListenerRatingSnapshot(userId);
     const nextLevelInfo = listenerNextLevelInfo(progress.points || 0);
-    const { data: ledgerRows } = await supabase
-      .from("listener_points_ledger")
-      .select("*")
-      .eq("listener_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(12);
+    const [ledgerResult, badges, endorsements, wellbeingRows, cooldown] = await Promise.all([
+      supabase
+        .from("listener_points_ledger")
+        .select("*")
+        .eq("listener_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(12),
+      this.listListenerBadges(userId, 24),
+      this.listListenerEndorsements(userId, 8),
+      supabase
+        .from("listener_wellbeing_checkins")
+        .select("*")
+        .eq("listener_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(10),
+      this.getActiveListenerCooldown(userId),
+    ]);
+    const ledgerRows = ledgerResult.data || [];
+    const checkIns = (wellbeingRows.data || []).map(mapListenerWellbeingCheckIn);
+    const latestCheckIn = checkIns.length > 0 ? checkIns[0] : null;
+    const checkInCount = checkIns.length;
+    const averageStressLevel = checkInCount > 0
+      ? Math.round((checkIns.reduce((sum, row) => sum + Number(row.stressLevel || 0), 0) / checkInCount) * 100) / 100
+      : null;
+    const averageEmotionalLoad = checkInCount > 0
+      ? Math.round((checkIns.reduce((sum, row) => sum + Number(row.emotionalLoad || 0), 0) / checkInCount) * 100) / 100
+      : null;
+    const suggestedCooldown = Boolean(
+      latestCheckIn?.needsBreak
+      || (averageStressLevel !== null && averageStressLevel >= 4)
+      || (averageEmotionalLoad !== null && averageEmotionalLoad >= 4),
+    );
 
     return {
       progress,
@@ -1497,24 +1714,155 @@ export class DatabaseStorage implements IStorage {
       averageRating: ratingSnapshot.averageRating,
       ratingCount: ratingSnapshot.ratingCount,
       positiveStreak: ratingSnapshot.positiveStreak,
+      longestStreak: progress.longestStreak ?? ratingSnapshot.longestPositiveStreak,
+      endorsementsCount: progress.endorsementsCount ?? 0,
       recentLedger: (ledgerRows || []).map(mapListenerPointsLedger),
+      badges,
+      endorsements,
+      wellbeing: {
+        latestCheckIn,
+        checkInCount,
+        averageStressLevel,
+        averageEmotionalLoad,
+        suggestedCooldown,
+      },
+      cooldown: cooldown || null,
     };
   }
 
-  async getListenerLeaderboard(limit = 20): Promise<ListenerLeaderboardEntry[]> {
+  async listListenerBadges(listenerId: string, limit = 24): Promise<ListenerBadge[]> {
     const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
-    const { data: progressRows, error: progressError } = await supabase
-      .from("listener_progress")
+    const { data, error } = await supabase
+      .from("listener_badges")
       .select("*")
-      .order("points", { ascending: false })
-      .order("level", { ascending: false })
+      .eq("listener_id", listenerId)
+      .order("awarded_at", { ascending: false })
       .limit(safeLimit);
-    if (progressError || !progressRows || progressRows.length === 0) return [];
+    if (error || !data) return [];
+    return data.map(mapListenerBadge);
+  }
 
-    const mappedProgress = progressRows.map(mapListenerProgress);
-    const listenerIds = mappedProgress.map((row) => row.listenerId);
+  async listListenerEndorsements(listenerId: string, limit = 8): Promise<ListenerEndorsement[]> {
+    const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
+    const { data, error } = await supabase
+      .from("listener_endorsements")
+      .select("*")
+      .eq("listener_id", listenerId)
+      .order("created_at", { ascending: false })
+      .limit(safeLimit);
+    if (error || !data) return [];
+    return data.map(mapListenerEndorsement);
+  }
 
-    const [{ data: listenerProfileRows }, { data: profileRows }, { data: feedbackRows }] = await Promise.all([
+  async createListenerEndorsement(data: InsertListenerEndorsement): Promise<ListenerEndorsement | undefined> {
+    const quote = String(data.quote || "").replace(/\s+/g, " ").trim();
+    if (!quote) return undefined;
+
+    const payload = {
+      listener_id: data.listenerId,
+      session_id: data.sessionId ?? null,
+      quote: quote.slice(0, 280),
+      warmth_score: data.warmthScore ?? null,
+    };
+
+    const { data: row, error } = await supabase
+      .from("listener_endorsements")
+      .insert(payload)
+      .select("*")
+      .single();
+    if (error) {
+      if (error.code === "23505") return undefined;
+      throw error;
+    }
+
+    await this.syncListenerEndorsementCount(data.listenerId);
+    const progress = await this.recalculateListenerProgress(data.listenerId);
+    const ratingSnapshot = await this.getListenerRatingSnapshot(data.listenerId);
+    await this.maybeAwardProgressBadges(data.listenerId, progress, ratingSnapshot);
+
+    return mapListenerEndorsement(row);
+  }
+
+  async createListenerWellbeingCheckIn(data: InsertListenerWellbeingCheckIn): Promise<ListenerWellbeingCheckIn> {
+    const payload = toSnakeCase(data);
+    const { data: row, error } = await supabase
+      .from("listener_wellbeing_checkins")
+      .insert(payload)
+      .select("*")
+      .single();
+    if (error || !row) throw error ?? new Error("Failed to create wellbeing check-in");
+    return mapListenerWellbeingCheckIn(row);
+  }
+
+  async getActiveListenerCooldown(listenerId: string): Promise<ListenerCooldown | undefined> {
+    const nowIso = new Date().toISOString();
+    const { data, error } = await supabase
+      .from("listener_cooldowns")
+      .select("*")
+      .eq("listener_id", listenerId)
+      .gt("ends_at", nowIso)
+      .is("released_at", null)
+      .maybeSingle();
+    if (error || !data) return undefined;
+    return mapListenerCooldown(data);
+  }
+
+  async upsertListenerCooldown(
+    listenerId: string,
+    sourceSessionId: number | null,
+    reason: string,
+    durationMinutes = DIFFICULT_SESSION_COOLDOWN_MINUTES,
+  ): Promise<ListenerCooldown | undefined> {
+    const start = new Date();
+    const end = new Date(start.getTime() + Math.max(1, durationMinutes) * 60_000);
+
+    const { data, error } = await supabase
+      .from("listener_cooldowns")
+      .upsert(
+        {
+          listener_id: listenerId,
+          source_session_id: sourceSessionId ?? null,
+          reason: reason || "difficult_session",
+          starts_at: start.toISOString(),
+          ends_at: end.toISOString(),
+          released_at: null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "listener_id" },
+      )
+      .select("*")
+      .single();
+
+    if (error || !data) return undefined;
+    await this.setListenerAvailability(listenerId, false).catch(() => undefined);
+    return mapListenerCooldown(data);
+  }
+
+  async getListenerLeaderboard(limit = 20, seasonKey?: string): Promise<ListenerLeaderboardEntry[]> {
+    const safeLimit = Math.max(1, Math.min(5000, Math.floor(limit)));
+    const resolvedSeasonKey = seasonKey && isValidListenerSeasonKey(seasonKey)
+      ? seasonKey
+      : listenerSeasonKeyForDate(new Date());
+    const { startIso, endIso } = listenerSeasonRangeFromKey(resolvedSeasonKey);
+
+    const { data: ledgerRows, error: ledgerError } = await supabase
+      .from("listener_points_ledger")
+      .select("listener_id, delta")
+      .gte("created_at", startIso)
+      .lt("created_at", endIso);
+    if (ledgerError || !ledgerRows || ledgerRows.length === 0) return [];
+
+    const pointsByListener = new Map<string, number>();
+    for (const row of ledgerRows) {
+      const listenerId = String(row.listener_id);
+      const nextPoints = (pointsByListener.get(listenerId) || 0) + Number(row.delta || 0);
+      pointsByListener.set(listenerId, nextPoints);
+    }
+
+    const listenerIds = Array.from(pointsByListener.keys());
+    if (listenerIds.length === 0) return [];
+
+    const [{ data: listenerProfileRows }, { data: profileRows }, { data: feedbackRows }, { data: levelRows }] = await Promise.all([
       supabase
         .from("listener_profiles")
         .select("user_id, display_alias")
@@ -1527,7 +1875,13 @@ export class DatabaseStorage implements IStorage {
         .from("peer_session_feedback")
         .select("listener_id, rating, created_at")
         .in("listener_id", listenerIds)
+        .gte("created_at", startIso)
+        .lt("created_at", endIso)
         .order("created_at", { ascending: false }),
+      supabase
+        .from("listener_progress")
+        .select("listener_id, level")
+        .in("listener_id", listenerIds),
     ]);
 
     const aliasByUser = new Map<string, string>();
@@ -1539,6 +1893,10 @@ export class DatabaseStorage implements IStorage {
       const display = `${row.first_name || ""} ${row.last_name || ""}`.trim();
       nameByUser.set(row.id, display);
     }
+    const levelByUser = new Map<string, number>();
+    for (const row of levelRows || []) {
+      levelByUser.set(row.listener_id, Number(row.level || 1));
+    }
 
     const ratingsByListener = new Map<string, number[]>();
     for (const row of feedbackRows || []) {
@@ -1549,34 +1907,147 @@ export class DatabaseStorage implements IStorage {
       ratingsByListener.set(row.listener_id, list);
     }
 
-    return mappedProgress.map((progress, index) => {
-      const ratings = ratingsByListener.get(progress.listenerId) || [];
-      const ratingCount = ratings.length;
-      const averageRating = ratingCount > 0
-        ? Math.round((ratings.reduce((sum, rating) => sum + rating, 0) / ratingCount) * 100) / 100
-        : 0;
-      let positiveStreak = 0;
-      for (const rating of ratings) {
-        if (rating >= 4) positiveStreak += 1;
-        else break;
-      }
+    const ranked = listenerIds
+      .map((listenerId) => {
+        const ratings = ratingsByListener.get(listenerId) || [];
+        const ratingCount = ratings.length;
+        const averageRating = ratingCount > 0
+          ? Math.round((ratings.reduce((sum, rating) => sum + rating, 0) / ratingCount) * 100) / 100
+          : 0;
+        let positiveStreak = 0;
+        for (const rating of ratings) {
+          if (rating >= 4) positiveStreak += 1;
+          else break;
+        }
 
-      const alias = aliasByUser.get(progress.listenerId);
-      const displayName = alias
-        || nameByUser.get(progress.listenerId)
-        || `Listener ${progress.listenerId.slice(0, 8)}`;
+        const alias = aliasByUser.get(listenerId);
+        const displayName = alias
+          || nameByUser.get(listenerId)
+          || `Listener ${listenerId.slice(0, 8)}`;
+
+        return {
+          listenerId,
+          displayName,
+          level: levelByUser.get(listenerId) ?? 1,
+          points: pointsByListener.get(listenerId) || 0,
+          averageRating,
+          ratingCount,
+          positiveStreak,
+        };
+      })
+      .sort((a, b) =>
+        b.points - a.points
+        || b.averageRating - a.averageRating
+        || b.ratingCount - a.ratingCount
+        || b.level - a.level,
+      );
+
+    return ranked.slice(0, safeLimit).map((entry, index) => {
+      const rank = index + 1;
+      const trophyTier = trophyTierForRank(rank);
+      const certificationTitle = rank === 1 && entry.averageRating >= 4.5 && entry.ratingCount >= 8
+        ? "Top Listener Certified"
+        : null;
 
       return {
-        listenerId: progress.listenerId,
-        rank: index + 1,
-        displayName,
-        level: progress.level,
-        points: progress.points,
-        averageRating,
-        ratingCount,
-        positiveStreak,
+        listenerId: entry.listenerId,
+        rank,
+        displayName: entry.displayName,
+        level: entry.level,
+        points: entry.points,
+        averageRating: entry.averageRating,
+        ratingCount: entry.ratingCount,
+        positiveStreak: entry.positiveStreak,
+        trophyTier,
+        certificationTitle,
       };
     });
+  }
+
+  private async ensureListenerSeasonRow(seasonKey: string): Promise<void> {
+    if (!isValidListenerSeasonKey(seasonKey)) return;
+    const { startIso, endIso } = listenerSeasonRangeFromKey(seasonKey);
+    await supabase
+      .from("listener_leaderboard_seasons")
+      .upsert(
+        {
+          season_key: seasonKey,
+          starts_at: startIso,
+          ends_at: endIso,
+        },
+        { onConflict: "season_key" },
+      );
+  }
+
+  async getListenerHallOfFame(limitSeasons = 6, entriesPerSeason = 3): Promise<ListenerHallOfFameEntry[]> {
+    const safeSeasonLimit = Math.max(1, Math.min(24, Math.floor(limitSeasons)));
+    const safeEntryLimit = Math.max(1, Math.min(20, Math.floor(entriesPerSeason)));
+    const rowLimit = safeSeasonLimit * safeEntryLimit * 3;
+
+    const { data, error } = await supabase
+      .from("listener_hall_of_fame")
+      .select("*")
+      .order("season_key", { ascending: false })
+      .order("rank", { ascending: true })
+      .limit(rowLimit);
+    if (error || !data) return [];
+
+    const kept: any[] = [];
+    const perSeasonCounts = new Map<string, number>();
+    for (const row of data) {
+      const seasonKey = String(row.season_key);
+      const count = perSeasonCounts.get(seasonKey) || 0;
+      if (count >= safeEntryLimit) continue;
+      if (perSeasonCounts.size >= safeSeasonLimit && !perSeasonCounts.has(seasonKey)) continue;
+      kept.push(row);
+      perSeasonCounts.set(seasonKey, count + 1);
+    }
+    return kept.map(mapListenerHallOfFameEntry);
+  }
+
+  async finalizeListenerSeason(seasonKey: string, topN = 3): Promise<ListenerHallOfFameEntry[]> {
+    if (!isValidListenerSeasonKey(seasonKey)) return [];
+    const safeTopN = Math.max(1, Math.min(20, Math.floor(topN)));
+
+    await this.ensureListenerSeasonRow(seasonKey);
+    const { data: existingRows } = await supabase
+      .from("listener_hall_of_fame")
+      .select("*")
+      .eq("season_key", seasonKey)
+      .order("rank", { ascending: true });
+    if ((existingRows || []).length > 0) {
+      return (existingRows || []).map(mapListenerHallOfFameEntry);
+    }
+
+    const leaderboard = await this.getListenerLeaderboard(safeTopN, seasonKey);
+    if (leaderboard.length === 0) return [];
+
+    const rowsToInsert = leaderboard.map((entry) => ({
+      season_key: seasonKey,
+      rank: entry.rank,
+      listener_id: entry.listenerId,
+      display_name: entry.displayName,
+      points: entry.points,
+      average_rating: entry.averageRating,
+      rating_count: entry.ratingCount,
+      positive_streak: entry.positiveStreak,
+      trophy_tier: entry.trophyTier,
+      certification_title: entry.certificationTitle,
+      archived_at: new Date().toISOString(),
+    }));
+
+    const { data: insertedRows, error } = await supabase
+      .from("listener_hall_of_fame")
+      .insert(rowsToInsert)
+      .select("*");
+    if (error || !insertedRows) return [];
+
+    await supabase
+      .from("listener_leaderboard_seasons")
+      .update({ finalized_at: new Date().toISOString() })
+      .eq("season_key", seasonKey);
+
+    return insertedRows.map(mapListenerHallOfFameEntry);
   }
 
   async getListenerRiskSnapshots(listenerIds: string[]): Promise<ListenerRiskSnapshot[]> {
@@ -1750,7 +2221,10 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    return this.recalculateListenerProgress(data.listenerId);
+    const progress = await this.recalculateListenerProgress(data.listenerId);
+    const updatedRatingSnapshot = await this.getListenerRatingSnapshot(data.listenerId);
+    await this.maybeAwardProgressBadges(data.listenerId, progress, updatedRatingSnapshot);
+    return progress;
   }
 
   async applyListenerReportPenalty(
@@ -1912,6 +2386,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async setListenerAvailability(userId: string, isAvailable: boolean): Promise<ListenerProfile | undefined> {
+    if (isAvailable) {
+      const activeCooldown = await this.getActiveListenerCooldown(userId);
+      if (activeCooldown) return undefined;
+    }
+
     const { data, error } = await supabase
       .from("listener_profiles")
       .update({
@@ -1944,7 +2423,18 @@ export class DatabaseStorage implements IStorage {
 
     const { data, error } = await query;
     if (error || !data) return [];
-    return data.map(mapListenerProfile);
+    const mapped = data.map(mapListenerProfile);
+    if (mapped.length === 0) return mapped;
+
+    const nowIso = new Date().toISOString();
+    const { data: cooldownRows } = await supabase
+      .from("listener_cooldowns")
+      .select("listener_id")
+      .in("listener_id", mapped.map((row) => row.userId))
+      .gt("ends_at", nowIso)
+      .is("released_at", null);
+    const coolingDown = new Set((cooldownRows || []).map((row: any) => String(row.listener_id)));
+    return mapped.filter((row) => !coolingDown.has(row.userId));
   }
 
   // ---- Queue, peer sessions and messaging ----
@@ -2104,7 +2594,7 @@ export class DatabaseStorage implements IStorage {
   async getBrowsableListeners(filters?: { language?: string; topic?: string; availableOnly?: boolean }): Promise<BrowsableListener[]> {
     const { data: profiles, error } = await supabase
       .from("listener_profiles")
-      .select("user_id, display_alias, headline, avatar_emoji, languages, topics, is_available, total_sessions, average_rating")
+      .select("user_id, display_alias, headline, about_me, avatar_emoji, languages, topics, is_available, total_sessions, average_rating")
       .eq("verification_status", "approved")
       .in("activation_status", ["trial", "live"])
       .order("is_available", { ascending: false })
@@ -2131,18 +2621,39 @@ export class DatabaseStorage implements IStorage {
       .from("listener_progress")
       .select("listener_id, level")
       .in("listener_id", userIds);
+    const currentSeasonLeaderboard = await this.getListenerLeaderboard(
+      3,
+      listenerSeasonKeyForDate(new Date()),
+    );
+    const nowIso = new Date().toISOString();
+    const { data: cooldownRows } = await supabase
+      .from("listener_cooldowns")
+      .select("listener_id")
+      .in("listener_id", userIds)
+      .gt("ends_at", nowIso)
+      .is("released_at", null);
 
     const levelMap = new Map<string, number>();
     (progressRows || []).forEach((r: any) => levelMap.set(r.listener_id, r.level ?? 1));
+    const cooldownMap = new Set((cooldownRows || []).map((r: any) => String(r.listener_id)));
+    const trophyByListenerId = new Map<string, "gold" | "silver" | "bronze">();
+    const certificationByListenerId = new Map<string, string>();
+    currentSeasonLeaderboard.forEach((row) => {
+      if (row.trophyTier) trophyByListenerId.set(String(row.listenerId), row.trophyTier);
+      if (row.certificationTitle) certificationByListenerId.set(String(row.listenerId), row.certificationTitle);
+    });
 
     return filtered.map((p) => ({
+      trophyTier: trophyByListenerId.get(String(p.user_id)) || null,
+      certificationTitle: certificationByListenerId.get(String(p.user_id)) || null,
       userId: p.user_id,
       displayAlias: p.display_alias ?? null,
       headline: p.headline ?? null,
+      aboutMe: p.about_me ?? null,
       avatarEmoji: p.avatar_emoji ?? "🤝",
       languages: p.languages ?? null,
       topics: p.topics ?? null,
-      isAvailable: p.is_available ?? false,
+      isAvailable: (p.is_available ?? false) && !cooldownMap.has(String(p.user_id)),
       totalSessions: p.total_sessions ?? 0,
       averageRating: p.average_rating ?? null,
       level: levelMap.get(p.user_id) ?? 1,

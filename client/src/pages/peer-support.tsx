@@ -33,12 +33,23 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import type { BrowsableListener, PeerMessage, PeerSession, User } from "@shared/schema";
+import type { BrowsableListener, ListenerCooldown, PeerMessage, PeerSession, User } from "@shared/schema";
 import { Link } from "wouter";
 
 interface PeerSessionsResponse {
   sessions: (PeerSession & { otherUser: User })[];
   activeQueueEntry: null;
+}
+
+interface ListenerProgressDetailsPayload {
+  cooldown: ListenerCooldown | null;
+}
+
+interface EndSessionPayload {
+  session: PeerSession;
+  durationMinutes: number;
+  difficultSession?: boolean;
+  cooldown: ListenerCooldown | null;
 }
 
 const peerQuickTopics = ["anxiety", "stress", "relationships", "self_esteem", "grief", "depression"];
@@ -79,9 +90,22 @@ export default function PeerSupportPage() {
   // Confirm dialog
   const [confirmListener, setConfirmListener] = useState<BrowsableListener | null>(null);
   const [showReportDialog, setShowReportDialog] = useState(false);
+  const [showCooldownDialog, setShowCooldownDialog] = useState(false);
+  const [checkinRequired, setCheckinRequired] = useState(false);
+  const [checkinStress, setCheckinStress] = useState(3);
+  const [checkinLoad, setCheckinLoad] = useState(3);
+  const [checkinNeedsBreak, setCheckinNeedsBreak] = useState(false);
+  const [checkinNotes, setCheckinNotes] = useState("");
+  const [activeCooldown, setActiveCooldown] = useState<ListenerCooldown | null>(null);
+  const [cooldownNow, setCooldownNow] = useState(Date.now());
 
   const { data: sessionsPayload, isLoading: sessionsLoading } = useQuery<PeerSessionsResponse>({
     queryKey: ["/api/peer/sessions"],
+  });
+
+  const { data: listenerProgressDetails } = useQuery<ListenerProgressDetailsPayload>({
+    queryKey: ["/api/listener/progress/details"],
+    enabled: user?.role === "listener",
   });
 
   const { data: listeners = [], isLoading: listenersLoading } = useQuery<BrowsableListener[]>({
@@ -154,6 +178,21 @@ export default function PeerSupportPage() {
     return () => { supabase.removeChannel(channel); };
   }, [selectedSessionId]);
 
+  useEffect(() => {
+    if (user?.role !== "listener") return;
+    const cooldown = listenerProgressDetails?.cooldown ?? null;
+    setActiveCooldown(cooldown);
+    if (cooldown) {
+      setShowCooldownDialog(true);
+    }
+  }, [listenerProgressDetails?.cooldown, user?.role]);
+
+  useEffect(() => {
+    if (!activeCooldown?.endsAt) return;
+    const timer = window.setInterval(() => setCooldownNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [activeCooldown?.endsAt]);
+
   const startDirectSessionMutation = useMutation({
     mutationFn: async (listenerId: string) => {
       const res = await apiRequest("POST", "/api/peer/session/direct", { listenerId });
@@ -191,13 +230,47 @@ export default function PeerSupportPage() {
   const endSessionMutation = useMutation({
     mutationFn: async () => {
       if (!selectedSessionId) return;
-      await apiRequest("POST", `/api/peer/session/${selectedSessionId}/end`);
+      const res = await apiRequest("POST", `/api/peer/session/${selectedSessionId}/end`);
+      return (await res.json()) as EndSessionPayload;
     },
-    onSuccess: () => {
+    onSuccess: (payload) => {
       setJustEndedSessionId(selectedSessionId);
       queryClient.invalidateQueries({ queryKey: ["/api/peer/sessions"] });
       queryClient.invalidateQueries({ queryKey: ["/api/listeners/browse"] });
+      if (user?.role === "listener" && payload?.cooldown) {
+        setActiveCooldown(payload.cooldown);
+        setCheckinRequired(true);
+        setShowCooldownDialog(true);
+        queryClient.invalidateQueries({ queryKey: ["/api/listener/progress/details"] });
+      }
       toast({ title: t("peer.session_ended") });
+    },
+  });
+
+  const listenerCheckinMutation = useMutation({
+    mutationFn: async () => {
+      if (!user || user.role !== "listener") return null;
+      const res = await apiRequest("POST", "/api/listener/wellbeing/checkin", {
+        sessionId: selectedSessionId ?? null,
+        stressLevel: checkinStress,
+        emotionalLoad: checkinLoad,
+        needsBreak: checkinNeedsBreak,
+        notes: checkinNotes.trim() || null,
+      });
+      return res.json();
+    },
+    onSuccess: (payload: any) => {
+      setCheckinRequired(false);
+      setShowCooldownDialog(false);
+      setCheckinNotes("");
+      if (payload?.cooldown) setActiveCooldown(payload.cooldown);
+      queryClient.invalidateQueries({ queryKey: ["/api/listener/progress/details"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/listener/application"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/listeners/browse"] });
+      toast({ title: "Wellbeing check-in saved." });
+    },
+    onError: () => {
+      toast({ title: "Failed to submit wellbeing check-in.", variant: "destructive" });
     },
   });
 
@@ -241,6 +314,13 @@ export default function PeerSupportPage() {
   const canSend = selectedSession?.status === "active" && messageText.trim().length > 0;
   const isEnded = Boolean(selectedSession && selectedSession.status !== "active" && user?.id === selectedSession.clientId);
   const shouldHighlight = justEndedSessionId !== null && justEndedSessionId === selectedSession?.id;
+  const cooldownSecondsRemaining = activeCooldown?.endsAt
+    ? Math.max(0, Math.floor((new Date(activeCooldown.endsAt).getTime() - cooldownNow) / 1000))
+    : 0;
+  const inCooldown = user?.role === "listener" && cooldownSecondsRemaining > 0;
+  const cooldownLabel = inCooldown
+    ? `${Math.floor(cooldownSecondsRemaining / 60)}:${(cooldownSecondsRemaining % 60).toString().padStart(2, "0")}`
+    : null;
 
   const availableCount = listeners.filter((l) => l.isAvailable).length;
 
@@ -254,6 +334,12 @@ export default function PeerSupportPage() {
         (l.topics || []).some((tp) => tp.includes(q)),
     );
   }, [listeners, searchQuery]);
+  const trophyIconForTier = (tier: "gold" | "silver" | "bronze" | null) => {
+    if (tier === "gold") return "🏆";
+    if (tier === "silver") return "🥈";
+    if (tier === "bronze") return "🥉";
+    return "";
+  };
 
   // ─── Browse view ─────────────────────────────────────────────────────────────
   const browseView = (
@@ -291,6 +377,20 @@ export default function PeerSupportPage() {
           )}
         </div>
       </div>
+
+      {inCooldown && (
+        <div className="rounded-xl border border-amber-300/80 bg-amber-50 dark:bg-amber-950/20 p-4">
+          <p className="text-sm font-medium text-amber-900 dark:text-amber-300">
+            Cooldown active: {cooldownLabel}
+          </p>
+          <p className="text-xs text-amber-800/90 dark:text-amber-400/90 mt-1">
+            You are temporarily hidden from matching while you recover from a difficult session.
+          </p>
+          <Button size="sm" variant="outline" className="mt-3" onClick={() => setShowCooldownDialog(true)}>
+            Open wellbeing check-in
+          </Button>
+        </div>
+      )}
 
       {/* Filters row */}
       <div className="space-y-3">
@@ -415,7 +515,25 @@ export default function PeerSupportPage() {
                       <Badge variant="outline" className="text-[10px] px-1.5">
                         Lvl {listener.level}
                       </Badge>
+                      {listener.trophyTier && (
+                        <Badge
+                          className={`text-[10px] px-1.5 ${
+                            listener.trophyTier === "gold"
+                              ? "bg-amber-600 hover:bg-amber-600 text-white"
+                              : listener.trophyTier === "silver"
+                                ? "bg-slate-600 hover:bg-slate-600 text-white"
+                                : "bg-orange-600 hover:bg-orange-600 text-white"
+                          }`}
+                        >
+                          {trophyIconForTier(listener.trophyTier)} {listener.trophyTier}
+                        </Badge>
+                      )}
                     </div>
+                    {listener.certificationTitle && (
+                      <p className="text-[10px] font-medium text-amber-700 dark:text-amber-400 mt-0.5">
+                        {listener.certificationTitle}
+                      </p>
+                    )}
                     {listener.headline && (
                       <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 leading-snug">
                         {listener.headline}
@@ -451,6 +569,13 @@ export default function PeerSupportPage() {
                       </span>
                     ))}
                   </div>
+                )}
+
+                {/* About me */}
+                {listener.aboutMe && (
+                  <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3 border-t pt-2">
+                    {listener.aboutMe}
+                  </p>
                 )}
 
                 {/* CTA */}
@@ -590,15 +715,12 @@ export default function PeerSupportPage() {
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              className={`rounded-xl border p-4 space-y-3 mb-3 ${shouldHighlight ? "border-primary/40 bg-primary/5" : "bg-muted/30"}`}
+              className={`rounded-xl border p-4 space-y-4 mb-3 ${shouldHighlight ? "border-primary/40 bg-primary/5" : "bg-muted/30"}`}
             >
               <div className="flex items-center gap-2">
                 <HeartHandshake className="h-4 w-4 text-primary" />
-                <p className="text-sm font-medium">{tr("peer.not_alone_title", "You did something brave today.")}</p>
+                <p className="text-sm font-semibold">{tr("peer.not_alone_title", "You did something brave today.")}</p>
               </div>
-              <p className="text-xs text-muted-foreground">
-                {tr("peer.ended_help", "If you need more support, therapists are here for you.")}
-              </p>
 
               {/* Rating */}
               <div className="space-y-2">
@@ -629,14 +751,27 @@ export default function PeerSupportPage() {
                     <AlertTriangle className="h-3.5 w-3.5 me-1.5" />
                     {t("peer.report_session")}
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => setView("browse")}>
-                    Browse more listeners
-                  </Button>
-                  <Link href="/therapists">
-                    <Button size="sm" className="gap-1.5">
-                      <HeartHandshake className="h-3.5 w-3.5" />
-                      Talk to a therapist
-                    </Button>
+                </div>
+              </div>
+
+              {/* What's next */}
+              <div className="border-t pt-3 space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">What would you like to do next?</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    onClick={() => setView("browse")}
+                    className="rounded-lg border bg-background p-3 text-left hover:border-primary/40 hover:bg-primary/5 transition-all"
+                  >
+                    <p className="text-xs font-medium">Talk to another listener</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Browse available peer volunteers</p>
+                  </button>
+                  <Link href="/therapists" className="rounded-lg border bg-background p-3 text-left hover:border-primary/40 hover:bg-primary/5 transition-all block">
+                    <p className="text-xs font-medium">See a professional</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Book a session with a licensed therapist</p>
+                  </Link>
+                  <Link href="/self-care" className="rounded-lg border bg-background p-3 text-left hover:border-primary/40 hover:bg-primary/5 transition-all block">
+                    <p className="text-xs font-medium">Try self-care tools</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Breathing, grounding, and relaxation</p>
                   </Link>
                 </div>
               </div>
@@ -759,6 +894,86 @@ export default function PeerSupportPage() {
                 disabled={startDirectSessionMutation.isPending}
               >
                 {startDirectSessionMutation.isPending ? "Starting…" : "Start conversation"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Listener cooldown check-in dialog */}
+        <Dialog
+          open={showCooldownDialog && user?.role === "listener"}
+          onOpenChange={(open) => {
+            if (!checkinRequired) setShowCooldownDialog(open);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Listener wellbeing check-in</DialogTitle>
+              <DialogDescription>
+                {inCooldown
+                  ? `Cooldown active (${cooldownLabel}). Share how you're doing before you continue.`
+                  : "Share a quick wellbeing check-in after this session."}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <p className="text-xs text-muted-foreground">Stress level (1-5)</p>
+                <div className="flex gap-1.5">
+                  {[1, 2, 3, 4, 5].map((value) => (
+                    <Button
+                      key={`checkin-stress-${value}`}
+                      type="button"
+                      size="sm"
+                      variant={checkinStress === value ? "default" : "outline"}
+                      onClick={() => setCheckinStress(value)}
+                    >
+                      {value}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs text-muted-foreground">Emotional load (1-5)</p>
+                <div className="flex gap-1.5">
+                  {[1, 2, 3, 4, 5].map((value) => (
+                    <Button
+                      key={`checkin-load-${value}`}
+                      type="button"
+                      size="sm"
+                      variant={checkinLoad === value ? "default" : "outline"}
+                      onClick={() => setCheckinLoad(value)}
+                    >
+                      {value}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant={checkinNeedsBreak ? "default" : "outline"}
+                onClick={() => setCheckinNeedsBreak((prev) => !prev)}
+              >
+                {checkinNeedsBreak ? "Break requested" : "Request extended break"}
+              </Button>
+              <Textarea
+                value={checkinNotes}
+                onChange={(e) => setCheckinNotes(e.target.value)}
+                placeholder="Optional: write a quick reflection."
+                rows={3}
+              />
+            </div>
+            <DialogFooter>
+              {!checkinRequired && (
+                <Button variant="outline" onClick={() => setShowCooldownDialog(false)}>
+                  Later
+                </Button>
+              )}
+              <Button
+                onClick={() => listenerCheckinMutation.mutate()}
+                disabled={listenerCheckinMutation.isPending}
+              >
+                {listenerCheckinMutation.isPending ? "Saving..." : "Submit check-in"}
               </Button>
             </DialogFooter>
           </DialogContent>

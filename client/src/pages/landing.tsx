@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
 import {
   Heart, MessageCircle, Brain, Shield, Sparkles, BookOpen,
@@ -35,6 +35,7 @@ const scrollReveal = {
 export default function LandingPage() {
   const { t, isRTL } = useI18n();
   const { user, isLoading } = useAuth();
+  const [, navigate] = useLocation();
   const Arrow = isRTL ? ArrowLeft : ArrowRight;
   const currentYear = new Date().getFullYear();
 
@@ -47,14 +48,10 @@ export default function LandingPage() {
 
   const handleQuizClick = (spec: string) => {
     if (user) {
-      if (spec) {
-        window.location.href = `/therapists?specialization=${spec}`;
-      } else {
-        window.location.href = "/therapists";
-      }
+      navigate(spec ? `/therapists?specialization=${spec}` : "/therapists");
     } else {
       // Guests go to self-care (breathing exercise) — no login wall for exploration
-      window.location.href = "/self-care";
+      navigate("/self-care");
     }
   };
 
@@ -73,6 +70,9 @@ export default function LandingPage() {
             <div className="hidden md:flex items-center gap-6">
               <Link href="/therapists" className="text-sm text-muted-foreground hover-elevate rounded-md px-3 py-1.5" data-testid="link-nav-therapists">
                 {t("nav.therapists")}
+              </Link>
+              <Link href="/hall-of-fame" className="text-sm text-muted-foreground hover-elevate rounded-md px-3 py-1.5" data-testid="link-nav-hall-of-fame">
+                {t("nav.hall_of_fame") === "nav.hall_of_fame" ? "Hall of Fame" : t("nav.hall_of_fame")}
               </Link>
               <Link href="/resources" className="text-sm text-muted-foreground hover-elevate rounded-md px-3 py-1.5" data-testid="link-nav-resources">
                 {t("nav.resources")}
@@ -458,6 +458,9 @@ export default function LandingPage() {
 
             <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
               <Link href="/about" className="hover:text-foreground transition-colors">{t("footer.about")}</Link>
+              <Link href="/hall-of-fame" className="hover:text-foreground transition-colors">
+                {t("nav.hall_of_fame") === "nav.hall_of_fame" ? "Hall of Fame" : t("nav.hall_of_fame")}
+              </Link>
               <Link href="/privacy" className="hover:text-foreground transition-colors">{t("footer.privacy")}</Link>
               <Link href="/terms" className="hover:text-foreground transition-colors">{t("footer.terms")}</Link>
               <Link href="/contact" className="hover:text-foreground transition-colors">{t("footer.contact")}</Link>

@@ -22,6 +22,7 @@ const translations: Record<Language, Record<string, string>> = {
     "nav.mood": "تتبع المزاج",
     "nav.journal": "المذكرات",
     "nav.resources": "الموارد",
+    "nav.hall_of_fame": "قاعة الشرف",
     "nav.appointments": "المواعيد",
     "nav.profile": "الملف الشخصي",
     "nav.listen": "الاستماع",
@@ -841,6 +842,7 @@ const translations: Record<Language, Record<string, string>> = {
     "nav.mood": "Suivi d'humeur",
     "nav.journal": "Journal",
     "nav.resources": "Ressources",
+    "nav.hall_of_fame": "Temple de la renommée",
     "nav.appointments": "Rendez-vous",
     "nav.profile": "Profil",
     "nav.listen": "Ecoute",
@@ -1663,9 +1665,9 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguageState] = useState<Language>(() => {
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem("shifa-lang") as Language;
-      return stored === "ar" || stored === "fr" ? stored : "ar";
+      return stored === "ar" || stored === "fr" ? stored : "fr";
     }
-    return "ar";
+    return "fr";
   });
 
   const setLanguage = useCallback((lang: Language) => {

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useI18n } from "@/lib/i18n";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,10 +11,8 @@ import { motion } from "framer-motion";
 import type { OnboardingResponse, TherapistProfile, User } from "@shared/schema";
 
 function homeRouteForRole(role: string | null | undefined) {
-  if (role === "listener") return "/listener/dashboard";
-  if (role === "therapist") return "/therapist-dashboard";
-  if (role === "moderator" || role === "admin") return "/admin/listeners";
-  return "/dashboard";
+  if (!role) return "/workflow";
+  return "/workflow";
 }
 
 type TherapistRow = TherapistProfile & { user: User };
@@ -22,14 +21,16 @@ type StarterPath = "peer" | "therapist" | "wellness";
 export default function WelcomePage() {
   const { user } = useAuth();
   const { t } = useI18n();
+  const [, navigate] = useLocation();
+  const role = user?.role;
 
   const tr = (key: string, fallback: string) => {
     const value = t(key);
     return value === key ? fallback : value;
   };
 
-  if (user?.role && user.role !== "client") {
-    window.location.href = homeRouteForRole(user.role);
+  if (role && role !== "client") {
+    navigate(homeRouteForRole(role));
     return null;
   }
 
@@ -66,14 +67,14 @@ export default function WelcomePage() {
   const continuePath = () => {
     localStorage.removeItem("shifa-show-welcome");
     if (starterPath === "therapist") {
-      window.location.href = "/therapists";
+      navigate("/therapists");
       return;
     }
     if (starterPath === "wellness") {
-      window.location.href = "/self-care";
+      navigate("/self-care");
       return;
     }
-    window.location.href = "/peer-support";
+    navigate("/peer-support");
   };
 
   return (
@@ -103,15 +104,15 @@ export default function WelcomePage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-3">
-              <Button variant="outline" className="justify-start gap-2" onClick={() => (window.location.href = "/peer-support")}>
+              <Button variant="outline" className="justify-start gap-2" onClick={() => navigate("/peer-support")}>
                 <HeartHandshake className="h-4 w-4" />
                 {tr("welcome.peer", "Browse our listeners")}
               </Button>
-              <Button variant="outline" className="justify-start gap-2" onClick={() => (window.location.href = "/therapists")}>
+              <Button variant="outline" className="justify-start gap-2" onClick={() => navigate("/therapists")}>
                 <Users className="h-4 w-4" />
                 {tr("welcome.therapist", "Browse therapists")}
               </Button>
-              <Button variant="outline" className="justify-start gap-2" onClick={() => (window.location.href = "/self-care")}>
+              <Button variant="outline" className="justify-start gap-2" onClick={() => navigate("/self-care")}>
                 <Wind className="h-4 w-4" />
                 {tr("welcome.wellness", "Open wellness tools")}
               </Button>
@@ -134,7 +135,7 @@ export default function WelcomePage() {
                     <p className="text-xs text-muted-foreground">
                       {recommendedTherapist.rateDinar ?? "--"} {t("common.dinar")}
                     </p>
-                    <Button size="sm" onClick={() => (window.location.href = `/therapist/${recommendedTherapist.userId}`)}>
+                    <Button size="sm" onClick={() => navigate(`/therapist/${recommendedTherapist.userId}`)}>
                       {t("therapist.book")}
                     </Button>
                   </div>

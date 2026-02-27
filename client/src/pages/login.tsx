@@ -8,12 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Heart, Mail, Phone, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const { t } = useI18n();
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
@@ -49,7 +50,7 @@ export default function LoginPage() {
       }
 
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      window.location.href = postAuthRouteForUser(payload?.user);
+      navigate(postAuthRouteForUser(payload?.user));
     } catch {
       toast({ title: t("common.error"), variant: "destructive" });
     } finally {
@@ -109,7 +110,7 @@ export default function LoginPage() {
       }
 
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      window.location.href = postAuthRouteForUser(payload?.user);
+      navigate(postAuthRouteForUser(payload?.user));
     } catch {
       toast({ title: t("common.error"), variant: "destructive" });
     } finally {
@@ -120,7 +121,7 @@ export default function LoginPage() {
   const handleOAuth = async (provider: "google" | "facebook") => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo: `${window.location.origin}/dashboard` },
+      options: { redirectTo: `${window.location.origin}/workflow` },
     });
     if (error) toast({ title: error.message, variant: "destructive" });
   };

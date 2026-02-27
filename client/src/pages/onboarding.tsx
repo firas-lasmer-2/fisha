@@ -50,7 +50,7 @@ export default function OnboardingPage() {
   const { t, isRTL } = useI18n();
   const { toast } = useToast();
   const { user } = useAuth();
-  const [, ] = useLocation();
+  const [, navigate] = useLocation();
 
   const role = user?.role ?? "client";
 
@@ -132,7 +132,7 @@ export default function OnboardingPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
       queryClient.invalidateQueries({ queryKey: ["/api/onboarding"] });
-      window.location.href = "/therapists";
+      navigate("/support");
     },
     onError: () => {
       toast({ title: t("common.error"), variant: "destructive" });
@@ -148,7 +148,7 @@ export default function OnboardingPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      window.location.href = "/listener/test";
+      navigate("/listener/test");
     },
     onError: () => {
       toast({ title: t("common.error"), variant: "destructive" });
@@ -164,7 +164,7 @@ export default function OnboardingPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      window.location.href = "/therapist-dashboard";
+      navigate("/therapist-dashboard");
     },
     onError: () => {
       toast({ title: t("common.error"), variant: "destructive" });

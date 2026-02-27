@@ -474,11 +474,11 @@ export default function TherapistDashboardPage() {
                     <CardTitle className="text-sm font-medium text-muted-foreground">{t("therapist_dash.action_items")}</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    {reviews.some(r => !r.reply) && (
+                    {reviews.some(r => !r.therapistResponse) && (
                       <div className="flex items-start gap-2 text-sm">
                         <div className="w-2 h-2 mt-1.5 rounded-full bg-amber-500" />
                         <span className="flex-1 cursor-pointer hover:underline" onClick={() => setActiveSection("reviews")}>
-                          {reviews.filter(r => !r.reply).length} {t("therapist_dash.pending_reviews")}
+                          {reviews.filter(r => !r.therapistResponse).length} {t("therapist_dash.pending_reviews")}
                         </span>
                       </div>
                     )}

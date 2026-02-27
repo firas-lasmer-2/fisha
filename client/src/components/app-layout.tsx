@@ -8,29 +8,23 @@ import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Heart, LayoutDashboard, Users, MessageCircle,
+  Heart, HeartHandshake, LayoutDashboard, Users, MessageCircle,
   Calendar, CalendarDays, LogOut, UserCircle, AlertCircle,
-  ShieldCheck, Settings, LifeBuoy,
+  ShieldCheck, Settings, LifeBuoy, Trophy, Compass, TrendingUp,
 } from "lucide-react";
 
 function homeHrefForRole(role: string | null | undefined): string {
-  if (role === "listener") return "/listener/dashboard";
   if (role === "therapist") return "/therapist-dashboard";
-  if (role === "moderator" || role === "admin") return "/admin/listeners";
-  return "/dashboard";
+  if (role === "listener") return "/listener/dashboard";
+  return "/workflow";
 }
 
-function profileHrefForRole(role: string | null | undefined): string {
-  if (role === "therapist") return "/therapist-dashboard";
-  if (role === "listener") return "/listener/dashboard";
-  if (role === "moderator" || role === "admin") return "/admin/listeners";
-  return "/settings";
-}
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { t } = useI18n();
   const { user, logout } = useAuth();
   const [location] = useLocation();
+  const currentRole = user?.role || null;
 
   const { data: unread } = useQuery<{ count: number }>({
     queryKey: ["/api/unread-count"],
@@ -42,73 +36,72 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     return value === key ? fallback : value;
   };
 
-  const desktopNavItems = [
-    { href: "/support", icon: LifeBuoy, label: tr("nav.support_hub", "Find Support") },
-    { href: "/therapists", icon: Users, label: t("nav.therapists") },
-    { href: "/appointments", icon: Calendar, label: t("nav.appointments") },
-    { href: "/messages", icon: MessageCircle, label: t("nav.messages") },
-    { href: "/dashboard", icon: LayoutDashboard, label: t("nav.dashboard") },
-    ...(user?.role === "therapist"
-      ? [{ href: "/therapist-dashboard", icon: UserCircle, label: t("therapist_dash.your_page") }]
-      : []),
-    ...(user?.role === "listener"
-      ? [{ href: "/listener/dashboard", icon: UserCircle, label: tr("nav.listener_dashboard", "Listener Dashboard") }]
-      : []),
-    ...(user?.role === "moderator" || user?.role === "admin"
+  const desktopNavItems =
+    currentRole === "therapist"
       ? [
-          { href: "/admin/listeners", icon: ShieldCheck, label: tr("nav.admin_listeners", "Listener Moderation") },
-          { href: "/admin/dashboard", icon: LayoutDashboard, label: tr("nav.admin_dashboard", "Admin Dashboard") },
+          { href: "/therapist-dashboard", icon: LayoutDashboard, label: tr("nav.my_dashboard", "My Dashboard") },
+          { href: "/appointments", icon: Calendar, label: t("nav.appointments") },
+          { href: "/messages", icon: MessageCircle, label: t("nav.messages") },
         ]
-      : []),
-  ];
+      : currentRole === "listener"
+        ? [
+            { href: "/listener/dashboard", icon: LayoutDashboard, label: tr("nav.my_dashboard", "My Dashboard") },
+            { href: "/peer-support", icon: HeartHandshake, label: tr("nav.peer_sessions", "Peer Sessions") },
+            { href: "/hall-of-fame", icon: Trophy, label: tr("nav.hall_of_fame", "Hall of Fame") },
+            { href: "/messages", icon: MessageCircle, label: t("nav.messages") },
+          ]
+        : currentRole === "moderator" || currentRole === "admin"
+          ? [
+              { href: "/admin/listeners", icon: ShieldCheck, label: tr("nav.admin_listeners", "Listener Moderation") },
+              { href: "/admin/dashboard", icon: LayoutDashboard, label: tr("nav.admin_dashboard", "Admin Dashboard") },
+              { href: "/messages", icon: MessageCircle, label: t("nav.messages") },
+            ]
+          : [
+              { href: "/support", icon: LifeBuoy, label: tr("nav.support_hub", "Find Support") },
+              { href: "/therapists", icon: Users, label: t("nav.therapists") },
+              { href: "/appointments", icon: Calendar, label: t("nav.appointments") },
+              { href: "/messages", icon: MessageCircle, label: t("nav.messages") },
+              { href: "/progress", icon: TrendingUp, label: tr("nav.progress", "Progress") },
+            ];
 
-  const homeHref = homeHrefForRole(user?.role);
-  const profileHref = profileHrefForRole(user?.role);
-
-  const bottomNavItems = [
-    {
-      key: "home",
-      href: homeHref,
-      icon: LayoutDashboard,
-      label: t("nav.home"),
-      active: location === homeHref || location === "/dashboard",
-    },
-    {
-      key: "messages",
-      href: "/messages",
-      icon: MessageCircle,
-      label: t("nav.messages"),
-      active: location.startsWith("/messages"),
-      badge: (unread?.count ?? 0) > 0,
-    },
-    {
-      key: "therapists",
-      href: "/therapists",
-      icon: Users,
-      label: t("nav.therapists"),
-      active: location.startsWith("/therapists") || location.startsWith("/therapist/"),
-    },
-    {
-      key: "appointments",
-      href: "/appointments",
-      icon: CalendarDays,
-      label: t("nav.appointments"),
-      active: location.startsWith("/appointments"),
-    },
-    {
-      key: "profile",
-      href: profileHref,
-      icon: UserCircle,
-      label: t("nav.profile"),
-      active: ["/settings", "/listener/dashboard", "/therapist-dashboard", "/admin/listeners"].some((path) => location.startsWith(path)),
-    },
-  ];
+  const bottomNavItems =
+    currentRole === "therapist"
+      ? [
+          { key: "home", href: "/therapist-dashboard", icon: LayoutDashboard, label: tr("nav.my_dashboard", "Dashboard"), active: location.startsWith("/therapist-dashboard"), badge: false },
+          { key: "appointments", href: "/appointments", icon: CalendarDays, label: t("nav.appointments"), active: location.startsWith("/appointments"), badge: false },
+          { key: "messages", href: "/messages", icon: MessageCircle, label: t("nav.messages"), active: location.startsWith("/messages"), badge: (unread?.count ?? 0) > 0 },
+          { key: "therapists", href: "/therapists", icon: Users, label: t("nav.therapists"), active: location.startsWith("/therapists") || location.startsWith("/therapist/"), badge: false },
+          { key: "profile", href: "/settings", icon: UserCircle, label: t("nav.profile"), active: location.startsWith("/settings"), badge: false },
+        ]
+      : currentRole === "listener"
+        ? [
+            { key: "home", href: "/listener/dashboard", icon: LayoutDashboard, label: tr("nav.my_dashboard", "Dashboard"), active: location.startsWith("/listener/dashboard"), badge: false },
+            { key: "sessions", href: "/peer-support", icon: HeartHandshake, label: tr("nav.peer_sessions", "Sessions"), active: location.startsWith("/peer-support"), badge: false },
+            { key: "fame", href: "/hall-of-fame", icon: Trophy, label: tr("nav.hall_of_fame", "Ranking"), active: location.startsWith("/hall-of-fame"), badge: false },
+            { key: "messages", href: "/messages", icon: MessageCircle, label: t("nav.messages"), active: location.startsWith("/messages"), badge: (unread?.count ?? 0) > 0 },
+            { key: "profile", href: "/settings", icon: UserCircle, label: t("nav.profile"), active: location.startsWith("/settings"), badge: false },
+          ]
+        : currentRole === "moderator" || currentRole === "admin"
+          ? [
+              { key: "moderation", href: "/admin/listeners", icon: ShieldCheck, label: tr("nav.moderation", "Moderation"), active: location.startsWith("/admin/listeners"), badge: false },
+              { key: "admin", href: "/admin/dashboard", icon: LayoutDashboard, label: tr("nav.admin", "Admin"), active: location.startsWith("/admin/dashboard"), badge: false },
+              { key: "messages", href: "/messages", icon: MessageCircle, label: t("nav.messages"), active: location.startsWith("/messages"), badge: (unread?.count ?? 0) > 0 },
+              { key: "fame", href: "/hall-of-fame", icon: Trophy, label: tr("nav.hall_of_fame", "Hall of Fame"), active: location.startsWith("/hall-of-fame"), badge: false },
+              { key: "profile", href: "/settings", icon: UserCircle, label: t("nav.profile"), active: location.startsWith("/settings"), badge: false },
+            ]
+          : [
+              { key: "home", href: "/workflow", icon: Compass, label: t("nav.home"), active: location === "/workflow" || location === "/dashboard", badge: false },
+              { key: "support", href: "/support", icon: LifeBuoy, label: tr("nav.find_support", "Support"), active: location === "/support", badge: false },
+              { key: "messages", href: "/messages", icon: MessageCircle, label: t("nav.messages"), active: location.startsWith("/messages"), badge: (unread?.count ?? 0) > 0 },
+              { key: "appointments", href: "/appointments", icon: CalendarDays, label: t("nav.appointments"), active: location.startsWith("/appointments"), badge: false },
+              { key: "profile", href: "/settings", icon: UserCircle, label: t("nav.profile"), active: location.startsWith("/settings"), badge: false },
+            ];
 
   return (
     <div className="min-h-screen bg-background">
       <header className="fixed top-0 left-0 right-0 z-50 glass-effect border-b h-14" data-testid="app-header">
         <div className="max-w-7xl mx-auto px-4 h-full flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2" data-testid="link-app-home">
+          <Link href={user ? homeHrefForRole(currentRole) : "/"} className="flex items-center gap-2" data-testid="link-app-home">
             <div className="w-8 h-8 rounded-lg gradient-calm flex items-center justify-center">
               <Heart className="h-4 w-4 text-white" />
             </div>
@@ -211,7 +204,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             data-testid="button-sos"
           >
             <AlertCircle className="h-4 w-4 me-2" />
-            {tr("nav.support", "Support")}
+            SOS
           </Button>
         </Link>
       )}
