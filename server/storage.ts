@@ -14,6 +14,7 @@ import {
   type CrisisReport, type InsertCrisisReport,
   type OnboardingResponse, type InsertOnboardingResponse,
   type ListenerProfile, type InsertListenerProfile,
+  type BrowsableListener,
   type ListenerProgress, type ListenerPointsLedger,
   type InsertListenerProgress, type InsertListenerPointsLedger,
   type ListenerApplication, type InsertListenerApplication,
@@ -316,6 +317,9 @@ export interface IStorage {
   getPeerSession(id: number): Promise<PeerSession | undefined>;
   getPeerSessionsByUser(userId: string): Promise<(PeerSession & { otherUser: User })[]>;
   endPeerSession(id: number): Promise<PeerSession | undefined>;
+
+  getBrowsableListeners(filters?: { language?: string; topic?: string; availableOnly?: boolean }): Promise<BrowsableListener[]>;
+  syncListenerBrowseStats(listenerId: string): Promise<void>;
 
   createPeerMessage(data: InsertPeerMessage): Promise<PeerMessage>;
   getPeerMessages(sessionId: number): Promise<PeerMessage[]>;
@@ -1743,6 +1747,12 @@ export class DatabaseStorage implements IStorage {
       activation_status: activationStatus,
       updated_at: new Date().toISOString(),
     };
+    // Auto-enable availability when activating; auto-disable when suspending/deactivating
+    if (activationStatus === "trial" || activationStatus === "live") {
+      payload.is_available = true;
+    } else {
+      payload.is_available = false;
+    }
     if (reviewerId) {
       payload.approved_by = reviewerId;
       payload.approved_at = new Date().toISOString();
@@ -1946,6 +1956,79 @@ export class DatabaseStorage implements IStorage {
       .single();
     if (error) throw error;
     return mapPeerSessionFeedback(result);
+  }
+
+  async getBrowsableListeners(filters?: { language?: string; topic?: string; availableOnly?: boolean }): Promise<BrowsableListener[]> {
+    const { data: profiles, error } = await supabase
+      .from("listener_profiles")
+      .select("user_id, display_alias, headline, avatar_emoji, languages, topics, is_available, total_sessions, average_rating")
+      .eq("verification_status", "approved")
+      .in("activation_status", ["trial", "live"])
+      .order("is_available", { ascending: false })
+      .order("average_rating", { ascending: false, nullsFirst: false })
+      .order("total_sessions", { ascending: false });
+
+    if (error || !profiles) return [];
+
+    let filtered = profiles as any[];
+    if (filters?.language) {
+      filtered = filtered.filter((p) => Array.isArray(p.languages) && p.languages.includes(filters.language));
+    }
+    if (filters?.topic) {
+      filtered = filtered.filter((p) => Array.isArray(p.topics) && p.topics.includes(filters.topic));
+    }
+    if (filters?.availableOnly) {
+      filtered = filtered.filter((p) => p.is_available === true);
+    }
+
+    const userIds = filtered.map((p) => p.user_id);
+    if (userIds.length === 0) return [];
+
+    const { data: progressRows } = await supabase
+      .from("listener_progress")
+      .select("listener_id, level")
+      .in("listener_id", userIds);
+
+    const levelMap = new Map<string, number>();
+    (progressRows || []).forEach((r: any) => levelMap.set(r.listener_id, r.level ?? 1));
+
+    return filtered.map((p) => ({
+      userId: p.user_id,
+      displayAlias: p.display_alias ?? null,
+      headline: p.headline ?? null,
+      avatarEmoji: p.avatar_emoji ?? "🤝",
+      languages: p.languages ?? null,
+      topics: p.topics ?? null,
+      isAvailable: p.is_available ?? false,
+      totalSessions: p.total_sessions ?? 0,
+      averageRating: p.average_rating ?? null,
+      level: levelMap.get(p.user_id) ?? 1,
+    }));
+  }
+
+  async syncListenerBrowseStats(listenerId: string): Promise<void> {
+    const { count: sessionCount } = await supabase
+      .from("peer_sessions")
+      .select("id", { count: "exact", head: true })
+      .eq("listener_id", listenerId)
+      .eq("status", "completed");
+
+    const { data: feedbackRows } = await supabase
+      .from("peer_session_feedback")
+      .select("rating")
+      .eq("listener_id", listenerId);
+
+    const ratings = (feedbackRows || []).map((r: any) => r.rating).filter((r: any) => typeof r === "number");
+    const avgRating = ratings.length > 0 ? ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length : null;
+
+    await supabase
+      .from("listener_profiles")
+      .update({
+        total_sessions: sessionCount ?? 0,
+        average_rating: avgRating,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", listenerId);
   }
 
   async createPeerReport(data: InsertPeerReport): Promise<PeerReport> {

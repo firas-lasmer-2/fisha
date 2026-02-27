@@ -318,8 +318,8 @@ export default function MessagesPage() {
               </div>
 
               {!conversationKey && (
-                <div className="p-3 border-b bg-amber-50 text-amber-800 text-xs flex items-center gap-2">
-                  <ShieldAlert className="h-4 w-4 shrink-0" />
+                <div className="p-3 border-b bg-muted/40 text-muted-foreground text-xs flex items-center gap-2">
+                  <Lock className="h-3.5 w-3.5 shrink-0" />
                   <span>{t("messages.encryption_waiting")}</span>
                 </div>
               )}

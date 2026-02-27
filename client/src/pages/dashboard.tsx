@@ -18,10 +18,22 @@ function toTimestamp(value: string | null | undefined): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+const timeOfDaySuggestion = (): { emoji: string; text: string } => {
+  const hour = new Date().getHours();
+  if (hour >= 6 && hour < 12)
+    return { emoji: "🌅", text: "A good morning starts with checking in. How are you feeling?" };
+  if (hour >= 12 && hour < 18)
+    return { emoji: "🌿", text: "Take a breath. A short mindful pause can reset your afternoon." };
+  if (hour >= 18 && hour < 23)
+    return { emoji: "🌙", text: "How did today go? Reflecting before sleep helps you process and heal." };
+  return { emoji: "💙", text: "Late nights can feel heavy. You're not alone — help is always here." };
+};
+
 export default function DashboardPage() {
   const { t, isRTL } = useI18n();
   const { user } = useAuth();
 
+  const suggestion = timeOfDaySuggestion();
 
   const { data: appointments, isLoading: appointmentsLoading } = useQuery<(Appointment & { otherUser: User })[]>({
     queryKey: ["/api/appointments"],
@@ -134,6 +146,17 @@ export default function DashboardPage() {
             {t("dashboard.today_title")}, {user?.firstName || t("common.friend")}
           </h1>
           <p className="text-sm text-muted-foreground">{todayDate}</p>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.02 }}
+          className="rounded-xl border bg-card/60 px-4 py-3 flex items-center gap-3"
+          data-testid="card-time-suggestion"
+        >
+          <span className="text-2xl shrink-0">{suggestion.emoji}</span>
+          <p className="text-sm text-muted-foreground">{suggestion.text}</p>
         </motion.div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Smile, TrendingUp, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { MoodEntry } from "@shared/schema";
 
 const moodOptions = [
@@ -29,6 +29,19 @@ export default function MoodPage() {
   const { data: entries, isLoading } = useQuery<MoodEntry[]>({
     queryKey: ["/api/mood"],
   });
+
+  const sevenDayDots = useMemo(() => {
+    const today = new Date();
+    return Array.from({ length: 7 }, (_, i) => {
+      const day = new Date(today);
+      day.setDate(today.getDate() - (6 - i));
+      const dateStr = day.toDateString();
+      const entry = (entries || []).find(
+        (m) => m.createdAt && new Date(m.createdAt).toDateString() === dateStr,
+      );
+      return { filled: !!entry, score: entry?.moodScore ?? null };
+    });
+  }, [entries]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -137,6 +150,17 @@ export default function MoodPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            {entries && entries.length > 0 && (
+              <div className="flex items-center gap-1.5 mb-4">
+                {sevenDayDots.map((dot, i) => (
+                  <div
+                    key={i}
+                    className={`flex-1 h-3 rounded-full ${dot.filled ? "gradient-calm" : "bg-muted"}`}
+                    title={dot.filled ? `Mood: ${dot.score}` : "No entry"}
+                  />
+                ))}
+              </div>
+            )}
             {isLoading ? (
               <div className="space-y-3">
                 {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}

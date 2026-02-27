@@ -281,9 +281,9 @@ export default function TherapistsPage() {
           />
         </motion.div>
 
-        <div className="rounded-xl border bg-card/50 p-3 space-y-3" data-testid="section-filters">
+        <div className="rounded-xl border bg-card/50 p-4 space-y-4" data-testid="section-filters">
           {/* Row 1: Specializations */}
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
               <Filter className="h-3 w-3" />
               {t("therapist.filter_specialization")}
@@ -298,51 +298,55 @@ export default function TherapistsPage() {
                     initial="hidden"
                     animate="visible"
                   >
-                    <Badge
-                      variant={specialization === s.value ? "default" : "secondary"}
-                      className="cursor-pointer shrink-0 whitespace-nowrap text-xs"
+                    <button
                       onClick={() => toggleFilter("specialization", s.value)}
                       data-testid={`filter-spec-${s.value}`}
+                      className={`shrink-0 whitespace-nowrap text-xs px-3 py-1.5 rounded-full border transition-all font-medium ${
+                        specialization === s.value
+                          ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                          : "bg-muted/40 text-muted-foreground border-transparent hover:border-border hover:text-foreground"
+                      }`}
                     >
                       {s.label}
-                    </Badge>
+                    </button>
                   </motion.div>
                 ))}
               </div>
             </ScrollArea>
           </div>
 
-          {/* Divider */}
-          <div className="border-t" />
-
-          {/* Row 2: All other filters in one clean row */}
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Row 2: Secondary filters — each group on its own row on mobile, inline on desktop */}
+          <div className="flex flex-wrap gap-x-5 gap-y-3">
             {/* Language */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-2">
               <Globe className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              {languageOptions.map((l) => (
-                <Badge
-                  key={l.value}
-                  variant={language === l.value ? "default" : "outline"}
-                  className="cursor-pointer text-xs"
-                  onClick={() => toggleFilter("language", l.value)}
-                  data-testid={`filter-lang-${l.value}`}
-                >
-                  {l.label}
-                </Badge>
-              ))}
+              <div className="flex gap-1.5">
+                {languageOptions.map((l) => (
+                  <button
+                    key={l.value}
+                    onClick={() => toggleFilter("language", l.value)}
+                    data-testid={`filter-lang-${l.value}`}
+                    className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
+                      language === l.value
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-muted/40 border-transparent hover:border-border text-muted-foreground"
+                    }`}
+                  >
+                    {l.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <span className="text-muted-foreground/40 text-sm">|</span>
-
             {/* Online now */}
-            <Badge
-              variant={onlineOnly ? "default" : "outline"}
-              className={`cursor-pointer gap-1.5 text-xs transition-colors ${
-                onlineOnly ? "bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700 border-emerald-600 text-white" : ""
-              }`}
+            <button
               onClick={() => setOnlineOnly(!onlineOnly)}
               data-testid="filter-online-now"
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-all ${
+                onlineOnly
+                  ? "bg-emerald-600 text-white border-emerald-600"
+                  : "bg-muted/40 border-transparent hover:border-border text-muted-foreground"
+              }`}
             >
               <span className="relative flex h-2 w-2 shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
@@ -352,72 +356,80 @@ export default function TherapistsPage() {
               {onlineTherapists.size > 0 && (
                 <span className="opacity-80">({onlineTherapists.size})</span>
               )}
-            </Badge>
-
-            <span className="text-muted-foreground/40 text-sm">|</span>
+            </button>
 
             {/* Gender */}
-            {genderOptions.map((g) => (
-              <Badge
-                key={g.value}
-                variant={gender === g.value ? "default" : "outline"}
-                className="cursor-pointer text-xs"
-                onClick={() => toggleFilter("gender", g.value)}
-                data-testid={`filter-gender-${g.value}`}
-              >
-                {g.label}
-              </Badge>
-            ))}
-
-            <span className="text-muted-foreground/40 text-sm">|</span>
+            <div className="flex gap-1.5">
+              {genderOptions.map((g) => (
+                <button
+                  key={g.value}
+                  onClick={() => toggleFilter("gender", g.value)}
+                  data-testid={`filter-gender-${g.value}`}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
+                    gender === g.value
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-muted/40 border-transparent hover:border-border text-muted-foreground"
+                  }`}
+                >
+                  {g.label}
+                </button>
+              ))}
+            </div>
 
             {/* Tier */}
-            {tierOptions.map((tierOption) => (
-              <Badge
-                key={tierOption.value}
-                variant={tier === tierOption.value ? "default" : "outline"}
-                className="cursor-pointer whitespace-nowrap text-xs"
-                onClick={() => toggleFilter("tier", tierOption.value)}
-                data-testid={`filter-tier-${tierOption.value}`}
-              >
-                {tierOption.label}
-              </Badge>
-            ))}
-
-            <span className="text-muted-foreground/40 text-sm">|</span>
+            <div className="flex gap-1.5">
+              {tierOptions.map((tierOption) => (
+                <button
+                  key={tierOption.value}
+                  onClick={() => toggleFilter("tier", tierOption.value)}
+                  data-testid={`filter-tier-${tierOption.value}`}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-all whitespace-nowrap ${
+                    tier === tierOption.value
+                      ? tierOption.value === "premium_doctor"
+                        ? "bg-amber-500 text-white border-amber-500"
+                        : "bg-primary text-primary-foreground border-primary"
+                      : "bg-muted/40 border-transparent hover:border-border text-muted-foreground"
+                  }`}
+                >
+                  {tierOption.value === "premium_doctor" ? `✦ ${tierOption.label}` : tierOption.label}
+                </button>
+              ))}
+            </div>
 
             {/* Budget */}
-            {budgetOptions.map((b) => (
-              <Badge
-                key={b.value}
-                variant={budget === b.value ? "default" : "outline"}
-                className="cursor-pointer whitespace-nowrap text-xs"
-                onClick={() => setBudget(budget === b.value ? "" : b.value)}
-                data-testid={`filter-budget-${b.value}`}
-              >
-                {b.label}
-              </Badge>
-            ))}
-
-            {(specialization || language || gender || tier || onlineOnly || budget) && (
-              <>
-                <span className="text-muted-foreground/40 text-sm">|</span>
-                <Badge
-                  variant="outline"
-                  className="cursor-pointer text-destructive border-destructive/40 text-xs"
-                  onClick={() => {
-                    setSpecialization("");
-                    setLanguage("");
-                    setGender("");
-                    setTier("");
-                    setBudget("");
-                    setOnlineOnly(false);
-                  }}
-                  data-testid="button-clear-filters"
+            <div className="flex gap-1.5">
+              {budgetOptions.map((b) => (
+                <button
+                  key={b.value}
+                  onClick={() => setBudget(budget === b.value ? "" : b.value)}
+                  data-testid={`filter-budget-${b.value}`}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-all whitespace-nowrap ${
+                    budget === b.value
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-muted/40 border-transparent hover:border-border text-muted-foreground"
+                  }`}
                 >
-                  {t("therapist.clear_all")}
-                </Badge>
-              </>
+                  {b.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Clear all */}
+            {(specialization || language || gender || tier || onlineOnly || budget) && (
+              <button
+                onClick={() => {
+                  setSpecialization("");
+                  setLanguage("");
+                  setGender("");
+                  setTier("");
+                  setBudget("");
+                  setOnlineOnly(false);
+                }}
+                data-testid="button-clear-filters"
+                className="text-xs px-2.5 py-1 rounded-full border border-destructive/40 text-destructive hover:bg-destructive/5 transition-all"
+              >
+                {t("therapist.clear_all")}
+              </button>
             )}
           </div>
         </div>
@@ -553,9 +565,15 @@ export default function TherapistsPage() {
                               <span className="text-[10px] font-medium hidden sm:inline">{tr("therapist.verified_badge", "Verified")}</span>
                             </span>
                           )}
-                          <Badge variant="outline" className="text-[10px]">
-                            {tp.tier === "graduated_doctor" ? t("tier.graduated_doctor_therapist") : t("tier.premium_doctor_therapist")}
-                          </Badge>
+                          {tp.tier === "premium_doctor" ? (
+                            <Badge className="text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-400/50">
+                              ✦ {t("tier.premium_doctor_therapist")}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px]">
+                              {t("tier.graduated_doctor_therapist")}
+                            </Badge>
+                          )}
                           {tp.hasOpenSlots === true && (
                             <Badge variant="secondary" className="text-[10px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
                               • {tr("therapist.accepting_clients", "Accepting clients")}

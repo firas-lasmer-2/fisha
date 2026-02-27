@@ -23,34 +23,25 @@ import {
 } from "@/components/ui/dialog";
 import {
   AlertTriangle,
-  Clock3,
   HeartHandshake,
   MessageCircle,
   Send,
   ShieldCheck,
-  Sparkles,
   Star,
+  Users,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import type { ListenerQueueEntry, PeerMessage, PeerSession, User } from "@shared/schema";
+import type { BrowsableListener, PeerMessage, PeerSession, User } from "@shared/schema";
 
 interface PeerSessionsResponse {
   sessions: (PeerSession & { otherUser: User })[];
-  activeQueueEntry: ListenerQueueEntry | null;
-}
-
-interface PeerQueueStatusResponse {
-  activeQueueEntry: ListenerQueueEntry | null;
-  queuePosition: number | null;
-  waitingCount: number;
-  availableListeners: number;
-  availableForYou: number;
-  estimatedWaitMinutes: number | null;
+  activeQueueEntry: null;
 }
 
 const peerQuickTopics = ["anxiety", "stress", "relationships", "self_esteem", "grief", "depression"];
 
 const languageOptions = [
+  { value: "", label: "All languages" },
   { value: "ar", label: "العربية" },
   { value: "fr", label: "Francais" },
 ] as const;
@@ -60,6 +51,8 @@ function readableQueueStatus(status: string, fallback: string): string {
   if (value === "waiting") return "Waiting";
   if (value === "matched") return "Matched";
   if (value === "cancelled") return "Cancelled";
+  if (value === "active") return "Active";
+  if (value === "ended") return "Ended";
   return fallback;
 }
 
@@ -75,34 +68,40 @@ export default function PeerSupportPage() {
 
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [messageText, setMessageText] = useState("");
-  const [preferredLanguage, setPreferredLanguage] = useState("ar");
-  const [quickTopics, setQuickTopics] = useState<string[]>([]);
   const [rating, setRating] = useState(5);
   const [feedbackComment, setFeedbackComment] = useState("");
   const [reportReason, setReportReason] = useState("");
   const [reportDetails, setReportDetails] = useState("");
-  const [mobilePanel, setMobilePanel] = useState<"sessions" | "chat">("chat");
-  const [expectationsOpen, setExpectationsOpen] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<"directory" | "sessions" | "chat">("directory");
   const [justEndedSessionId, setJustEndedSessionId] = useState<number | null>(null);
   const messageListEndRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    if (user?.languagePreference && ["ar", "fr"].includes(user.languagePreference)) {
-      setPreferredLanguage(user.languagePreference);
-    }
-  }, [user?.languagePreference]);
+  // Directory filters
+  const [filterLanguage, setFilterLanguage] = useState("");
+  const [filterTopic, setFilterTopic] = useState("");
+  const [filterAvailable, setFilterAvailable] = useState(false);
+
+  // Confirm dialog before starting a direct session
+  const [confirmListener, setConfirmListener] = useState<BrowsableListener | null>(null);
 
   const { data: sessionsPayload, isLoading: sessionsLoading } = useQuery<PeerSessionsResponse>({
     queryKey: ["/api/peer/sessions"],
   });
 
-  const { data: queueStatus } = useQuery<PeerQueueStatusResponse>({
-    queryKey: ["/api/peer/queue/status"],
-    refetchInterval: 15000,
+  const { data: listeners = [], isLoading: listenersLoading } = useQuery<BrowsableListener[]>({
+    queryKey: ["/api/listeners/browse", filterLanguage, filterTopic, filterAvailable],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (filterLanguage) params.set("language", filterLanguage);
+      if (filterTopic) params.set("topic", filterTopic);
+      if (filterAvailable) params.set("available", "1");
+      const res = await fetch(`/api/listeners/browse?${params.toString()}`);
+      if (!res.ok) throw new Error("Failed to fetch listeners");
+      return res.json();
+    },
   });
 
   const sessions = sessionsPayload?.sessions || [];
-  const activeQueueEntry = sessionsPayload?.activeQueueEntry || null;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -119,9 +118,12 @@ export default function PeerSupportPage() {
     const activeSession = sessions.find((session) => session.status === "active");
     if (activeSession) {
       setSelectedSessionId(activeSession.id);
+      setMobilePanel("chat");
       return;
     }
-    setSelectedSessionId(sessions[0]?.id || null);
+    if (sessions.length > 0 && !selectedSessionId) {
+      setSelectedSessionId(sessions[0].id);
+    }
   }, [selectedSessionId, sessions]);
 
   const selectedSession = useMemo(
@@ -168,41 +170,26 @@ export default function PeerSupportPage() {
     };
   }, [selectedSessionId]);
 
-  const joinQueueMutation = useMutation({
-    mutationFn: async () => {
-      const topicTags = Array.from(new Set(quickTopics));
-      const response = await apiRequest("POST", "/api/peer/queue/join", {
-        preferredLanguage,
-        topicTags,
-      });
-      return response.json();
+  const startDirectSessionMutation = useMutation({
+    mutationFn: async (listenerId: string) => {
+      const res = await apiRequest("POST", "/api/peer/session/direct", { listenerId });
+      return res.json();
     },
-    onSuccess: (payload: { matched?: boolean; session?: PeerSession | null }) => {
-      setExpectationsOpen(false);
+    onSuccess: (session: PeerSession) => {
+      setConfirmListener(null);
       queryClient.invalidateQueries({ queryKey: ["/api/peer/sessions"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/peer/queue/status"] });
-      if (payload?.session?.id) {
-        setSelectedSessionId(payload.session.id);
-        setMobilePanel("chat");
-      }
-      toast({
-        title: payload?.matched ? t("peer.matched") : t("peer.joined_queue"),
-        description: payload?.matched ? t("peer.matched_desc") : t("peer.queued_desc"),
-      });
+      queryClient.invalidateQueries({ queryKey: ["/api/listeners/browse"] });
+      setSelectedSessionId(session.id);
+      setMobilePanel("chat");
+      toast({ title: tr("peer.session_started", "Session started! Say hello.") });
     },
     onError: (error: Error) => {
-      toast({ title: error.message, variant: "destructive" });
-    },
-  });
-
-  const leaveQueueMutation = useMutation({
-    mutationFn: async () => {
-      await apiRequest("DELETE", "/api/peer/queue/leave");
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/peer/sessions"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/peer/queue/status"] });
-      toast({ title: t("peer.left_queue") });
+      setConfirmListener(null);
+      const msg = error.message.includes("busy")
+        ? tr("peer.listener_busy", "This listener just became unavailable. Please choose another.")
+        : error.message;
+      toast({ title: msg, variant: "destructive" });
+      queryClient.invalidateQueries({ queryKey: ["/api/listeners/browse"] });
     },
   });
 
@@ -230,7 +217,7 @@ export default function PeerSupportPage() {
     onSuccess: () => {
       setJustEndedSessionId(selectedSessionId);
       queryClient.invalidateQueries({ queryKey: ["/api/peer/sessions"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/peer/queue/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/listeners/browse"] });
       toast({ title: t("peer.session_ended") });
     },
   });
@@ -271,234 +258,41 @@ export default function PeerSupportPage() {
     },
   });
 
-  const queueEntry = queueStatus?.activeQueueEntry || activeQueueEntry;
-  const isWaitingInQueue = queueEntry?.status === "waiting";
-  const queuePosition = queueStatus?.queuePosition;
-  const availableListeners = queueStatus?.availableListeners || 0;
-  const availableForYou = queueStatus?.availableForYou || 0;
-  const estimatedWaitMinutes = queueStatus?.estimatedWaitMinutes;
-
   const canSend = selectedSession?.status === "active" && messageText.trim().length > 0;
   const isClientViewingEndedSession = Boolean(
     selectedSession && selectedSession.status !== "active" && user?.id === selectedSession.clientId,
   );
   const shouldHighlightClosingCard = justEndedSessionId !== null && justEndedSessionId === selectedSession?.id;
 
-  const toggleQuickTopic = (topic: string) => {
-    setQuickTopics((prev) =>
-      prev.includes(topic) ? prev.filter((item) => item !== topic) : [...prev, topic],
-    );
-  };
-
-  const isJoinDisabled = joinQueueMutation.isPending || !!queueEntry;
-  const supportFlow = [
-    {
-      title: tr("peer.flow_1_title", "1. Set your preferences"),
-      desc: tr("peer.flow_1_desc", "Choose language and topics so we can match you faster."),
-      icon: Sparkles,
-    },
-    {
-      title: tr("peer.flow_2_title", "2. Join the queue"),
-      desc: tr("peer.flow_2_desc", "You'll see your place in line and estimated wait time."),
-      icon: Clock3,
-    },
-    {
-      title: tr("peer.flow_3_title", "3. Start chatting"),
-      desc: tr("peer.flow_3_desc", "Share what you need, then rate the session at the end."),
-      icon: MessageCircle,
-    },
-  ];
+  const availableCount = listeners.filter((l) => l.isAvailable).length;
 
   return (
     <AppLayout>
       <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-4">
-        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}>
-          <Card className="overflow-hidden">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <HeartHandshake className="h-5 w-5 text-primary" />
-                {t("peer.title")}
-              </CardTitle>
-              <Button variant="ghost" size="sm" onClick={() => setExpectationsOpen(true)}>
-                {tr("peer.what_to_expect", "What to expect")}
-              </Button>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {tr("peer.clear_intro", "Get matched with a listener in a few steps. You're always in control.")}
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-2 sm:grid-cols-3">
-              {supportFlow.map((item, index) => (
-                <motion.div
-                  key={item.title}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.06 + index * 0.05 }}
-                  className="rounded-lg border bg-muted/30 p-3"
-                >
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <item.icon className="h-4 w-4 text-primary" />
-                    <p className="text-sm font-medium">{item.title}</p>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{item.desc}</p>
-                </motion.div>
-              ))}
-            </div>
+        {/* Header */}
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <HeartHandshake className="h-6 w-6 text-primary" />
+            {tr("peer.directory_title", "Peer Listeners")}
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {tr("peer.directory_subtitle", "Choose a listener and start a private, free conversation.")}
+          </p>
+        </div>
 
-            <div className="rounded-lg border p-3 flex flex-wrap items-center justify-between gap-3" data-testid="peer-availability-banner">
-              <div className="flex items-center gap-2">
-                <span
-                  className={`h-2.5 w-2.5 rounded-full ${availableListeners > 0 ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/40"}`}
-                />
-                <p className="text-sm font-medium">{tr("peer.listeners_online", "Listeners online now")}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant={availableListeners > 0 ? "secondary" : "outline"}>{availableListeners}</Badge>
-                <Badge variant="secondary">{tr("peer.free_unlimited", "Free and unlimited peer support")}</Badge>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-sm font-medium">{tr("peer.select_language", "Preferred language")}</p>
-              <div className="flex flex-wrap gap-2">
-                {languageOptions.map((lang) => {
-                  const selected = preferredLanguage === lang.value;
-                  return (
-                    <button
-                      key={lang.value}
-                      type="button"
-                      onClick={() => setPreferredLanguage(lang.value)}
-                      className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
-                        selected ? "bg-primary text-primary-foreground border-primary" : "bg-muted/40"
-                      }`}
-                      data-testid={`peer-language-${lang.value}`}
-                    >
-                      {lang.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-sm font-medium">{tr("peer.topics_title", "Topics you want support with")}</p>
-              <div className="flex flex-wrap gap-2">
-                {peerQuickTopics.map((topic) => {
-                  const selected = quickTopics.includes(topic);
-                  return (
-                    <button
-                      key={topic}
-                      type="button"
-                      onClick={() => toggleQuickTopic(topic)}
-                      className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
-                        selected ? "bg-primary text-primary-foreground border-primary" : "bg-muted/40"
-                      }`}
-                      data-testid={`peer-topic-${topic}`}
-                    >
-                      {t(`specialization.${topic}`)}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {isWaitingInQueue && (
-              <div className="grid gap-2 sm:grid-cols-3" data-testid="peer-queue-insights">
-                <div className="rounded-lg bg-muted/60 p-3">
-                  <p className="text-xs text-muted-foreground">Your place in line</p>
-                  <p className="text-lg font-semibold">{queuePosition || "-"}</p>
-                  {queuePosition && <p className="text-xs text-primary">{tr("peer.shortly", "A listener will be with you shortly.")}</p>}
-                </div>
-                <div className="rounded-lg bg-muted/60 p-3">
-                  <p className="text-xs text-muted-foreground">{tr("peer.eta", "Estimated wait")}</p>
-                  <p className="text-lg font-semibold">{estimatedWaitMinutes ? `${estimatedWaitMinutes} ${t("common.minutes")}` : "-"}</p>
-                </div>
-                <div className="rounded-lg bg-muted/60 p-3">
-                  <p className="text-xs text-muted-foreground">{tr("peer.available_for_you", "Available for you")}</p>
-                  <p className="text-lg font-semibold">{availableForYou}</p>
-                </div>
-              </div>
-            )}
-
-            {queueEntry && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                <Badge variant="outline" data-testid="peer-queue-status-badge">
-                {t("peer.queue_status")}: {tr(`peer.status_${queueEntry.status}`, readableQueueStatus(queueEntry.status, queueEntry.status))}
-                </Badge>
-              </motion.div>
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <Button
-                onClick={() => setExpectationsOpen(true)}
-                disabled={isJoinDisabled}
-                data-testid="button-peer-join-queue"
-              >
-                {tr("peer.join_safe", "Talk to someone")}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => leaveQueueMutation.mutate()}
-                disabled={leaveQueueMutation.isPending || !queueEntry}
-                data-testid="button-peer-leave-queue"
-              >
-                {t("peer.leave_queue") === "peer.leave_queue" ? "Never mind, I'm okay" : t("peer.leave_queue")}
-              </Button>
-            </div>
-          </CardContent>
-          </Card>
-        </motion.div>
-
-        <Dialog open={expectationsOpen} onOpenChange={setExpectationsOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{tr("peer.expect_title", "Before you start")}</DialogTitle>
-              <DialogDescription>
-                {tr("peer.expect_desc", "Peer support is warm and human, but not a replacement for professional care.")}
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-3 text-sm">
-              <div className="flex items-start gap-2">
-                <ShieldCheck className="h-4 w-4 text-primary mt-0.5" />
-                <p>{tr("peer.expect_anonymous", "Your conversation stays anonymous by default.")}</p>
-              </div>
-              <div className="flex items-start gap-2">
-                <HeartHandshake className="h-4 w-4 text-primary mt-0.5" />
-                <p>{tr("peer.expect_listener", "Listeners are trained volunteers who offer emotional support.")}</p>
-              </div>
-              <div className="flex items-start gap-2">
-                <Clock3 className="h-4 w-4 text-primary mt-0.5" />
-                <p>{tr("peer.expect_wait", "You might wait a few minutes before matching.")}</p>
-              </div>
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="h-4 w-4 text-destructive mt-0.5" />
-                <p>{tr("peer.expect_crisis", "If you are in immediate danger, use SOS for emergency support.")}</p>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setExpectationsOpen(false)}>
-                {t("common.cancel")}
-              </Button>
-              <Button
-                onClick={() => joinQueueMutation.mutate()}
-                disabled={joinQueueMutation.isPending || !!queueEntry}
-              >
-                {joinQueueMutation.isPending ? tr("common.loading", "Loading...") : t("peer.join_queue")}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        <div className="md:hidden grid grid-cols-2 gap-2">
+        {/* Mobile tab bar */}
+        <div className="md:hidden grid grid-cols-3 gap-2">
+          <Button
+            size="sm"
+            variant={mobilePanel === "directory" ? "secondary" : "outline"}
+            onClick={() => setMobilePanel("directory")}
+          >
+            {tr("peer.browse", "Browse")}
+          </Button>
           <Button
             size="sm"
             variant={mobilePanel === "sessions" ? "secondary" : "outline"}
             onClick={() => setMobilePanel("sessions")}
-            className="w-full"
           >
             {t("peer.sessions")}
           </Button>
@@ -506,13 +300,190 @@ export default function PeerSupportPage() {
             size="sm"
             variant={mobilePanel === "chat" ? "secondary" : "outline"}
             onClick={() => setMobilePanel("chat")}
-            className="w-full"
           >
             {t("peer.conversation")}
           </Button>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
+        <div className="grid gap-4 md:grid-cols-[1fr_280px_minmax(0,1fr)]">
+          {/* ── Listener Directory ── */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={mobilePanel === "directory" ? "" : "hidden md:block"}
+          >
+            <Card className="h-full">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-primary" />
+                    {tr("peer.listeners_title", "Available Listeners")}
+                  </span>
+                  <span className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+                    <span className={`h-2 w-2 rounded-full ${availableCount > 0 ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/40"}`} />
+                    {availableCount} {tr("peer.online", "online")}
+                  </span>
+                </CardTitle>
+
+                {/* Filters */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex flex-wrap gap-1.5">
+                    {languageOptions.map((lang) => (
+                      <button
+                        key={lang.value}
+                        type="button"
+                        onClick={() => setFilterLanguage(lang.value)}
+                        className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                          filterLanguage === lang.value
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "bg-muted/40 hover:bg-muted"
+                        }`}
+                      >
+                        {lang.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setFilterTopic("")}
+                      className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                        filterTopic === ""
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-muted/40 hover:bg-muted"
+                      }`}
+                    >
+                      {tr("peer.all_topics", "All topics")}
+                    </button>
+                    {peerQuickTopics.map((topic) => (
+                      <button
+                        key={topic}
+                        type="button"
+                        onClick={() => setFilterTopic(topic === filterTopic ? "" : topic)}
+                        className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                          filterTopic === topic
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "bg-muted/40 hover:bg-muted"
+                        }`}
+                      >
+                        {t(`specialization.${topic}`)}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={filterAvailable}
+                      onChange={(e) => setFilterAvailable(e.target.checked)}
+                      className="rounded"
+                    />
+                    {tr("peer.available_only", "Available now only")}
+                  </label>
+                </div>
+              </CardHeader>
+
+              <CardContent className="p-0">
+                <ScrollArea className="h-[500px]">
+                  <div className="p-3 space-y-2">
+                    {listenersLoading ? (
+                      <>
+                        <Skeleton className="h-20 w-full" />
+                        <Skeleton className="h-20 w-full" />
+                        <Skeleton className="h-20 w-full" />
+                      </>
+                    ) : listeners.length === 0 ? (
+                      <div className="py-12 text-center text-sm text-muted-foreground space-y-2">
+                        <Users className="h-8 w-8 mx-auto text-muted-foreground/40" />
+                        <p>{tr("peer.no_listeners", "No listeners match your filters right now.")}</p>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setFilterLanguage("");
+                            setFilterTopic("");
+                            setFilterAvailable(false);
+                          }}
+                        >
+                          {tr("peer.clear_filters", "Clear filters")}
+                        </Button>
+                      </div>
+                    ) : (
+                      <AnimatePresence initial={false}>
+                        {listeners.map((listener, index) => (
+                          <motion.div
+                            key={listener.userId}
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ delay: index * 0.03 }}
+                            className="rounded-lg border bg-card p-3 space-y-2 hover:bg-muted/30 transition-colors"
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className="relative">
+                                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-xl select-none">
+                                  {listener.avatarEmoji}
+                                </div>
+                                <span
+                                  className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background ${
+                                    listener.isAvailable ? "bg-emerald-500" : "bg-muted-foreground/40"
+                                  }`}
+                                />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <p className="text-sm font-medium">
+                                    {listener.displayAlias || tr("peer.anonymous_listener", "Anonymous Listener")}
+                                  </p>
+                                  <Badge variant="outline" className="text-xs">
+                                    {tr("peer.level", "Lvl")} {listener.level}
+                                  </Badge>
+                                  {listener.isAvailable ? (
+                                    <Badge className="text-xs bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200">
+                                      {tr("peer.available", "Available")}
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-xs text-muted-foreground">
+                                      {tr("peer.busy", "Busy")}
+                                    </Badge>
+                                  )}
+                                </div>
+                                {listener.headline && (
+                                  <p className="text-xs text-muted-foreground mt-0.5 truncate">{listener.headline}</p>
+                                )}
+                                <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                                  {listener.totalSessions > 0 && (
+                                    <span>{listener.totalSessions} {tr("peer.sessions_count", "sessions")}</span>
+                                  )}
+                                  {listener.averageRating !== null && listener.averageRating !== undefined && (
+                                    <span className="flex items-center gap-0.5">
+                                      <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                                      {listener.averageRating.toFixed(1)}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <Button
+                              size="sm"
+                              className="w-full"
+                              disabled={!listener.isAvailable || startDirectSessionMutation.isPending}
+                              onClick={() => setConfirmListener(listener)}
+                            >
+                              {listener.isAvailable
+                                ? tr("peer.start_session", "Start session")
+                                : tr("peer.listener_unavailable", "Unavailable")}
+                            </Button>
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                    )}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          {/* ── Session List Sidebar ── */}
           <motion.div
             initial={{ opacity: 0, x: -12 }}
             animate={{ opacity: 1, x: 0 }}
@@ -562,6 +533,7 @@ export default function PeerSupportPage() {
             </Card>
           </motion.div>
 
+          {/* ── Chat Panel ── */}
           <motion.div
             initial={{ opacity: 0, x: 12 }}
             animate={{ opacity: 1, x: 0 }}
@@ -667,10 +639,9 @@ export default function PeerSupportPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => setExpectationsOpen(true)}
-                              disabled={isJoinDisabled}
+                              onClick={() => setMobilePanel("directory")}
                             >
-                              {tr("peer.rejoin_queue", "Talk to someone again")}
+                              {tr("peer.browse_more", "Browse more listeners")}
                             </Button>
                             <Button size="sm" variant="outline" onClick={() => { window.location.href = "/self-care"; }}>
                               {tr("peer.open_selfcare", "Open self-care")}
@@ -766,14 +737,57 @@ export default function PeerSupportPage() {
                     )}
                   </>
                 ) : (
-                  <div className="h-[360px] flex items-center justify-center text-sm text-muted-foreground">
-                    {t("peer.select_session")}
+                  <div className="h-[360px] flex flex-col items-center justify-center text-sm text-muted-foreground gap-3">
+                    <ShieldCheck className="h-8 w-8 text-muted-foreground/40" />
+                    <p>{tr("peer.pick_listener", "Pick a listener from the directory to start a private session.")}</p>
                   </div>
                 )}
               </CardContent>
             </Card>
           </motion.div>
         </div>
+
+        {/* Confirm start session dialog */}
+        <Dialog open={!!confirmListener} onOpenChange={(open) => { if (!open) setConfirmListener(null); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{tr("peer.confirm_title", "Start a session?")}</DialogTitle>
+              <DialogDescription>
+                {tr("peer.confirm_desc", "You'll be connected to this listener. The conversation is private and free.")}
+              </DialogDescription>
+            </DialogHeader>
+            {confirmListener && (
+              <div className="flex items-center gap-3 py-2">
+                <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-2xl">
+                  {confirmListener.avatarEmoji}
+                </div>
+                <div>
+                  <p className="font-medium">{confirmListener.displayAlias || tr("peer.anonymous_listener", "Anonymous Listener")}</p>
+                  {confirmListener.headline && (
+                    <p className="text-sm text-muted-foreground">{confirmListener.headline}</p>
+                  )}
+                </div>
+              </div>
+            )}
+            <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/50 rounded-lg p-3">
+              <ShieldCheck className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+              <p>{tr("peer.privacy_note", "Your real name is never shown. Listeners are trained volunteers verified by our team.")}</p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmListener(null)}>
+                {t("common.cancel")}
+              </Button>
+              <Button
+                onClick={() => confirmListener && startDirectSessionMutation.mutate(confirmListener.userId)}
+                disabled={startDirectSessionMutation.isPending}
+              >
+                {startDirectSessionMutation.isPending
+                  ? tr("common.loading", "Starting...")
+                  : tr("peer.start_session", "Start session")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );

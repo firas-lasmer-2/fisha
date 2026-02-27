@@ -73,6 +73,9 @@ export default function SettingsPage() {
   const [displayNameInput, setDisplayNameInput] = useState(user?.displayName || "");
   const { available, checking } = useDisplayNameCheck(displayNameInput, user?.displayName);
 
+  const [firstNameInput, setFirstNameInput] = useState(user?.firstName || "");
+  const [lastNameInput, setLastNameInput] = useState(user?.lastName || "");
+
   const { data: payments, isLoading: paymentsLoading } = useQuery<PaymentTransaction[]>({
     queryKey: ["/api/payments"],
     enabled: isClient,
@@ -105,6 +108,23 @@ export default function SettingsPage() {
   const canSaveDisplayName =
     displayNameInput !== (user?.displayName || "") &&
     (displayNameInput === "" || available === true);
+
+  const saveProfileName = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("PATCH", "/api/user/profile", {
+        firstName: firstNameInput || undefined,
+        lastName: lastNameInput || undefined,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      toast({ title: tr("settings.name_saved", "Name updated") });
+    },
+    onError: (err: Error) => {
+      toast({ title: err.message, variant: "destructive" });
+    },
+  });
 
   // ---- E2E Key Backup / Recovery ----
   const [backupPassphrase, setBackupPassphrase] = useState("");
@@ -171,11 +191,40 @@ export default function SettingsPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div>
+              <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">{tr("settings.name", "Name")}</p>
-                <p className="text-sm font-medium">
-                  {[user?.firstName, user?.lastName].filter(Boolean).join(" ") || tr("common.anonymous", "Anonymous")}
-                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    value={firstNameInput}
+                    onChange={(e) => setFirstNameInput(e.target.value)}
+                    placeholder={tr("settings.first_name", "First name")}
+                    data-testid="input-first-name"
+                  />
+                  <Input
+                    value={lastNameInput}
+                    onChange={(e) => setLastNameInput(e.target.value)}
+                    placeholder={tr("settings.last_name", "Last name")}
+                    data-testid="input-last-name"
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full"
+                  disabled={
+                    (firstNameInput === (user?.firstName || "") &&
+                      lastNameInput === (user?.lastName || "")) ||
+                    saveProfileName.isPending
+                  }
+                  onClick={() => saveProfileName.mutate()}
+                  data-testid="button-save-name"
+                >
+                  {saveProfileName.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    tr("settings.save_name", "Save name")
+                  )}
+                </Button>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">{tr("settings.email", "Email")}</p>

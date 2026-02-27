@@ -227,6 +227,24 @@ export interface ListenerProfile {
   lastSeenAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  headline: string | null;
+  aboutMe: string | null;
+  avatarEmoji: string;
+  totalSessions: number;
+  averageRating: number | null;
+}
+
+export interface BrowsableListener {
+  userId: string;
+  displayAlias: string | null;
+  headline: string | null;
+  avatarEmoji: string;
+  languages: string[] | null;
+  topics: string[] | null;
+  isAvailable: boolean;
+  totalSessions: number;
+  averageRating: number | null;
+  level: number;
 }
 
 export interface ListenerProgress {
@@ -500,6 +518,9 @@ export const insertListenerProfileSchema = z.object({
   approvedBy: z.string().optional().nullable(),
   approvedAt: z.string().optional().nullable(),
   isAvailable: z.boolean().default(false).optional(),
+  headline: z.string().max(120).optional().nullable(),
+  aboutMe: z.string().max(2000).optional().nullable(),
+  avatarEmoji: z.string().max(10).optional(),
 });
 
 export const insertListenerProgressSchema = z.object({
@@ -1304,6 +1325,11 @@ export function mapListenerProfile(row: any): ListenerProfile {
     lastSeenAt: row.last_seen_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    headline: row.headline ?? null,
+    aboutMe: row.about_me ?? null,
+    avatarEmoji: row.avatar_emoji ?? '🤝',
+    totalSessions: row.total_sessions ?? 0,
+    averageRating: row.average_rating ?? null,
   };
 }
 

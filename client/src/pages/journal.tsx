@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { BookOpen, Plus, Trash2, Calendar, Loader2, Sparkles } from "lucide-react";
+import { BookOpen, Plus, Trash2, Pencil, Calendar, Loader2, Sparkles } from "lucide-react";
 import { useState } from "react";
 import type { JournalEntry } from "@shared/schema";
 
@@ -17,6 +17,7 @@ export default function JournalPage() {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null);
 
   const { data: entries, isLoading } = useQuery<JournalEntry[]>({
     queryKey: ["/api/journal"],
@@ -44,6 +45,21 @@ export default function JournalPage() {
     },
   });
 
+  const editMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingEntry) return;
+      const res = await apiRequest("PATCH", `/api/journal/${editingEntry.id}`, { title, content });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/journal"] });
+      setTitle("");
+      setContent("");
+      setEditingEntry(null);
+      setDialogOpen(false);
+    },
+  });
+
   const prompts = [
     t("journal.prompt_1"),
     t("journal.prompt_2"),
@@ -68,7 +84,7 @@ export default function JournalPage() {
       <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold" data-testid="text-journal-title">{t("nav.journal")}</h1>
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setEditingEntry(null); setTitle(""); setContent(""); } }}>
             <DialogTrigger asChild>
               <Button className="gap-2" data-testid="button-new-journal">
                 <Plus className="h-4 w-4" />
@@ -77,7 +93,7 @@ export default function JournalPage() {
             </DialogTrigger>
             <DialogContent className="sm:max-w-lg">
               <DialogHeader>
-                <DialogTitle>{t("journal.new")}</DialogTitle>
+                <DialogTitle>{editingEntry ? "Edit entry" : t("journal.new")}</DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
                 <div>
@@ -110,13 +126,13 @@ export default function JournalPage() {
                   data-testid="textarea-journal-content"
                 />
                 <Button
-                  onClick={() => createMutation.mutate()}
-                  disabled={!content.trim() || createMutation.isPending}
+                  onClick={() => editingEntry ? editMutation.mutate() : createMutation.mutate()}
+                  disabled={!content.trim() || createMutation.isPending || editMutation.isPending}
                   className="w-full"
                   data-testid="button-save-journal"
                 >
-                  {createMutation.isPending && <Loader2 className="h-4 w-4 me-2 animate-spin" />}
-                  {t("journal.save")}
+                  {(createMutation.isPending || editMutation.isPending) && <Loader2 className="h-4 w-4 me-2 animate-spin" />}
+                  {editingEntry ? "Save changes" : t("journal.save")}
                 </Button>
               </div>
             </DialogContent>
@@ -160,15 +176,31 @@ export default function JournalPage() {
                         {new Date(entry.createdAt!).toLocaleDateString()}
                       </div>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="shrink-0 text-muted-foreground hover:text-destructive"
-                      onClick={() => deleteMutation.mutate(entry.id)}
-                      data-testid={`button-delete-journal-${entry.id}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          setEditingEntry(entry);
+                          setTitle(entry.title || "");
+                          setContent(entry.content);
+                          setDialogOpen(true);
+                        }}
+                        data-testid={`button-edit-journal-${entry.id}`}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => deleteMutation.mutate(entry.id)}
+                        data-testid={`button-delete-journal-${entry.id}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>

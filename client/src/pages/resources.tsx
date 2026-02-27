@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useQuery } from "@tanstack/react-query";
 import { Library, Clock, BookOpen, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,7 @@ export default function ResourcesPage() {
   const { t, isRTL, language } = useI18n();
   const [category, setCategory] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
 
   const queryStr = category ? `?category=${category}` : "";
   const { data: resourceList, isLoading } = useQuery<Resource[]>({
@@ -86,9 +88,16 @@ export default function ResourcesPage() {
             {resourceList.filter((resource) => {
               if (!searchQuery.trim()) return true;
               const title = getTitle(resource).toLowerCase();
-              return title.includes(searchQuery.toLowerCase());
+              const content = getContent(resource).toLowerCase();
+              const q = searchQuery.toLowerCase();
+              return title.includes(q) || content.includes(q);
             }).map((resource) => (
-              <Card key={resource.id} className="hover-elevate" data-testid={`resource-card-${resource.id}`}>
+              <Card
+                key={resource.id}
+                className="hover-elevate cursor-pointer"
+                data-testid={`resource-card-${resource.id}`}
+                onClick={() => setSelectedResource(resource)}
+              >
                 <CardContent className="p-5">
                   <Badge variant="secondary" className="mb-3 text-xs">
                     {categories.find((c) => c.value === resource.category)?.label || resource.category}
@@ -112,6 +121,30 @@ export default function ResourcesPage() {
           </div>
         )}
       </div>
+
+      <Sheet open={!!selectedResource} onOpenChange={(open) => { if (!open) setSelectedResource(null); }}>
+        <SheetContent side="bottom" className="max-h-[80vh] overflow-y-auto rounded-t-2xl">
+          {selectedResource && (
+            <>
+              <SheetHeader className="mb-4">
+                <Badge variant="secondary" className="w-fit text-xs mb-1">
+                  {categories.find((c) => c.value === selectedResource.category)?.label || selectedResource.category}
+                </Badge>
+                <SheetTitle className="text-start leading-snug">{getTitle(selectedResource)}</SheetTitle>
+              </SheetHeader>
+              <p className="text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
+                {getContent(selectedResource)}
+              </p>
+              {selectedResource.readTimeMinutes && (
+                <div className="flex items-center gap-1.5 mt-4 text-xs text-muted-foreground">
+                  <Clock className="h-3 w-3" />
+                  {selectedResource.readTimeMinutes} {t("resources.min_read")}
+                </div>
+              )}
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </AppLayout>
   );
 }

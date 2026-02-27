@@ -73,7 +73,7 @@ export default function WelcomePage() {
       window.location.href = "/self-care";
       return;
     }
-    window.location.href = "/listen";
+    window.location.href = "/peer-support";
   };
 
   return (
@@ -103,9 +103,9 @@ export default function WelcomePage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-3">
-              <Button variant="outline" className="justify-start gap-2" onClick={() => (window.location.href = "/listen")}>
+              <Button variant="outline" className="justify-start gap-2" onClick={() => (window.location.href = "/peer-support")}>
                 <HeartHandshake className="h-4 w-4" />
-                {tr("welcome.peer", "Start with peer support")}
+                {tr("welcome.peer", "Browse our listeners")}
               </Button>
               <Button variant="outline" className="justify-start gap-2" onClick={() => (window.location.href = "/therapists")}>
                 <Users className="h-4 w-4" />

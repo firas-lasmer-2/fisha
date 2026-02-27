@@ -9,8 +9,10 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import type {
   ListenerApplication,
   ListenerProfile,
@@ -59,7 +61,9 @@ export default function ListenerDashboardPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [isAvailable, setIsAvailable] = useState(false);
-
+  const [headlineInput, setHeadlineInput] = useState("");
+  const [aboutMeInput, setAboutMeInput] = useState("");
+  const [avatarEmojiInput, setAvatarEmojiInput] = useState("🤝");
   const { data: listenerData, isLoading } = useQuery<ListenerApplicationPayload>({
     queryKey: ["/api/listener/application"],
   });
@@ -80,20 +84,49 @@ export default function ListenerDashboardPage() {
     if (typeof listenerData?.profile?.isAvailable === "boolean") {
       setIsAvailable(listenerData.profile.isAvailable);
     }
-  }, [listenerData?.profile?.isAvailable]);
+    if (listenerData?.profile) {
+      const p = listenerData.profile;
+      setHeadlineInput((p as any).headline ?? "");
+      setAboutMeInput((p as any).aboutMe ?? "");
+      setAvatarEmojiInput((p as any).avatarEmoji ?? "🤝");
+    }
+  }, [listenerData?.profile]);
 
-  const availabilityMutation = useMutation({
-    mutationFn: async (nextValue: boolean) => {
-      await apiRequest("POST", "/api/listener/availability", { isAvailable: nextValue });
+  const pauseMutation = useMutation({
+    mutationFn: async (pause: boolean) => {
+      await apiRequest("POST", "/api/listener/availability", { isAvailable: !pause });
+    },
+    onSuccess: (_data, pause) => {
+      setIsAvailable(!pause);
+      queryClient.invalidateQueries({ queryKey: ["/api/listener/application"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/listeners/browse"] });
+      toast({
+        title: pause
+          ? "You are now paused. You won't appear in the directory until you resume."
+          : "You are back online. Clients can find you in the directory.",
+      });
+    },
+    onError: () => {
+      toast({ title: "Failed to update status.", variant: "destructive" });
+    },
+  });
+
+  const saveProfileMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("PATCH", "/api/listener/profile", {
+        headline: headlineInput.trim() || undefined,
+        aboutMe: aboutMeInput.trim() || undefined,
+        avatarEmoji: avatarEmojiInput || undefined,
+      });
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/listener/application"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/peer/sessions"] });
-      toast({ title: t("listener.availability_updated") });
+      queryClient.invalidateQueries({ queryKey: ["/api/listeners/browse"] });
+      toast({ title: "Profile updated." });
     },
     onError: () => {
-      setIsAvailable((prev) => !prev);
-      toast({ title: t("listener.availability_error"), variant: "destructive" });
+      toast({ title: "Failed to update profile.", variant: "destructive" });
     },
   });
 
@@ -203,19 +236,30 @@ export default function ListenerDashboardPage() {
 
                 <div className="flex items-center justify-between border rounded-md p-3">
                   <div>
-                    <p className="text-sm font-medium">{t("listener.accept_sessions")}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {t("listener.accept_sessions_desc")}
+                    <p className="text-sm font-medium flex items-center gap-2">
+                      <span className={`h-2.5 w-2.5 rounded-full ${activeSessions.length > 0 ? "bg-amber-500" : isAvailable ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/40"}`} />
+                      {activeSessions.length > 0
+                        ? "Currently in a session"
+                        : isAvailable
+                        ? "Available — clients can find you"
+                        : "Paused — you're hidden from the directory"}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {activeSessions.length > 0
+                        ? "You'll be available again once the session ends."
+                        : "Your availability updates automatically when a session starts or ends."}
                     </p>
                   </div>
-                  <Switch
-                    checked={isAvailable}
-                    onCheckedChange={(nextValue) => {
-                      setIsAvailable(nextValue);
-                      availabilityMutation.mutate(nextValue);
-                    }}
-                    disabled={availabilityMutation.isPending}
-                  />
+                  {activeSessions.length === 0 && profile?.verificationStatus === "approved" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={pauseMutation.isPending}
+                      onClick={() => pauseMutation.mutate(isAvailable)}
+                    >
+                      {isAvailable ? "Pause" : "Resume"}
+                    </Button>
+                  )}
                 </div>
 
                 {(!profile || profile.verificationStatus !== "approved") && (
@@ -248,6 +292,59 @@ export default function ListenerDashboardPage() {
                 )}
               </>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Public Profile Card */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Your Public Profile</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="avatar-emoji">Avatar emoji</Label>
+              <div className="flex flex-wrap gap-2">
+                {["🤝", "🌱", "💙", "🌊", "🕊️", "🌸", "✨", "🌿", "💬", "🫂", "🌞", "🍀", "🌈", "🎋", "💚", "🦋", "🌻", "🪷", "🫶", "🙏"].map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => setAvatarEmojiInput(emoji)}
+                    className={`h-9 w-9 text-lg rounded-md border transition-colors ${avatarEmojiInput === emoji ? "border-primary bg-primary/10" : "hover:bg-muted"}`}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="headline">Headline <span className="text-muted-foreground text-xs">(shown to clients)</span></Label>
+              <Input
+                id="headline"
+                value={headlineInput}
+                onChange={(e) => setHeadlineInput(e.target.value)}
+                maxLength={120}
+                placeholder="e.g. Here to listen, no judgment."
+              />
+              <p className="text-xs text-muted-foreground text-right">{headlineInput.length}/120</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="about-me">About me <span className="text-muted-foreground text-xs">(optional)</span></Label>
+              <Textarea
+                id="about-me"
+                value={aboutMeInput}
+                onChange={(e) => setAboutMeInput(e.target.value)}
+                maxLength={2000}
+                rows={4}
+                placeholder="Share a bit about your approach and what topics you're comfortable supporting."
+              />
+              <p className="text-xs text-muted-foreground text-right">{aboutMeInput.length}/2000</p>
+            </div>
+            <Button
+              onClick={() => saveProfileMutation.mutate()}
+              disabled={saveProfileMutation.isPending}
+            >
+              {saveProfileMutation.isPending ? "Saving..." : "Save profile"}
+            </Button>
           </CardContent>
         </Card>
 

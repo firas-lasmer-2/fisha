@@ -168,6 +168,15 @@ export default function TherapistProfilePage() {
     (s) => s.status === "active" && s.sessionsRemaining > 0,
   ) ?? null;
 
+  // Gate reviews: only users who have had a confirmed/completed appointment with this therapist can review
+  const { data: myAppointments = [] } = useQuery<Appointment[]>({
+    queryKey: ["/api/appointments"],
+    enabled: !!user,
+  });
+  const hasInteractedWithTherapist = myAppointments.some(
+    (a) => a.therapistId === userId && ["confirmed", "completed"].includes(a.status),
+  );
+
   const confirmBookingMutation = useMutation({
     mutationFn: async (payMethod?: "flouci" | "konnect" | "subscription") => {
       if (!selectedSlotId) throw new Error("No slot selected");
@@ -380,9 +389,15 @@ export default function TherapistProfilePage() {
                         {t("therapist.verified")}
                       </Badge>
                     )}
-                    <Badge variant="outline">
-                      {profile.tier === "graduated_doctor" ? t("tier.graduated_doctor_therapist") : t("tier.premium_doctor_therapist")}
-                    </Badge>
+                    {profile.tier === "premium_doctor" ? (
+                      <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-400/50 gap-1">
+                        ✦ {t("tier.premium_doctor_therapist")}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline">
+                        {t("tier.graduated_doctor_therapist")}
+                      </Badge>
+                    )}
                   </div>
 
                   {profile.headline && (
@@ -451,20 +466,24 @@ export default function TherapistProfilePage() {
                     )}
                   </div>
 
-                  {profile.rateDinar && (
-                    <div className="flex items-center gap-1" data-testid="text-rate">
-                      <span className="text-xl font-bold text-primary">{profile.rateDinar}</span>
-                      <span className="text-sm text-muted-foreground">
-                        {t("common.dinar")} / {t("therapist.per_session")}
+                  <div className="flex flex-col gap-0.5" data-testid="text-rate">
+                    <span className="flex items-center gap-1.5 text-sm font-medium text-primary">
+                      <MessageCircle className="h-3.5 w-3.5" />
+                      {t("therapist.free_to_message") === "therapist.free_to_message" ? "Free to message" : t("therapist.free_to_message")}
+                    </span>
+                    {profile.rateDinar && (
+                      <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <Video className="h-3.5 w-3.5" />
+                        {profile.rateDinar} {t("common.dinar")} / {t("therapist.per_session")}
                       </span>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
                   <div className="flex items-center gap-2 flex-wrap pt-1">
                     <Link href={`/messages?therapist=${userId}`}>
                       <Button size="sm" className="gap-1.5" data-testid="button-message-hero">
                         <MessageCircle className="h-3.5 w-3.5" />
-                        Send a free message
+                        {t("profile.send_message")}
                       </Button>
                     </Link>
                     <Button
@@ -475,7 +494,9 @@ export default function TherapistProfilePage() {
                       data-testid="button-book-session-hero"
                     >
                       <Calendar className="h-3.5 w-3.5" />
-                      Book a 20 TND session
+                      {profile.rateDinar
+                        ? `${t("profile.book_session")} · ${profile.rateDinar} ${t("common.dinar")}`
+                        : t("profile.book_session")}
                     </Button>
                     <Button
                       size="sm"
@@ -1082,7 +1103,7 @@ export default function TherapistProfilePage() {
                 ) : null}
               </CardTitle>
 
-              {user && (
+              {user && hasInteractedWithTherapist && (
                 <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
                   <DialogTrigger asChild>
                     <Button size="sm" data-testid="button-write-review">
@@ -1151,6 +1172,11 @@ export default function TherapistProfilePage() {
                     </div>
                   </DialogContent>
                 </Dialog>
+              )}
+              {user && !hasInteractedWithTherapist && (
+                <p className="text-xs text-muted-foreground italic">
+                  Book a session to leave a review.
+                </p>
               )}
             </CardHeader>
             <CardContent>
@@ -1247,7 +1273,7 @@ export default function TherapistProfilePage() {
 
       <div className="fixed bottom-0 left-0 right-0 sm:hidden z-40 glass-effect border-t p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]" data-testid="sticky-cta-bar">
         <div className="flex items-center gap-2 max-w-4xl mx-auto">
-          <Link href={`/messages`} className="flex-1">
+          <Link href={`/messages?therapist=${userId}`} className="flex-1">
             <Button
               variant="outline"
               className="w-full gap-1.5"
@@ -1270,7 +1296,7 @@ export default function TherapistProfilePage() {
 
       <div className="hidden sm:block fixed bottom-6 end-6 z-40" data-testid="desktop-cta-buttons">
         <div className="flex items-center gap-2">
-          <Link href={`/messages`}>
+          <Link href={`/messages?therapist=${userId}`}>
             <Button
               variant="outline"
               className="gap-1.5 shadow-lg"

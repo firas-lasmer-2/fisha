@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useI18n } from "@/lib/i18n";
 import { useQuery } from "@tanstack/react-query";
-import type { MoodEntry, OnboardingResponse } from "@shared/schema";
+import type { MoodEntry, OnboardingResponse, JournalEntry } from "@shared/schema";
 import { Brain, HandHeart, Sparkles, Wind } from "lucide-react";
 import { Link } from "wouter";
 
@@ -27,12 +27,15 @@ export default function GrowPage() {
     queryKey: ["/api/mood"],
   });
 
+  const { data: journalEntries = [] } = useQuery<JournalEntry[]>({
+    queryKey: ["/api/journal"],
+  });
+
   const { data: onboarding } = useQuery<OnboardingResponse | null>({
     queryKey: ["/api/onboarding"],
   });
 
   const primaryConcerns = onboarding?.primaryConcerns || [];
-  const activityUnits = Math.min(15, moods.length);
 
   return (
     <AppLayout>
@@ -45,7 +48,12 @@ export default function GrowPage() {
         <div className="grid gap-4 sm:grid-cols-2">
           {paths.map((path) => {
             const isRecommended = primaryConcerns.includes(path.key);
-            const rawCompleted = Math.floor(activityUnits / 3) + (isRecommended ? 2 : 1);
+            const moodUnits = Math.min(path.steps, moods.length);
+            const journalUnits = Math.min(path.steps, journalEntries.length);
+            const rawCompleted =
+              path.key === "anxiety" || path.key === "stress"
+                ? Math.floor(moodUnits / 2) + (isRecommended ? 1 : 0)
+                : Math.floor(journalUnits / 2) + (isRecommended ? 1 : 0);
             const completed = Math.max(1, Math.min(path.steps, rawCompleted));
             const progress = Math.round((completed / path.steps) * 100);
             const Icon = path.icon;

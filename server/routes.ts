@@ -2354,6 +2354,8 @@ export async function registerRoutes(
       );
 
       res.json({ session: ended, durationMinutes });
+      // Fire-and-forget stat sync
+      storage.syncListenerBrowseStats(ended.listenerId).catch(() => {});
     } catch (error) {
       res.status(500).json({ message: "Failed to end peer session" });
     }
@@ -2510,6 +2512,8 @@ export async function registerRoutes(
       });
 
       res.status(201).json({ feedback, listenerProgress: progress });
+      // Fire-and-forget stat sync
+      storage.syncListenerBrowseStats(session.listenerId).catch(() => {});
     } catch (error) {
       res.status(500).json({ message: "Failed to submit peer feedback" });
     }
@@ -3343,6 +3347,98 @@ export async function registerRoutes(
       res.json(updated);
     } catch {
       res.status(500).json({ message: "Failed to review tier upgrade request" });
+    }
+  });
+
+  // ---- Listener Directory ----
+
+  // Public browse — no auth required
+  app.get("/api/listeners/browse", async (req, res) => {
+    try {
+      const language = typeof req.query.language === "string" ? req.query.language : undefined;
+      const topic = typeof req.query.topic === "string" ? req.query.topic : undefined;
+      const availableOnly = req.query.available === "1" || req.query.available === "true";
+      const listeners = await storage.getBrowsableListeners({ language, topic, availableOnly });
+      res.json(listeners);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch listeners" });
+    }
+  });
+
+  // Start a session directly with a specific listener
+  app.post("/api/peer/session/direct", isAuthenticated, async (req: any, res) => {
+    try {
+      const clientId = req.user.id;
+      const { listenerId } = req.body;
+      if (!listenerId || typeof listenerId !== "string") {
+        return res.status(400).json({ message: "listenerId is required" });
+      }
+
+      // Validate listener exists and is available
+      const profile = await storage.getListenerProfile(listenerId);
+      if (!profile) return res.status(404).json({ message: "Listener not found" });
+      if (profile.verificationStatus !== "approved") {
+        return res.status(403).json({ message: "Listener is not approved" });
+      }
+      if (!["trial", "live"].includes(profile.activationStatus)) {
+        return res.status(403).json({ message: "Listener is not active" });
+      }
+      if (!profile.isAvailable) {
+        return res.status(409).json({ message: "Listener is currently busy" });
+      }
+
+      // Mark listener unavailable and create session
+      await storage.setListenerAvailability(listenerId, false);
+      const session = await storage.createPeerSession({ clientId, listenerId });
+      res.status(201).json(session);
+    } catch {
+      res.status(500).json({ message: "Failed to start session" });
+    }
+  });
+
+  // Listener updates their own public profile fields
+  app.patch("/api/listener/profile", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const profile = await storage.getListenerProfile(userId);
+      if (!profile) return res.status(403).json({ message: "Not a listener" });
+
+      const { headline, aboutMe, avatarEmoji } = req.body;
+      const updates: Record<string, unknown> = {};
+      if (headline !== undefined) {
+        if (typeof headline !== "string" || headline.length > 120) {
+          return res.status(400).json({ message: "headline must be a string ≤ 120 chars" });
+        }
+        updates.headline = headline;
+      }
+      if (aboutMe !== undefined) {
+        if (typeof aboutMe !== "string" || aboutMe.length > 2000) {
+          return res.status(400).json({ message: "aboutMe must be a string ≤ 2000 chars" });
+        }
+        updates.about_me = aboutMe;
+      }
+      if (avatarEmoji !== undefined) {
+        if (typeof avatarEmoji !== "string" || avatarEmoji.length > 10) {
+          return res.status(400).json({ message: "avatarEmoji must be a string ≤ 10 chars" });
+        }
+        updates.avatar_emoji = avatarEmoji;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "No valid fields to update" });
+      }
+
+      const { data, error } = await (await import("./supabase")).supabaseAdmin
+        .from("listener_profiles")
+        .update(updates)
+        .eq("user_id", userId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json(data);
+    } catch {
+      res.status(500).json({ message: "Failed to update listener profile" });
     }
   });
 
