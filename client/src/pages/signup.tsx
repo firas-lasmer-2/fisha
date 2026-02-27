@@ -54,7 +54,7 @@ export default function SignupPage() {
       }
 
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      window.location.href = "/onboarding";
+      window.location.href = role === "therapist" ? "/therapist-dashboard" : "/onboarding";
     } catch {
       toast({ title: t("common.error"), variant: "destructive" });
     } finally {

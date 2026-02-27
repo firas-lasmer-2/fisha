@@ -54,7 +54,7 @@ import { PaymentDialog } from "@/components/payment-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useOnlineTherapists } from "@/hooks/use-online-therapists";
 import { motion } from "framer-motion";
-import type { Appointment, TherapistProfile, TherapistSlot, User, TherapistReview } from "@shared/schema";
+import type { Appointment, TherapistProfile, TherapistSlot, User, TherapistReview, UserSubscription } from "@shared/schema";
 
 const sectionVariants = {
   hidden: { opacity: 0, y: 30 },
@@ -160,8 +160,16 @@ export default function TherapistProfilePage() {
     enabled: !!userId,
   });
 
+  const { data: userSubscriptions = [] } = useQuery<UserSubscription[]>({
+    queryKey: ["/api/subscriptions/mine"],
+    enabled: !!user,
+  });
+  const activeSub = userSubscriptions.find(
+    (s) => s.status === "active" && s.sessionsRemaining > 0,
+  ) ?? null;
+
   const confirmBookingMutation = useMutation({
-    mutationFn: async (payMethod?: "flouci" | "konnect") => {
+    mutationFn: async (payMethod?: "flouci" | "konnect" | "subscription") => {
       if (!selectedSlotId) throw new Error("No slot selected");
       const res = await apiRequest("POST", `/api/appointments/from-slot/${selectedSlotId}`, {
         sessionType: selectedSessionType,
@@ -1293,6 +1301,7 @@ export default function TherapistProfilePage() {
             : "Therapist"
         }
         therapistTier={profile?.tier}
+        activeSubscription={activeSub}
         isPending={confirmBookingMutation.isPending}
         onConfirm={async (method) => {
           const result = await confirmBookingMutation.mutateAsync(method);

@@ -591,6 +591,8 @@ export interface TherapistVerification {
   reviewerNotes: string | null;
   submittedAt: string | null;
   reviewedAt: string | null;
+  slaDeadline: string | null;
+  priority: "normal" | "urgent" | "low";
 }
 
 export const insertTherapistVerificationSchema = z.object({
@@ -612,6 +614,8 @@ export function mapTherapistVerification(row: any): TherapistVerification {
     reviewerNotes: row.reviewer_notes,
     submittedAt: row.submitted_at,
     reviewedAt: row.reviewed_at,
+    slaDeadline: row.sla_deadline ?? null,
+    priority: row.priority ?? "normal",
   };
 }
 
@@ -1435,7 +1439,7 @@ export type LandingSection =
   | { type: "testimonials"; enabled: boolean; maxCount?: number }
   | { type: "faq"; enabled: boolean }
   | { type: "slots"; enabled: boolean }
-  | { type: "video"; enabled: boolean }
+  | { type: "video"; enabled: boolean; videoUrl?: string }
   | { type: "office_photos"; enabled: boolean }
   | { type: "social_links"; enabled: boolean }
   | { type: "custom_text"; enabled: boolean; title: string; content: string }
@@ -1457,3 +1461,103 @@ export const DEFAULT_LANDING_SECTIONS: LandingSection[] = [
   { type: "office_photos", enabled: false },
   { type: "social_links", enabled: false },
 ];
+
+// ── Phase B: Subscription model ──────────────────────────────────────────────
+
+export interface SubscriptionPlan {
+  id: number;
+  name: string;
+  nameAr: string | null;
+  nameFr: string | null;
+  description: string | null;
+  sessionsIncluded: number;
+  priceDinar: number;
+  durationDays: number;
+  tierRestriction: TherapistTier | null;
+  isActive: boolean;
+  createdAt: string | null;
+}
+
+export interface UserSubscription {
+  id: number;
+  userId: string;
+  planId: number;
+  therapistId: string | null;
+  sessionsRemaining: number;
+  startsAt: string;
+  expiresAt: string;
+  status: "active" | "expired" | "cancelled";
+  paymentTransactionId: number | null;
+  createdAt: string | null;
+  plan?: SubscriptionPlan;
+}
+
+export interface MatchingPreferences {
+  userId: string;
+  preferredSpecializations: string[] | null;
+  preferredLanguages: string[] | null;
+  preferredGender: string | null;
+  maxBudgetDinar: number | null;
+  sessionTypePreference: "online" | "in_person" | "any" | null;
+  updatedAt: string | null;
+}
+
+// Mappers
+export function mapSubscriptionPlan(row: any): SubscriptionPlan {
+  return {
+    id: row.id,
+    name: row.name,
+    nameAr: row.name_ar,
+    nameFr: row.name_fr,
+    description: row.description,
+    sessionsIncluded: row.sessions_included,
+    priceDinar: row.price_dinar,
+    durationDays: row.duration_days,
+    tierRestriction: row.tier_restriction ?? null,
+    isActive: row.is_active,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapUserSubscription(row: any): UserSubscription {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    planId: row.plan_id,
+    therapistId: row.therapist_id ?? null,
+    sessionsRemaining: row.sessions_remaining,
+    startsAt: row.starts_at,
+    expiresAt: row.expires_at,
+    status: row.status,
+    paymentTransactionId: row.payment_transaction_id ?? null,
+    createdAt: row.created_at,
+    plan: row.subscription_plans ? mapSubscriptionPlan(row.subscription_plans) : undefined,
+  };
+}
+
+export function mapMatchingPreferences(row: any): MatchingPreferences {
+  return {
+    userId: row.user_id,
+    preferredSpecializations: row.preferred_specializations ?? null,
+    preferredLanguages: row.preferred_languages ?? null,
+    preferredGender: row.preferred_gender ?? null,
+    maxBudgetDinar: row.max_budget_dinar ?? null,
+    sessionTypePreference: row.session_type_preference ?? null,
+    updatedAt: row.updated_at,
+  };
+}
+
+// Zod schemas
+export const purchaseSubscriptionSchema = z.object({
+  planId: z.number().int().positive(),
+  therapistId: z.string().uuid().optional(),
+  paymentMethod: z.enum(["flouci", "konnect"]),
+});
+
+export const matchingPreferencesSchema = z.object({
+  preferredSpecializations: z.array(z.string()).optional(),
+  preferredLanguages: z.array(z.string()).optional(),
+  preferredGender: z.enum(["male", "female", "any"]).optional(),
+  maxBudgetDinar: z.number().positive().optional(),
+  sessionTypePreference: z.enum(["online", "in_person", "any"]).optional(),
+});

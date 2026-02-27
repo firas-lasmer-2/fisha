@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: Type-check & build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+        env:
+          NODE_ENV: production
+          # Stub required env vars so build doesn't error on missing keys
+          DATABASE_URL: "postgresql://stub:stub@localhost/stub"
+          SUPABASE_URL: "https://stub.supabase.co"
+          SUPABASE_ANON_KEY: "stub"
+          SUPABASE_SERVICE_ROLE_KEY: "stub"
+
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test --if-present
+        env:
+          NODE_ENV: test

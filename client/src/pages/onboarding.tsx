@@ -1,6 +1,8 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { useI18n } from "@/lib/i18n";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/use-auth";
+import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +48,17 @@ const DISPLAY_NAME_REGEX = /^[a-zA-Z0-9\u0600-\u06FF_]{3,30}$/;
 export default function OnboardingPage() {
   const { t, isRTL } = useI18n();
   const { toast } = useToast();
+  const { user } = useAuth();
+  const [, navigate] = useLocation();
+
+  // Non-client roles should never see client onboarding
+  useEffect(() => {
+    if (user && user.role !== "client") {
+      if (user.role === "therapist") navigate("/therapist-dashboard");
+      else if (user.role === "listener") navigate("/listener/dashboard");
+      else navigate("/dashboard");
+    }
+  }, [user, navigate]);
   const [step, setStep] = useState(0);
   const [concerns, setConcerns] = useState<string[]>([]);
   const [preferredLanguage, setPreferredLanguage] = useState("");

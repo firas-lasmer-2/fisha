@@ -309,13 +309,34 @@ export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderPro
                     </>
                   )}
 
-                  {["gallery", "certifications", "pricing", "contact_form", "consultation_intro"].includes(section.type) && (
+                  {section.type === "video" && (
+                    <div>
+                      <label className="text-xs text-muted-foreground">YouTube / Vimeo URL</label>
+                      <Input
+                        className="mt-1"
+                        value={(section as any).videoUrl ?? ""}
+                        onChange={(e) => updateSection(index, { videoUrl: e.target.value } as any)}
+                        placeholder="https://youtube.com/watch?v=..."
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Paste a YouTube or Vimeo link. It will be embedded on your page.
+                      </p>
+                    </div>
+                  )}
+
+                  {["gallery", "certifications", "pricing", "consultation_intro"].includes(section.type) && (
                     <p className="text-xs text-muted-foreground">
                       Content is pulled from your profile data. Toggle to show/hide on your page.
                     </p>
                   )}
 
-                  {!["custom_text", "testimonials", "banner", "gallery", "certifications", "pricing", "contact_form", "consultation_intro"].includes(section.type) && (
+                  {section.type === "contact_form" && (
+                    <p className="text-xs text-muted-foreground">
+                      Shows a "Send a message" button that links to your in-app profile so visitors can contact you.
+                    </p>
+                  )}
+
+                  {!["custom_text", "testimonials", "banner", "gallery", "certifications", "pricing", "contact_form", "consultation_intro", "video"].includes(section.type) && (
                     <p className="text-xs text-muted-foreground">
                       This section has no configurable settings. Toggle it on/off above.
                     </p>

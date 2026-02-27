@@ -12,7 +12,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
-import { Calendar, Clock, CreditCard, Loader2, GraduationCap } from "lucide-react";
+import { Calendar, Clock, CreditCard, Loader2, GraduationCap, PackageCheck } from "lucide-react";
+import type { UserSubscription } from "@shared/schema";
 
 export interface PaymentDialogSlot {
   id: number;
@@ -21,13 +22,17 @@ export interface PaymentDialogSlot {
   priceDinar: number;
 }
 
+type PaymentMethod = "flouci" | "konnect" | "subscription";
+
 interface PaymentDialogProps {
   open: boolean;
   onClose: () => void;
   slot: PaymentDialogSlot | null;
   therapistName: string;
   therapistTier?: "graduated_doctor" | "premium_doctor";
-  onConfirm: (paymentMethod: "flouci" | "konnect") => Promise<void>;
+  /** Pass an active subscription if the client has one usable for this slot */
+  activeSubscription?: UserSubscription | null;
+  onConfirm: (paymentMethod: PaymentMethod) => Promise<void>;
   isPending?: boolean;
 }
 
@@ -37,16 +42,24 @@ export function PaymentDialog({
   slot,
   therapistName,
   therapistTier,
+  activeSubscription,
   onConfirm,
   isPending,
 }: PaymentDialogProps) {
-  const [paymentMethod, setPaymentMethod] = useState<"flouci" | "konnect">("flouci");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(
+    activeSubscription ? "subscription" : "flouci",
+  );
   const [termsAccepted, setTermsAccepted] = useState(false);
 
   if (!slot) return null;
 
   const startDate = new Date(slot.startsAt);
   const isFree = slot.priceDinar === 0;
+  const canUseSubscription =
+    !isFree &&
+    activeSubscription &&
+    activeSubscription.sessionsRemaining > 0 &&
+    activeSubscription.status === "active";
 
   const handleConfirm = async () => {
     await onConfirm(paymentMethod);
@@ -95,13 +108,20 @@ export function PaymentDialog({
                     Cap 20 TND
                   </Badge>
                 )}
-                <span className="text-lg font-bold">
-                  {isFree ? (
-                    <Badge variant="secondary">Free</Badge>
-                  ) : (
-                    `${slot.priceDinar} د.ت`
-                  )}
-                </span>
+                {paymentMethod === "subscription" ? (
+                  <Badge variant="secondary" className="gap-1">
+                    <PackageCheck className="h-3 w-3" />
+                    1 credit
+                  </Badge>
+                ) : (
+                  <span className="text-lg font-bold">
+                    {isFree ? (
+                      <Badge variant="secondary">Free</Badge>
+                    ) : (
+                      `${slot.priceDinar} د.ت`
+                    )}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -112,9 +132,27 @@ export function PaymentDialog({
               <p className="text-sm font-medium">Payment method</p>
               <RadioGroup
                 value={paymentMethod}
-                onValueChange={(v) => setPaymentMethod(v as "flouci" | "konnect")}
+                onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}
                 className="space-y-2"
               >
+                {/* Subscription credit option (shown first if available) */}
+                {canUseSubscription && (
+                  <div className="flex items-center space-x-3 rounded-lg border p-3 border-primary/40 bg-primary/5">
+                    <RadioGroupItem value="subscription" id="pay-sub" />
+                    <Label htmlFor="pay-sub" className="flex-1 cursor-pointer">
+                      <p className="font-medium">Subscription credit</p>
+                      <p className="text-xs text-muted-foreground">
+                        {activeSubscription!.sessionsRemaining} session
+                        {activeSubscription!.sessionsRemaining !== 1 ? "s" : ""} remaining
+                        {activeSubscription!.plan
+                          ? ` · ${activeSubscription!.plan.nameAr ?? activeSubscription!.plan.name}`
+                          : ""}
+                      </p>
+                    </Label>
+                    <PackageCheck className="h-5 w-5 text-primary" />
+                  </div>
+                )}
+
                 <div className="flex items-center space-x-3 rounded-lg border p-3">
                   <RadioGroupItem value="flouci" id="pay-flouci" />
                   <Label htmlFor="pay-flouci" className="flex-1 cursor-pointer">
@@ -159,7 +197,7 @@ export function PaymentDialog({
             >
               {isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
-              ) : isFree ? (
+              ) : isFree || paymentMethod === "subscription" ? (
                 "Confirm booking"
               ) : (
                 "Confirm & Pay"

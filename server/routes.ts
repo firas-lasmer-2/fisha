@@ -9,8 +9,9 @@ import { mapProfile, type User,
   sendMessageRequestSchema, moodEntryRequestSchema, journalEntryRequestSchema,
   onboardingRequestSchema, reviewRequestSchema, slotCreateRequestSchema,
   paymentInitiateRequestSchema, queueJoinRequestSchema, peerMessageRequestSchema,
+  purchaseSubscriptionSchema, matchingPreferencesSchema,
 } from "@shared/schema";
-import { authLimiter, webhookLimiter, paymentLimiter, bookingLimiter } from "./middleware/rate-limit";
+import { authLimiter, webhookLimiter, paymentLimiter, bookingLimiter, displayNameLimiter } from "./middleware/rate-limit";
 import { QUALIFICATION_QUESTIONS, scoreAnswers } from "@shared/qualification-questions";
 import { validateBody } from "./middleware/validate";
 import { logAudit } from "./audit";
@@ -24,6 +25,7 @@ import {
   sendWelcome,
 } from "./email";
 import { moderateContent } from "./moderation";
+import { matchTherapists, type TherapistCandidate } from "./matching";
 
 // Crisis keywords for auto-detection (Arabic, French, Tunisian dialect)
 const CRISIS_KEYWORDS = [
@@ -518,19 +520,35 @@ export async function registerRoutes(
       delete payload.tierApprovedBy;
       delete payload.tierApprovedAt;
 
-      // Sanitize custom_css: strip anything that isn't a safe CSS property/value
-      if (typeof payload.customCss === "string") {
-        const SAFE_CSS_PROPS = /^(color|background(-color)?|font-(size|weight|family|style)|text-(align|decoration|transform)|margin|padding|border(-radius|-color|-width|-style)?|width|max-width|min-width|height|max-height|min-height|display|flex(-(direction|wrap|grow|shrink|basis|flow))?|gap|align-(items|self|content)|justify-(content|self|items)|opacity|line-height|letter-spacing|white-space|overflow(-x|-y)?|box-shadow|cursor|list-style)$/i;
-        const sanitized = (payload.customCss as string)
-          .split(";")
-          .filter((decl: string) => {
-            const [prop] = decl.split(":").map((s: string) => s.trim());
-            return prop && SAFE_CSS_PROPS.test(prop);
-          })
-          .join(";");
-        payload.customCss = sanitized;
-      } else if (payload.customCss !== undefined && payload.customCss !== null) {
-        delete payload.customCss;
+      // Sanitize custom_css: only allow structured theme tokens (JSONB object).
+      // Rejects arbitrary CSS strings to prevent XSS / style injection.
+      // Allowed keys: primaryColor, accentColor, fontFamily, borderRadius.
+      if (payload.customCss !== undefined && payload.customCss !== null) {
+        const ALLOWED_KEYS = ["primaryColor", "accentColor", "fontFamily", "borderRadius"] as const;
+        const COLOR_RE = /^#[0-9a-fA-F]{3,8}$|^(rgb|hsl)a?\([^)]{0,80}\)$/;
+        const FONT_RE = /^[a-zA-Z0-9 ,'\-]{1,80}$/;
+        const RADIUS_RE = /^(\d+(\.\d+)?(px|rem|em|%)?\s*){1,4}$/;
+
+        if (typeof payload.customCss !== "object" || Array.isArray(payload.customCss)) {
+          delete payload.customCss;
+        } else {
+          const raw = payload.customCss as Record<string, unknown>;
+          const sanitized: Record<string, string> = {};
+          if (typeof raw.primaryColor === "string" && COLOR_RE.test(raw.primaryColor)) {
+            sanitized.primaryColor = raw.primaryColor;
+          }
+          if (typeof raw.accentColor === "string" && COLOR_RE.test(raw.accentColor)) {
+            sanitized.accentColor = raw.accentColor;
+          }
+          if (typeof raw.fontFamily === "string" && FONT_RE.test(raw.fontFamily)) {
+            sanitized.fontFamily = raw.fontFamily;
+          }
+          if (typeof raw.borderRadius === "string" && RADIUS_RE.test(raw.borderRadius)) {
+            sanitized.borderRadius = raw.borderRadius;
+          }
+          payload.customCss = Object.keys(sanitized).length > 0 ? sanitized : null;
+          void ALLOWED_KEYS; // consumed above
+        }
       }
 
       const nextRate =
@@ -980,6 +998,7 @@ export async function registerRoutes(
 
       const clientId = req.user.id;
       const paymentMethod: string = req.body.paymentMethod || "flouci";
+      const useSubscription = paymentMethod === "subscription";
       const result = await storage.createAppointmentFromSlot(
         slotId,
         clientId,
@@ -1030,36 +1049,249 @@ export async function registerRoutes(
       // Auto-initiate payment if price > 0
       let paymentUrl: string | null = null;
       if (result.slot.priceDinar > 0) {
-        const transaction = await storage.createPaymentTransaction({
-          clientId,
-          therapistId: result.appointment.therapistId,
-          appointmentId: result.appointment.id,
-          amountDinar: result.slot.priceDinar,
-          paymentMethod,
-          status: "pending",
-        });
-
-        try {
-          const origin = req.headers.origin || `${req.protocol}://${req.headers.host}`;
-          const successUrl = `${origin}/appointments?payment=success&txn=${transaction.id}`;
-          const failUrl = `${origin}/appointments?payment=failed&txn=${transaction.id}`;
-          const amountMillimes = Math.round(result.slot.priceDinar * 1000);
-          if (paymentMethod === "konnect") {
-            const r = await createKonnectPayment(amountMillimes, transaction.id, successUrl, failUrl);
-            paymentUrl = r.redirectUrl;
-          } else {
-            const r = await createFlouciPayment(amountMillimes, transaction.id, successUrl, failUrl);
-            paymentUrl = r.redirectUrl;
+        if (useSubscription) {
+          // Deduct one session credit from an active subscription
+          const activeSub = await storage.getActiveSubscription(clientId, result.appointment.therapistId);
+          if (!activeSub) {
+            return res.status(400).json({ message: "No active subscription with sessions remaining" });
           }
-        } catch (payErr) {
-          console.error("[payment] Auto-initiate failed:", payErr);
-          // Don't fail the booking; client can pay manually
+          await storage.deductSubscriptionSession(activeSub.id);
+          // No payment URL needed — credit already applied
+        } else {
+          const transaction = await storage.createPaymentTransaction({
+            clientId,
+            therapistId: result.appointment.therapistId,
+            appointmentId: result.appointment.id,
+            amountDinar: result.slot.priceDinar,
+            paymentMethod,
+            status: "pending",
+          });
+
+          try {
+            const origin = req.headers.origin || `${req.protocol}://${req.headers.host}`;
+            const successUrl = `${origin}/appointments?payment=success&txn=${transaction.id}`;
+            const failUrl = `${origin}/appointments?payment=failed&txn=${transaction.id}`;
+            const amountMillimes = Math.round(result.slot.priceDinar * 1000);
+            if (paymentMethod === "konnect") {
+              const r = await createKonnectPayment(amountMillimes, transaction.id, successUrl, failUrl);
+              paymentUrl = r.redirectUrl;
+            } else {
+              const r = await createFlouciPayment(amountMillimes, transaction.id, successUrl, failUrl);
+              paymentUrl = r.redirectUrl;
+            }
+          } catch (payErr) {
+            console.error("[payment] Auto-initiate failed:", payErr);
+            // Don't fail the booking; client can pay manually
+          }
         }
       }
 
       res.status(201).json({ ...result, paymentUrl });
     } catch (error) {
       res.status(500).json({ message: "Failed to create appointment from slot" });
+    }
+  });
+
+  // ── Subscription plans ──────────────────────────────────────────────────
+
+  app.get("/api/subscription-plans", async (_req, res) => {
+    try {
+      const plans = await storage.getSubscriptionPlans(true);
+      res.json(plans);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch subscription plans" });
+    }
+  });
+
+  // ── User subscriptions ───────────────────────────────────────────────────
+
+  app.get("/api/subscriptions/mine", isAuthenticated, async (req: any, res) => {
+    try {
+      const subs = await storage.getUserSubscriptions(req.user.id);
+      res.json(subs);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch subscriptions" });
+    }
+  });
+
+  app.post(
+    "/api/subscriptions",
+    isAuthenticated,
+    paymentLimiter,
+    validateBody(purchaseSubscriptionSchema),
+    async (req: any, res) => {
+      try {
+        const { planId, therapistId, paymentMethod } = req.body as {
+          planId: number;
+          therapistId?: string;
+          paymentMethod: "flouci" | "konnect";
+        };
+        const plan = await storage.getSubscriptionPlan(planId);
+        if (!plan || !plan.isActive) {
+          return res.status(404).json({ message: "Subscription plan not found or inactive" });
+        }
+
+        // Create pending payment transaction for the plan price
+        const txn = await storage.createPaymentTransaction({
+          clientId: req.user.id,
+          therapistId: therapistId ?? req.user.id, // use self as placeholder if platform-wide
+          amountDinar: plan.priceDinar,
+          paymentMethod,
+          status: "pending",
+        });
+
+        // Initiate payment with provider
+        let paymentUrl: string | null = null;
+        try {
+          const origin = req.headers.origin || `${req.protocol}://${req.headers.host}`;
+          const successUrl = `${origin}/dashboard?sub=success&txn=${txn.id}&plan=${planId}`;
+          const failUrl = `${origin}/dashboard?sub=failed&txn=${txn.id}`;
+          const amountMillimes = Math.round(plan.priceDinar * 1000);
+          if (paymentMethod === "konnect") {
+            const r = await createKonnectPayment(amountMillimes, txn.id, successUrl, failUrl);
+            paymentUrl = r.redirectUrl;
+          } else {
+            const r = await createFlouciPayment(amountMillimes, txn.id, successUrl, failUrl);
+            paymentUrl = r.redirectUrl;
+          }
+        } catch (err) {
+          console.error("[subscription] Payment init failed:", err);
+        }
+
+        res.status(201).json({ transactionId: txn.id, paymentUrl, plan });
+      } catch {
+        res.status(500).json({ message: "Failed to initiate subscription purchase" });
+      }
+    },
+  );
+
+  // Called by webhook handlers after payment confirmed — activates subscription
+  app.post("/api/subscriptions/activate", isAuthenticated, async (req: any, res) => {
+    try {
+      const { planId, paymentTransactionId, therapistId } = req.body as {
+        planId: number;
+        paymentTransactionId?: number;
+        therapistId?: string;
+      };
+      const plan = await storage.getSubscriptionPlan(planId);
+      if (!plan) return res.status(404).json({ message: "Plan not found" });
+      const sub = await storage.createUserSubscription({
+        userId: req.user.id,
+        planId,
+        sessionsIncluded: plan.sessionsIncluded,
+        durationDays: plan.durationDays,
+        therapistId,
+        paymentTransactionId,
+      });
+      res.status(201).json(sub);
+    } catch {
+      res.status(500).json({ message: "Failed to activate subscription" });
+    }
+  });
+
+  app.post("/api/subscriptions/:id/cancel", isAuthenticated, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) return res.status(400).json({ message: "Invalid id" });
+      const updated = await storage.cancelUserSubscription(id, req.user.id);
+      if (!updated) return res.status(404).json({ message: "Subscription not found" });
+      res.json(updated);
+    } catch {
+      res.status(500).json({ message: "Failed to cancel subscription" });
+    }
+  });
+
+  // ── Matching preferences ─────────────────────────────────────────────────
+
+  app.get("/api/matching/preferences", isAuthenticated, async (req: any, res) => {
+    try {
+      const prefs = await storage.getMatchingPreferences(req.user.id);
+      res.json(prefs ?? null);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch matching preferences" });
+    }
+  });
+
+  app.put(
+    "/api/matching/preferences",
+    isAuthenticated,
+    validateBody(matchingPreferencesSchema),
+    async (req: any, res) => {
+      try {
+        const prefs = await storage.upsertMatchingPreferences(req.user.id, {
+          preferredSpecializations: req.body.preferredSpecializations,
+          preferredLanguages: req.body.preferredLanguages,
+          preferredGender: req.body.preferredGender,
+          maxBudgetDinar: req.body.maxBudgetDinar,
+          sessionTypePreference: req.body.sessionTypePreference,
+        });
+        res.json(prefs);
+      } catch {
+        res.status(500).json({ message: "Failed to update matching preferences" });
+      }
+    },
+  );
+
+  // AI-powered therapist recommendations using saved preferences + onboarding
+  app.post("/api/matching/recommend", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+
+      // Fetch saved matching preferences and onboarding data in parallel
+      const [prefs, onboarding] = await Promise.all([
+        storage.getMatchingPreferences(userId),
+        storage.getOnboardingResponse(userId),
+      ]);
+
+      // Build match request from saved prefs + onboarding + optional body overrides
+      const concerns =
+        req.body.concerns ||
+        (prefs?.preferredSpecializations?.join(", ")) ||
+        (onboarding?.primaryConcerns?.join(", ")) ||
+        "general wellness";
+
+      const matchReq = {
+        concerns,
+        language: req.body.language || prefs?.preferredLanguages?.[0] || onboarding?.preferredLanguage || undefined,
+        gender: req.body.gender || prefs?.preferredGender || onboarding?.genderPreference || undefined,
+        budgetDinar: req.body.budgetDinar || prefs?.maxBudgetDinar || undefined,
+      };
+
+      // Fetch all active therapists and convert to candidates
+      const therapists = await storage.getTherapistProfiles({});
+      const now = new Date();
+      const in48h = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+
+      // Check which therapists have upcoming slots and which have had prior sessions
+      const priorAppointments = await storage.getAppointments(userId);
+      const priorTherapistIds = new Set(
+        (priorAppointments || []).map((a: any) => a.therapistId as string)
+      );
+
+      const candidates: TherapistCandidate[] = therapists.map((tp: any) => {
+        const user = tp.user as any;
+        const name = user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() || "Therapist" : "Therapist";
+        return {
+          id: tp.userId,
+          name,
+          specializations: tp.specializations || [],
+          languages: tp.languages || [],
+          rateDinar: tp.rateDinar ?? null,
+          rating: tp.rating ?? null,
+          gender: user?.gender ?? null,
+          yearsExperience: tp.yearsExperience ?? null,
+          verified: tp.verified ?? false,
+          hasAvailabilityIn48h: false, // simplified — would require slot query per therapist
+          hadPriorSession: priorTherapistIds.has(tp.userId),
+        };
+      });
+
+      const topK = Number(req.body.topK) || 3;
+      const results = await matchTherapists(candidates, matchReq, topK);
+      res.json(results);
+    } catch (err) {
+      console.error("[matching/recommend]", err);
+      res.status(500).json({ message: "Failed to generate recommendations" });
     }
   });
 
@@ -1174,7 +1406,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/user/display-name/check/:name", isAuthenticated, async (req: any, res) => {
+  app.get("/api/user/display-name/check/:name", isAuthenticated, displayNameLimiter, async (req: any, res) => {
     try {
       const { name } = req.params;
       const namePattern = /^[a-zA-Z0-9\u0600-\u06FF_]{3,30}$/;
@@ -1215,6 +1447,46 @@ export async function registerRoutes(
       res.json(backup);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch key backup" });
+    }
+  });
+
+  // GDPR-style data export — returns all user data as JSON
+  app.get("/api/user/data-export", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const [user, appointments, moods, journalEntries, onboarding, matchPrefs, subscriptions] = await Promise.all([
+        storage.getUser(userId),
+        storage.getAppointments(userId),
+        storage.getMoodEntries(userId, 365),
+        storage.getJournalEntries(userId),
+        storage.getOnboardingResponse(userId),
+        storage.getMatchingPreferences(userId),
+        storage.getUserSubscriptions(userId),
+      ]);
+
+      const exportData = {
+        exportedAt: new Date().toISOString(),
+        profile: user,
+        onboarding,
+        appointments: appointments.map((a) => ({
+          id: a.id,
+          scheduledAt: a.scheduledAt,
+          status: a.status,
+          sessionType: a.sessionType,
+          durationMinutes: a.durationMinutes,
+          therapistId: a.therapistId,
+        })),
+        moods,
+        journalEntries,
+        matchingPreferences: matchPrefs,
+        subscriptions,
+      };
+
+      res.setHeader("Content-Disposition", `attachment; filename="shifa-data-export-${userId.slice(0, 8)}.json"`);
+      res.setHeader("Content-Type", "application/json");
+      res.json(exportData);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to export data" });
     }
   });
 
@@ -2624,6 +2896,16 @@ export async function registerRoutes(
       res.json(data);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch revenue analytics" });
+    }
+  });
+
+  // Admin: all subscriptions
+  app.get("/api/admin/subscriptions", isAuthenticated, requireRoles(["admin"]), async (_req: any, res) => {
+    try {
+      const subs = await storage.getAllSubscriptions(200);
+      res.json(subs);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch subscriptions" });
     }
   });
 

@@ -1,6 +1,8 @@
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/components/app-layout";
+import { DashboardSidebarLayout } from "@/components/dashboard-sidebar-layout";
+import type { DashboardNavItem } from "@/components/dashboard-sidebar-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -8,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -50,8 +51,10 @@ import {
   X,
   SmilePlus,
   ArrowUpCircle,
+  LayoutDashboard,
+  Settings,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import type { TherapistProfile, TherapistReview, TherapistSlot, TherapistVerification, Appointment, User, DoctorPayout, SessionHomework, TierUpgradeRequest } from "@shared/schema";
 
 interface DashboardData {
@@ -79,10 +82,6 @@ export default function TherapistDashboardPage() {
   const { t, isRTL } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
-  const tr = (key: string, fallback: string) => {
-    const value = t(key);
-    return value === key ? fallback : value;
-  };
 
   const [headline, setHeadline] = useState("");
   const [aboutMe, setAboutMe] = useState("");
@@ -154,13 +153,13 @@ export default function TherapistDashboardPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/doctor/tier-upgrade"] });
-      toast({ title: "Upgrade request submitted!" });
+      toast({ title: t("therapist_dash.upgrade_submitted") });
       setShowUpgradeForm(false);
       setUpgradePortfolioUrl("");
       setUpgradeJustification("");
     },
     onError: () => {
-      toast({ title: "Failed to submit upgrade request", variant: "destructive" });
+      toast({ title: t("common.error"), variant: "destructive" });
     },
   });
 
@@ -330,7 +329,7 @@ export default function TherapistDashboardPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/therapist/dashboard"] });
-      toast({ title: tr("therapist_dash.landing_saved", "Landing page updated") });
+      toast({ title: t("therapist_dash.landing_saved") });
     },
     onError: () => {
       toast({ title: t("common.error"), variant: "destructive" });
@@ -347,7 +346,7 @@ export default function TherapistDashboardPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/therapist/verification"] });
       setVerificationDocUrl("");
-      toast({ title: tr("therapist_dash.verification_submitted", "Document submitted for review") });
+      toast({ title: t("therapist_dash.verification_submitted") });
     },
     onError: () => {
       toast({ title: t("common.error"), variant: "destructive" });
@@ -368,6 +367,8 @@ export default function TherapistDashboardPage() {
     setFaqItems(updated);
   };
 
+  const [activeSection, setActiveSection] = useState("overview");
+
   const profile = dashboardData?.profile;
   const reviews = dashboardData?.recentReviews || [];
   const totalSessions = dashboardData?.stats?.totalSessions || 0;
@@ -376,6 +377,19 @@ export default function TherapistDashboardPage() {
   const profileUrl = profile?.userId
     ? `/therapist/${profile.userId}`
     : null;
+
+  const navItems: DashboardNavItem[] = useMemo(() => [
+    { id: "overview", label: t("therapist_dash.overview"), icon: LayoutDashboard },
+    { id: "profile", label: t("therapist_dash.profile_tab"), icon: ClipboardList },
+    { id: "availability", label: t("therapist_dash.availability_tab"), icon: Calendar },
+    { id: "clients", label: t("therapist_dash.clients_tab"), icon: Users },
+    { id: "sessions", label: t("therapist_dash.sessions_tab"), icon: BookOpen },
+    { id: "reviews", label: t("therapist_dash.reviews_tab"), icon: MessageCircle },
+    { id: "earnings", label: t("therapist_dash.earnings_tab"), icon: DollarSign },
+    { id: "landing", label: t("therapist_dash.landing_tab"), icon: Globe },
+    { id: "verification", label: t("therapist_dash.verification_tab"), icon: ShieldCheck },
+    { id: "settings", label: t("therapist_dash.settings_tab"), icon: Settings },
+  ], [t]);
 
   if (isLoading) {
     return (
@@ -395,26 +409,26 @@ export default function TherapistDashboardPage() {
 
   return (
     <AppLayout>
-      <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold" data-testid="text-dashboard-title">
-              {t("therapist_dash.title")}
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              {t("therapist_dash.your_page")}
-            </p>
-          </div>
-          {profileUrl && (
-            <Link href={profileUrl}>
-              <Button variant="outline" data-testid="link-preview-profile">
-                <ExternalLink className="h-4 w-4 me-2" />
-                {t("therapist_dash.preview_page")}
-              </Button>
-            </Link>
-          )}
-        </div>
+      <DashboardSidebarLayout
+        items={navItems}
+        activeId={activeSection}
+        onNavigate={setActiveSection}
+        title={t("therapist_dash.title")}
+        subtitle={t("therapist_dash.your_page")}
+        headerAction={profileUrl ? (
+          <Link href={profileUrl}>
+            <Button variant="outline" size="sm" data-testid="link-preview-profile">
+              <ExternalLink className="h-4 w-4 me-1" />
+              {t("therapist_dash.preview_page")}
+            </Button>
+          </Link>
+        ) : undefined}
+      >
+        <div className="space-y-6">
 
+        {/* Overview section — always show stats at top when on overview */}
+        {activeSection === "overview" && (
+          <>
         {/* Portfolio banner — motivational framing for new graduates */}
         {totalSessions === 0 ? (
           <div className="safe-surface rounded-xl p-4 flex items-start gap-3">
@@ -422,8 +436,8 @@ export default function TherapistDashboardPage() {
               <GraduationCap className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <p className="text-sm font-medium">Welcome to your Shifa dashboard!</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Your first messages and sessions will start building your portfolio. Every review helps clients find you.</p>
+              <p className="text-sm font-medium">{t("therapist_dash.welcome_new")}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{t("therapist_dash.welcome_new_desc")}</p>
             </div>
           </div>
         ) : (profile?.reviewCount || 0) < 5 ? (
@@ -432,8 +446,8 @@ export default function TherapistDashboardPage() {
               <GraduationCap className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <p className="text-sm font-medium">You have {totalSessions} session{totalSessions !== 1 ? "s" : ""} — keep going!</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{5 - (profile?.reviewCount || 0)} more review{5 - (profile?.reviewCount || 0) !== 1 ? "s" : ""} and your profile will really stand out.</p>
+              <p className="text-sm font-medium">{t("therapist_dash.keep_going").replace("{count}", String(totalSessions))}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{t("therapist_dash.keep_going_desc").replace("{count}", String(5 - (profile?.reviewCount || 0)))}</p>
             </div>
           </div>
         ) : null}
@@ -480,43 +494,12 @@ export default function TherapistDashboardPage() {
           </Card>
         </div>
 
-        <Tabs defaultValue="profile" className="space-y-4">
-          <TabsList data-testid="tabs-dashboard">
-            <TabsTrigger value="profile" data-testid="tab-profile">
-              <ClipboardList className="h-4 w-4 me-1.5" />
-              {t("profile.edit_profile")}
-            </TabsTrigger>
-            <TabsTrigger value="reviews" data-testid="tab-reviews">
-              <MessageCircle className="h-4 w-4 me-1.5" />
-              {t("review.title")}
-            </TabsTrigger>
-            <TabsTrigger value="landing" data-testid="tab-landing">
-              <Globe className="h-4 w-4 me-1.5" />
-              {tr("therapist_dash.landing_tab", "Landing Page")}
-            </TabsTrigger>
-            <TabsTrigger value="verification" data-testid="tab-verification">
-              <ShieldCheck className="h-4 w-4 me-1.5" />
-              {tr("therapist_dash.verification_tab", "Verification")}
-            </TabsTrigger>
-            <TabsTrigger value="slots" data-testid="tab-slots">
-              <Calendar className="h-4 w-4 me-1.5" />
-              {tr("therapist_dash.slots_tab", "Slots")}
-            </TabsTrigger>
-            <TabsTrigger value="clients" data-testid="tab-clients">
-              <Users className="h-4 w-4 me-1.5" />
-              {tr("therapist_dash.clients_tab", "Clients")}
-            </TabsTrigger>
-            <TabsTrigger value="earnings" data-testid="tab-earnings">
-              <DollarSign className="h-4 w-4 me-1.5" />
-              {tr("therapist_dash.earnings_tab", "Earnings")}
-            </TabsTrigger>
-            <TabsTrigger value="sessions" data-testid="tab-sessions">
-              <BookOpen className="h-4 w-4 me-1.5" />
-              {tr("therapist_dash.sessions_tab", "Sessions")}
-            </TabsTrigger>
-          </TabsList>
+          </>
+        )}
 
-          <TabsContent value="profile" className="space-y-4">
+        {/* Profile Section */}
+        {activeSection === "profile" && (
+          <div className="space-y-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
                 <CardTitle className="text-lg">{t("profile.edit_profile")}</CardTitle>
@@ -693,7 +676,7 @@ export default function TherapistDashboardPage() {
                       className="w-full justify-between"
                       data-testid="button-toggle-advanced-profile"
                     >
-                      {tr("therapist_dash.advanced_options", "Advanced profile options")}
+                      {t("therapist_dash.advanced_options")}
                       {advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                     </Button>
                   </CollapsibleTrigger>
@@ -719,7 +702,7 @@ export default function TherapistDashboardPage() {
                         value={officePhotosInput}
                         onChange={(e) => setOfficePhotosInput(e.target.value)}
                         rows={4}
-                        placeholder={tr("therapist_dash.office_photos_placeholder", "One image URL per line")}
+                        placeholder={t("therapist_dash.office_photos_placeholder")}
                         data-testid="textarea-office-photos"
                       />
                     </div>
@@ -905,9 +888,12 @@ export default function TherapistDashboardPage() {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
+          </div>
+        )}
 
-          <TabsContent value="reviews" className="space-y-4">
+        {/* Reviews Section */}
+        {activeSection === "reviews" && (
+          <div className="space-y-4">
             <Card>
               <CardHeader className="pb-4">
                 <CardTitle className="text-lg flex items-center gap-2">
@@ -1052,13 +1038,15 @@ export default function TherapistDashboardPage() {
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
+          </div>
+        )}
 
-          {/* Landing Page Tab */}
-          <TabsContent value="landing" className="space-y-4">
+        {/* Landing Page Section */}
+        {activeSection === "landing" && (
+          <div className="space-y-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
-                <CardTitle className="text-lg">{tr("therapist_dash.landing_tab", "Landing Page")}</CardTitle>
+                <CardTitle className="text-lg">{t("therapist_dash.landing_tab")}</CardTitle>
                 <Button
                   onClick={() => saveLandingMutation.mutate()}
                   disabled={saveLandingMutation.isPending}
@@ -1071,9 +1059,9 @@ export default function TherapistDashboardPage() {
               <CardContent className="space-y-6">
                 <div className="flex items-center justify-between rounded-lg bg-muted/60 p-3">
                   <div>
-                    <p className="text-sm font-medium">{tr("therapist_dash.enable_landing", "Enable public landing page")}</p>
+                    <p className="text-sm font-medium">{t("therapist_dash.enable_landing")}</p>
                     <p className="text-xs text-muted-foreground">
-                      {tr("therapist_dash.enable_landing_hint", "Make your page accessible to anyone with the link")}
+                      {t("therapist_dash.enable_landing_hint")}
                     </p>
                   </div>
                   <Switch
@@ -1085,7 +1073,7 @@ export default function TherapistDashboardPage() {
 
                 {profile?.slug && landingEnabled && (
                   <div className="rounded-lg border p-3 space-y-2">
-                    <p className="text-xs text-muted-foreground font-medium">Your shareable link</p>
+                    <p className="text-xs text-muted-foreground font-medium">{t("therapist_dash.shareable_link")}</p>
                     <div className="flex items-center gap-2">
                       <code className="text-sm bg-muted px-2 py-1 rounded flex-1 truncate">
                         {window.location.origin}/p/{profile.slug}
@@ -1095,7 +1083,7 @@ export default function TherapistDashboardPage() {
                         size="sm"
                         onClick={() => {
                           navigator.clipboard.writeText(`${window.location.origin}/p/${profile?.slug}`);
-                          toast({ title: tr("common.copied", "Copied!") });
+                          toast({ title: t("common.copied") });
                         }}
                       >
                         <Copy className="h-4 w-4" />
@@ -1115,17 +1103,17 @@ export default function TherapistDashboardPage() {
 
                 {!profile?.slug && (
                   <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
-                    {tr("therapist_dash.slug_required", "Set a profile slug in the Profile tab to enable the landing page.")}
+                    {t("therapist_dash.slug_required")}
                   </div>
                 )}
 
                 {/* Style Customization */}
                 <div className="rounded-lg border p-4 space-y-4">
-                  <p className="text-sm font-semibold">Style &amp; Appearance</p>
+                  <p className="text-sm font-semibold">{t("therapist_dash.style_appearance")}</p>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">Accent Color</label>
+                      <label className="text-xs font-medium text-muted-foreground">{t("therapist_dash.accent_color")}</label>
                       <div className="flex items-center gap-2">
                         <input
                           type="color"
@@ -1163,19 +1151,19 @@ export default function TherapistDashboardPage() {
                       className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
                     >
                       <ExternalLink className="h-3 w-3" />
-                      Preview your public page
+                      {t("therapist_dash.preview_public_page")}
                     </a>
                   )}
                 </div>
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium">
-                    {tr("therapist_dash.cta_text", "CTA Button Text")}
+                    {t("therapist_dash.cta_text")}
                   </label>
                   <Input
                     value={landingCtaText}
                     onChange={(e) => setLandingCtaText(e.target.value)}
-                    placeholder={tr("therapist_dash.cta_text_placeholder", "e.g. Book a Session")}
+                    placeholder={t("therapist_dash.cta_text_placeholder")}
                     maxLength={80}
                     data-testid="input-cta-text"
                   />
@@ -1183,7 +1171,7 @@ export default function TherapistDashboardPage() {
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium">
-                    {tr("therapist_dash.cta_url", "CTA Custom URL (optional)")}
+                    {t("therapist_dash.cta_url")}
                   </label>
                   <Input
                     value={landingCtaUrl}
@@ -1193,16 +1181,16 @@ export default function TherapistDashboardPage() {
                     data-testid="input-cta-url"
                   />
                   <p className="text-xs text-muted-foreground">
-                    {tr("therapist_dash.cta_url_hint", "Leave blank to use the in-app booking flow.")}
+                    {t("therapist_dash.cta_url_hint")}
                   </p>
                 </div>
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium">
-                    Page Sections
+                    {t("therapist_dash.page_sections")}
                   </label>
                   <p className="text-xs text-muted-foreground">
-                    Choose which sections appear on your public page and reorder them.
+                    {t("therapist_dash.page_sections_desc")}
                   </p>
                   <LandingPageBuilder
                     sections={landingSections}
@@ -1211,30 +1199,30 @@ export default function TherapistDashboardPage() {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-          {/* Verification Tab */}
-          <TabsContent value="verification" className="space-y-4">
+          </div>
+        )}
+
+        {/* Verification Section */}
+        {activeSection === "verification" && (
+          <div className="space-y-4">
             <Card>
               <CardHeader className="pb-4">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <ShieldCheck className="h-5 w-5" />
-                  {tr("therapist_dash.verification_tab", "Verification")}
+                  {t("therapist_dash.verification_tab")}
                 </CardTitle>
                 <p className="text-sm text-muted-foreground">
-                  {tr(
-                    "therapist_dash.verification_hint",
-                    "Upload official documents to get a verified badge on your profile. Documents are reviewed within 2 business days.",
-                  )}
+                  {t("therapist_dash.verification_hint")}
                 </p>
               </CardHeader>
               <CardContent className="space-y-4">
                 {(["license", "diploma", "id_card", "cv"] as const).map((docType) => {
                   const existing = verifications.find((v) => v.documentType === docType);
                   const labelMap: Record<string, string> = {
-                    license: tr("verification.license", "Professional License"),
-                    diploma: tr("verification.diploma", "Diploma / Degree"),
-                    id_card: tr("verification.id_card", "National ID Card"),
-                    cv: tr("verification.cv", "Curriculum Vitae (CV)"),
+                    license: t("verification.license"),
+                    diploma: t("verification.diploma"),
+                    id_card: t("verification.id_card"),
+                    cv: t("verification.cv"),
                   };
                   const isUploading =
                     uploadVerificationMutation.isPending && verificationDocType === docType;
@@ -1262,19 +1250,19 @@ export default function TherapistDashboardPage() {
                             data-testid={`badge-status-${docType}`}
                           >
                             {existing.status === "approved"
-                              ? tr("verification.approved", "Approved")
+                              ? t("verification.approved")
                               : existing.status === "rejected"
-                                ? tr("verification.rejected", "Rejected")
-                                : tr("verification.pending", "Pending Review")}
+                                ? t("verification.rejected")
+                                : t("verification.pending")}
                           </Badge>
                         ) : (
-                          <Badge variant="outline">{tr("verification.not_submitted", "Not submitted")}</Badge>
+                          <Badge variant="outline">{t("verification.not_submitted")}</Badge>
                         )}
                       </div>
 
                       {existing?.reviewerNotes && (
                         <div className="rounded-md bg-destructive/10 border border-destructive/20 p-2 text-sm text-destructive">
-                          <p className="font-medium text-xs mb-1">{tr("verification.reviewer_notes", "Reviewer notes:")}</p>
+                          <p className="font-medium text-xs mb-1">{t("verification.reviewer_notes")}</p>
                           {existing.reviewerNotes}
                         </div>
                       )}
@@ -1296,7 +1284,7 @@ export default function TherapistDashboardPage() {
 
                       {existing?.status === "approved" && (
                         <p className="text-xs text-muted-foreground">
-                          {tr("verification.approved_desc", "This document has been verified. No further action needed.")}
+                          {t("verification.approved_desc")}
                         </p>
                       )}
                     </div>
@@ -1304,17 +1292,20 @@ export default function TherapistDashboardPage() {
                 })}
               </CardContent>
             </Card>
-          </TabsContent>
-          {/* Slots Tab (Phase 3.2) */}
-          <TabsContent value="slots" className="space-y-4">
+          </div>
+        )}
+
+        {/* Availability Section */}
+        {activeSection === "availability" && (
+          <div className="space-y-4">
             <Card>
               <CardHeader className="pb-4">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Calendar className="h-5 w-5" />
-                  {tr("therapist_dash.slots_tab", "Availability Calendar")}
+                  {t("therapist_dash.availability_tab")}
                 </CardTitle>
                 <p className="text-sm text-muted-foreground">
-                  Click any empty cell to create a slot. Check the recurring option to repeat weekly.
+                  {t("therapist_dash.slots_calendar_desc")}
                 </p>
               </CardHeader>
               <CardContent>
@@ -1326,24 +1317,27 @@ export default function TherapistDashboardPage() {
                 />
               </CardContent>
             </Card>
-          </TabsContent>
-          {/* Clients Tab */}
-          <TabsContent value="clients" className="space-y-4">
+          </div>
+        )}
+
+        {/* Clients Section */}
+        {activeSection === "clients" && (
+          <div className="space-y-4">
             <Card>
               <CardHeader className="pb-4">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Users className="h-5 w-5" />
-                  {tr("therapist_dash.clients_tab", "Clients")}
+                  {t("therapist_dash.clients_tab")}
                   <Badge variant="secondary" className="ms-1">{clientSummaries.length}</Badge>
                 </CardTitle>
                 <p className="text-sm text-muted-foreground">
-                  {tr("therapist_dash.clients_desc", "Clients who have booked sessions with you.")}
+                  {t("therapist_dash.clients_desc")}
                 </p>
               </CardHeader>
               <CardContent className="space-y-3">
                 {clientSummaries.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-8">
-                    {tr("therapist_dash.no_clients", "No clients yet. Once clients book sessions they'll appear here.")}
+                    {t("therapist_dash.no_clients")}
                   </p>
                 ) : (
                   clientSummaries.map((summary) => {
@@ -1351,7 +1345,7 @@ export default function TherapistDashboardPage() {
                     const upcomingCount = summary.statuses.filter((s) => s === "pending" || s === "confirmed").length;
                     const clientName =
                       `${summary.user.firstName || ""} ${summary.user.lastName || ""}`.trim() ||
-                      tr("common.client", "Client");
+                      t("common.client");
 
                     return (
                       <div
@@ -1367,7 +1361,7 @@ export default function TherapistDashboardPage() {
                             <p className="text-sm font-medium truncate">{clientName}</p>
                             {summary.lastDate && (
                               <p className="text-xs text-muted-foreground">
-                                {tr("therapist_dash.last_session", "Last session:")}{" "}
+                                {t("therapist_dash.last_session")}{" "}
                                 {new Date(summary.lastDate).toLocaleDateString()}
                               </p>
                             )}
@@ -1377,13 +1371,13 @@ export default function TherapistDashboardPage() {
                           {completedCount > 0 && (
                             <Badge variant="secondary" className="text-xs">
                               <CheckCircle className="h-3 w-3 me-1" />
-                              {completedCount} {tr("therapist_dash.completed", "completed")}
+                              {completedCount} {t("therapist_dash.completed")}
                             </Badge>
                           )}
                           {upcomingCount > 0 && (
                             <Badge variant="outline" className="text-xs">
                               <Calendar className="h-3 w-3 me-1" />
-                              {upcomingCount} {tr("therapist_dash.upcoming", "upcoming")}
+                              {upcomingCount} {t("therapist_dash.upcoming")}
                             </Badge>
                           )}
                         </div>
@@ -1393,25 +1387,27 @@ export default function TherapistDashboardPage() {
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
+          </div>
+        )}
 
-          {/* Earnings Tab */}
-          <TabsContent value="earnings" className="space-y-4">
+        {/* Earnings Section */}
+        {activeSection === "earnings" && (
+          <div className="space-y-4">
             <Card>
               <CardHeader className="pb-4">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <DollarSign className="h-5 w-5" />
-                  {tr("therapist_dash.earnings_tab", "Earnings")}
+                  {t("therapist_dash.earnings_tab")}
                 </CardTitle>
                 <p className="text-sm text-muted-foreground">
-                  {tr("therapist_dash.earnings_desc", "Your payout history from completed sessions.")}
+                  {t("therapist_dash.earnings_desc")}
                 </p>
               </CardHeader>
               <CardContent>
                 {payouts.length === 0 ? (
                   <div className="text-center py-10 text-muted-foreground">
                     <DollarSign className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                    <p className="text-sm">{tr("therapist_dash.no_payouts", "No payouts yet. Completed sessions will appear here.")}</p>
+                    <p className="text-sm">{t("therapist_dash.no_payouts")}</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -1433,21 +1429,21 @@ export default function TherapistDashboardPage() {
                         </div>
                         <div className="grid grid-cols-3 gap-2 text-sm">
                           <div>
-                            <p className="text-xs text-muted-foreground">{tr("payout.gross", "Gross")}</p>
+                            <p className="text-xs text-muted-foreground">{t("payout.gross")}</p>
                             <p className="font-medium">{payout.totalAmountDinar} د.ت</p>
                           </div>
                           <div>
-                            <p className="text-xs text-muted-foreground">{tr("payout.fee", "Platform fee")}</p>
+                            <p className="text-xs text-muted-foreground">{t("payout.fee")}</p>
                             <p className="font-medium text-red-500">-{payout.platformFeeDinar} د.ت</p>
                           </div>
                           <div>
-                            <p className="text-xs text-muted-foreground">{tr("payout.net", "Net payout")}</p>
+                            <p className="text-xs text-muted-foreground">{t("payout.net")}</p>
                             <p className="font-semibold text-emerald-600">{payout.netAmountDinar} د.ت</p>
                           </div>
                         </div>
                         {payout.paidAt && (
                           <p className="text-xs text-muted-foreground">
-                            {tr("payout.paid_on", "Paid on")} {new Date(payout.paidAt).toLocaleDateString()}
+                            {t("payout.paid_on")} {new Date(payout.paidAt).toLocaleDateString()}
                           </p>
                         )}
                       </div>
@@ -1456,14 +1452,18 @@ export default function TherapistDashboardPage() {
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
+          </div>
+        )}
 
-          {/* Sessions Tab — Phase 6: Homework + Notes + Consultation Prep */}
-          <TabsContent value="sessions" className="space-y-4">
-            <SessionsTab appointments={appointments} userId={user?.id ?? ""} t={t} tr={tr} toast={toast} />
-          </TabsContent>
-        </Tabs>
-      </div>
+        {/* Sessions Section */}
+        {activeSection === "sessions" && (
+          <div className="space-y-4">
+            <SessionsTab appointments={appointments} userId={user?.id ?? ""} t={t} toast={toast} />
+          </div>
+        )}
+
+        </div>
+      </DashboardSidebarLayout>
     </AppLayout>
   );
 }
@@ -1473,13 +1473,11 @@ function SessionsTab({
   appointments,
   userId,
   t,
-  tr,
   toast,
 }: {
   appointments: (Appointment & { otherUser: User })[];
   userId: string;
   t: (k: string) => string;
-  tr: (k: string, fallback: string) => string;
   toast: any;
 }) {
   const therapistAppointments = appointments
@@ -1493,7 +1491,7 @@ function SessionsTab({
       <Card>
         <CardContent className="py-12 text-center text-muted-foreground">
           <BookOpen className="h-10 w-10 mx-auto mb-3 opacity-30" />
-          <p className="text-sm">{tr("therapist_dash.no_sessions", "No sessions yet. Completed sessions will appear here.")}</p>
+          <p className="text-sm">{t("therapist_dash.no_sessions")}</p>
         </CardContent>
       </Card>
     );
@@ -1504,7 +1502,7 @@ function SessionsTab({
       <CardHeader className="pb-3">
         <CardTitle className="text-lg flex items-center gap-2">
           <BookOpen className="h-5 w-5" />
-          {tr("therapist_dash.sessions_tab", "Sessions")}
+          {t("therapist_dash.sessions_tab")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -1533,8 +1531,8 @@ function SessionsTab({
 
             {expandedId === apt.id && (
               <div className="border-t p-3 space-y-4 bg-muted/20">
-                <SessionNotesPanel appointmentId={apt.id} therapistId={userId} clientId={apt.clientId} toast={toast} tr={tr} />
-                <PrepViewPanel appointmentId={apt.id} tr={tr} />
+                <SessionNotesPanel appointmentId={apt.id} therapistId={userId} clientId={apt.clientId} toast={toast} t={t} />
+                <PrepViewPanel appointmentId={apt.id} t={t} />
               </div>
             )}
           </div>
@@ -1550,13 +1548,13 @@ function SessionNotesPanel({
   therapistId,
   clientId,
   toast,
-  tr,
+  t,
 }: {
   appointmentId: number;
   therapistId: string;
   clientId: string;
   toast: any;
-  tr: (k: string, fallback: string) => string;
+  t: (k: string) => string;
 }) {
   const [keyTopics, setKeyTopics] = useState<string[]>([]);
   const [topicInput, setTopicInput] = useState("");
@@ -1603,9 +1601,9 @@ function SessionNotesPanel({
     },
     onSuccess: () => {
       refetchSummary();
-      toast({ title: tr("therapist_dash.notes_saved", "Session notes saved") });
+      toast({ title: t("therapist_dash.notes_saved") });
     },
-    onError: () => toast({ title: "Error", variant: "destructive" }),
+    onError: () => toast({ title: t("common.error"), variant: "destructive" }),
   });
 
   const addHwMutation = useMutation({
@@ -1620,9 +1618,9 @@ function SessionNotesPanel({
       refetchHw();
       setNewHwDesc("");
       setNewHwDue("");
-      toast({ title: tr("therapist_dash.homework_added", "Homework added") });
+      toast({ title: t("therapist_dash.homework_added") });
     },
-    onError: () => toast({ title: "Error", variant: "destructive" }),
+    onError: () => toast({ title: t("common.error"), variant: "destructive" }),
   });
 
   const deleteHwMutation = useMutation({
@@ -1636,10 +1634,10 @@ function SessionNotesPanel({
     <div className="space-y-4">
       {/* Session Notes */}
       <div className="space-y-2">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Session Notes</p>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t("therapist_dash.session_notes")}</p>
 
         <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Key Topics</label>
+          <label className="text-xs text-muted-foreground">{t("therapist_dash.key_topics")}</label>
           <div className="flex flex-wrap gap-1.5 mb-1">
             {keyTopics.map((topic, i) => (
               <Badge key={i} variant="secondary" className="gap-1 text-xs">
@@ -1660,14 +1658,14 @@ function SessionNotesPanel({
                   setTopicInput("");
                 }
               }}
-              placeholder="Add topic and press Enter..."
+              placeholder={t("therapist_dash.add_topic_placeholder")}
               className="text-xs h-8"
             />
           </div>
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Therapist Notes (private)</label>
+          <label className="text-xs text-muted-foreground">{t("therapist_dash.therapist_notes_private")}</label>
           <Textarea
             value={therapistNotes}
             onChange={(e) => setTherapistNotes(e.target.value)}
@@ -1685,12 +1683,12 @@ function SessionNotesPanel({
               onChange={(e) => setClientVisible(e.target.checked)}
               className="rounded"
             />
-            Share summary with client
+            {t("therapist_dash.share_with_client")}
           </label>
           <Button size="sm" onClick={() => saveSummaryMutation.mutate()} disabled={saveSummaryMutation.isPending}>
             {saveSummaryMutation.isPending && <Loader2 className="h-3 w-3 me-1.5 animate-spin" />}
             <Save className="h-3 w-3 me-1.5" />
-            Save Notes
+            {t("therapist_dash.save_notes")}
           </Button>
         </div>
       </div>
@@ -1698,7 +1696,7 @@ function SessionNotesPanel({
       {/* Homework */}
       {summary?.id && (
         <div className="space-y-2">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Homework Assignments</p>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t("therapist_dash.homework_assignments")}</p>
 
           {homework.length > 0 && (
             <div className="space-y-1.5">
@@ -1707,8 +1705,8 @@ function SessionNotesPanel({
                   <span className="mt-0.5">{hw.completed ? "✅" : "📝"}</span>
                   <div className="flex-1 min-w-0">
                     <p className={hw.completed ? "line-through text-muted-foreground" : ""}>{hw.description}</p>
-                    {hw.dueDate && <p className="text-muted-foreground">Due: {new Date(hw.dueDate).toLocaleDateString()}</p>}
-                    {hw.clientNotes && <p className="text-muted-foreground italic">Client note: {hw.clientNotes}</p>}
+                    {hw.dueDate && <p className="text-muted-foreground">{t("therapist_dash.due_label")} {new Date(hw.dueDate).toLocaleDateString()}</p>}
+                    {hw.clientNotes && <p className="text-muted-foreground italic">{t("therapist_dash.client_note")} {hw.clientNotes}</p>}
                   </div>
                   <button
                     type="button"
@@ -1726,7 +1724,7 @@ function SessionNotesPanel({
             <Input
               value={newHwDesc}
               onChange={(e) => setNewHwDesc(e.target.value)}
-              placeholder="Assign homework..."
+              placeholder={t("therapist_dash.assign_homework_placeholder")}
               className="text-xs h-8 flex-1"
             />
             <Input
@@ -1751,7 +1749,7 @@ function SessionNotesPanel({
 }
 
 // Consultation prep viewer for therapist
-function PrepViewPanel({ appointmentId, tr }: { appointmentId: number; tr: (k: string, fallback: string) => string }) {
+function PrepViewPanel({ appointmentId, t }: { appointmentId: number; t: (k: string) => string }) {
   const { data: prep } = useQuery<any>({
     queryKey: [`/api/appointments/${appointmentId}/prep`],
     queryFn: async () => {
@@ -1768,12 +1766,12 @@ function PrepViewPanel({ appointmentId, tr }: { appointmentId: number; tr: (k: s
     <div className="rounded-lg border border-dashed p-3 space-y-2 bg-muted/10">
       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
         <ClipboardList className="h-3.5 w-3.5" />
-        Client's Session Prep
+        {t("therapist_dash.client_session_prep")}
       </p>
-      <p className="text-xs"><span className="font-medium">What's on their mind:</span> {prep.whatsOnMind}</p>
-      {prep.goalsForSession && <p className="text-xs"><span className="font-medium">Goals:</span> {prep.goalsForSession}</p>}
+      <p className="text-xs"><span className="font-medium">{t("therapist_dash.whats_on_mind")}</span> {prep.whatsOnMind}</p>
+      {prep.goalsForSession && <p className="text-xs"><span className="font-medium">{t("therapist_dash.goals_label")}</span> {prep.goalsForSession}</p>}
       {prep.currentMood && (
-        <p className="text-xs"><span className="font-medium">Pre-session mood:</span> {MOOD_EMOJIS[prep.currentMood - 1]} ({prep.currentMood}/5)</p>
+        <p className="text-xs"><span className="font-medium">{t("therapist_dash.pre_session_mood")}</span> {MOOD_EMOJIS[prep.currentMood - 1]} ({prep.currentMood}/5)</p>
       )}
     </div>
   );

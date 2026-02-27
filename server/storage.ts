@@ -47,6 +47,12 @@ import {
   mapSessionHomework, mapSessionMoodRating, mapConsultationPrep,
   mapTierUpgradeRequest,
   mapListenerQualificationTest,
+  mapSubscriptionPlan,
+  mapUserSubscription,
+  mapMatchingPreferences,
+  SubscriptionPlan,
+  UserSubscription,
+  MatchingPreferences,
   toSnakeCase,
 } from "@shared/schema";
 
@@ -391,6 +397,27 @@ export interface IStorage {
   getTierUpgradeRequestsByDoctor(doctorId: string): Promise<TierUpgradeRequest[]>;
   getAllTierUpgradeRequests(status?: string): Promise<(TierUpgradeRequest & { doctorName?: string })[]>;
   reviewTierUpgradeRequest(id: number, status: "approved" | "rejected", reviewedBy: string): Promise<TierUpgradeRequest | undefined>;
+
+  // Phase B: Subscriptions
+  getSubscriptionPlans(activeOnly?: boolean): Promise<SubscriptionPlan[]>;
+  getSubscriptionPlan(id: number): Promise<SubscriptionPlan | undefined>;
+  createUserSubscription(data: {
+    userId: string;
+    planId: number;
+    sessionsIncluded: number;
+    durationDays: number;
+    therapistId?: string;
+    paymentTransactionId?: number;
+  }): Promise<UserSubscription>;
+  getUserSubscriptions(userId: string): Promise<UserSubscription[]>;
+  getActiveSubscription(userId: string, therapistId?: string): Promise<UserSubscription | undefined>;
+  cancelUserSubscription(id: number, userId: string): Promise<UserSubscription | undefined>;
+  deductSubscriptionSession(id: number): Promise<UserSubscription | undefined>;
+  getAllSubscriptions(limit?: number): Promise<UserSubscription[]>;
+
+  // Phase B: Matching preferences
+  getMatchingPreferences(userId: string): Promise<MatchingPreferences | undefined>;
+  upsertMatchingPreferences(userId: string, data: Partial<Omit<MatchingPreferences, "userId" | "updatedAt">>): Promise<MatchingPreferences>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -437,10 +464,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async isDisplayNameAvailable(name: string, excludeUserId?: string): Promise<boolean> {
+    // ilike with no wildcards = case-insensitive exact match, consistent with
+    // the LOWER(display_name) unique index added in migration 024.
     let query = supabase
       .from("profiles")
       .select("id")
-      .eq("display_name", name);
+      .ilike("display_name", name);
     if (excludeUserId) {
       query = query.neq("id", excludeUserId);
     }
@@ -2624,6 +2653,151 @@ export class DatabaseStorage implements IStorage {
       .single();
     if (error || !row) return undefined;
     return mapTierUpgradeRequest(row);
+  }
+
+  // ── Phase B: Subscription plans ──────────────────────────────────────────
+
+  async getSubscriptionPlans(activeOnly = true): Promise<SubscriptionPlan[]> {
+    let query = supabase.from("subscription_plans").select("*").order("price_dinar");
+    if (activeOnly) query = query.eq("is_active", true);
+    const { data, error } = await query;
+    if (error || !data) return [];
+    return data.map(mapSubscriptionPlan);
+  }
+
+  async getSubscriptionPlan(id: number): Promise<SubscriptionPlan | undefined> {
+    const { data, error } = await supabase
+      .from("subscription_plans").select("*").eq("id", id).maybeSingle();
+    if (error || !data) return undefined;
+    return mapSubscriptionPlan(data);
+  }
+
+  async createUserSubscription(input: {
+    userId: string;
+    planId: number;
+    sessionsIncluded: number;
+    durationDays: number;
+    therapistId?: string;
+    paymentTransactionId?: number;
+  }): Promise<UserSubscription> {
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + input.durationDays);
+    const { data, error } = await supabase
+      .from("user_subscriptions")
+      .insert({
+        user_id: input.userId,
+        plan_id: input.planId,
+        therapist_id: input.therapistId ?? null,
+        sessions_remaining: input.sessionsIncluded,
+        expires_at: expiresAt.toISOString(),
+        payment_transaction_id: input.paymentTransactionId ?? null,
+        status: "active",
+      })
+      .select("*, subscription_plans(*)")
+      .single();
+    if (error || !data) throw new Error("Failed to create subscription");
+    return mapUserSubscription(data);
+  }
+
+  async getUserSubscriptions(userId: string): Promise<UserSubscription[]> {
+    const { data, error } = await supabase
+      .from("user_subscriptions")
+      .select("*, subscription_plans(*)")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+    if (error || !data) return [];
+    return data.map(mapUserSubscription);
+  }
+
+  async getActiveSubscription(userId: string, therapistId?: string): Promise<UserSubscription | undefined> {
+    const now = new Date().toISOString();
+    let query = supabase
+      .from("user_subscriptions")
+      .select("*, subscription_plans(*)")
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .gt("expires_at", now)
+      .gt("sessions_remaining", 0)
+      .order("expires_at");
+
+    // If therapistId given, prefer locked subscription, else accept platform-wide
+    if (therapistId) {
+      query = query.or(`therapist_id.eq.${therapistId},therapist_id.is.null`);
+    }
+    const { data, error } = await query.limit(1).maybeSingle();
+    if (error || !data) return undefined;
+    return mapUserSubscription(data);
+  }
+
+  async cancelUserSubscription(id: number, userId: string): Promise<UserSubscription | undefined> {
+    const { data, error } = await supabase
+      .from("user_subscriptions")
+      .update({ status: "cancelled" })
+      .eq("id", id)
+      .eq("user_id", userId)
+      .select("*, subscription_plans(*)")
+      .single();
+    if (error || !data) return undefined;
+    return mapUserSubscription(data);
+  }
+
+  async deductSubscriptionSession(id: number): Promise<UserSubscription | undefined> {
+    // Atomic decrement via RPC would be ideal; using optimistic client decrement here
+    const { data: current } = await supabase
+      .from("user_subscriptions").select("sessions_remaining").eq("id", id).single();
+    if (!current || current.sessions_remaining <= 0) return undefined;
+    const newCount = current.sessions_remaining - 1;
+    const updates: Record<string, any> = { sessions_remaining: newCount };
+    if (newCount === 0) updates.status = "expired";
+    const { data, error } = await supabase
+      .from("user_subscriptions")
+      .update(updates)
+      .eq("id", id)
+      .select("*, subscription_plans(*)")
+      .single();
+    if (error || !data) return undefined;
+    return mapUserSubscription(data);
+  }
+
+  async getAllSubscriptions(limit = 100): Promise<UserSubscription[]> {
+    const { data, error } = await supabase
+      .from("user_subscriptions")
+      .select("*, subscription_plans(*)")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error || !data) return [];
+    return data.map(mapUserSubscription);
+  }
+
+  // ── Phase B: Matching preferences ────────────────────────────────────────
+
+  async getMatchingPreferences(userId: string): Promise<MatchingPreferences | undefined> {
+    const { data, error } = await supabase
+      .from("matching_preferences").select("*").eq("user_id", userId).maybeSingle();
+    if (error || !data) return undefined;
+    return mapMatchingPreferences(data);
+  }
+
+  async upsertMatchingPreferences(
+    userId: string,
+    prefs: Partial<Omit<MatchingPreferences, "userId" | "updatedAt">>,
+  ): Promise<MatchingPreferences> {
+    const payload = {
+      user_id: userId,
+      preferred_specializations: prefs.preferredSpecializations ?? null,
+      preferred_languages: prefs.preferredLanguages ?? null,
+      preferred_gender: prefs.preferredGender ?? null,
+      max_budget_dinar: prefs.maxBudgetDinar ?? null,
+      session_type_preference: prefs.sessionTypePreference ?? null,
+      updated_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase
+      .from("matching_preferences")
+      .upsert(payload, { onConflict: "user_id" })
+      .select("*")
+      .single();
+    if (error || !data) throw new Error("Failed to upsert matching preferences");
+    return mapMatchingPreferences(data);
   }
 
 }

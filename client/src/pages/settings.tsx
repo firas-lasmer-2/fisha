@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { getAccessToken } from "@/lib/supabase";
-import { Calendar, CreditCard, Receipt, UserCircle, Wallet, AtSign, Check, X, Loader2, KeyRound, ShieldCheck } from "lucide-react";
+import { Calendar, CreditCard, Receipt, UserCircle, Wallet, AtSign, Check, X, Loader2, KeyRound, ShieldCheck, Download } from "lucide-react";
 import type { PaymentTransaction } from "@shared/schema";
 import { wrapPrivateKeyWithPassword, unwrapPrivateKeyWithPassword } from "@/lib/e2e";
 
@@ -428,6 +428,41 @@ export default function SettingsPage() {
                 </Button>
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Data export */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Download className="h-4 w-4 text-primary" />
+              Data & Privacy
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Download a copy of all your data stored on Shifa — profile, sessions, mood logs, journal entries and more.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                const token = await getAccessToken();
+                const res = await fetch("/api/user/data-export", {
+                  headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "shifa-data-export.json";
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              <Download className="h-4 w-4 me-2" />
+              Download my data
+            </Button>
           </CardContent>
         </Card>
       </div>

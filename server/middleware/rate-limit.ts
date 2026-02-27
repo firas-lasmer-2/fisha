@@ -2,7 +2,8 @@ import rateLimit from "express-rate-limit";
 
 /**
  * Strict limiter for authentication endpoints — prevents brute-force attacks.
- * 10 attempts per 15 minutes per IP.
+ * 10 failed attempts per 15 minutes per IP (successful requests don't count).
+ * Bypassed in non-production so dev testing isn't blocked.
  */
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -10,7 +11,8 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many requests, please try again later." },
-  skipSuccessfulRequests: false,
+  skipSuccessfulRequests: true,
+  skip: () => process.env.NODE_ENV !== "production",
 });
 
 /**
@@ -62,4 +64,16 @@ export const webhookLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many webhook requests." },
+});
+
+/**
+ * Display name availability check — prevents enumeration of taken names.
+ * 20 requests per minute per IP.
+ */
+export const displayNameLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many display name checks, please try again later." },
 });

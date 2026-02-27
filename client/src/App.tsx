@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -6,7 +6,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
 import { AnimatePresence, motion } from "framer-motion";
-import { useLocation } from "wouter";
+import { ErrorBoundary } from "@/components/error-boundary";
+import { OfflineIndicator } from "@/components/offline-indicator";
 import LandingPage from "@/pages/landing";
 import AboutPage from "@/pages/about";
 import PrivacyPage from "@/pages/privacy";
@@ -62,6 +63,7 @@ function AuthGuard({
   allowIncompleteOnboarding?: boolean;
 }) {
   const { user, isLoading } = useAuth();
+  const [, navigate] = useLocation();
 
   if (isLoading) {
     return (
@@ -72,13 +74,13 @@ function AuthGuard({
   }
 
   if (!user) {
-    window.location.href = "/login";
+    navigate("/login");
     return null;
   }
 
   const requiresOnboarding = user.role === "client";
   if (!allowIncompleteOnboarding && requiresOnboarding && !user.onboardingCompleted) {
-    window.location.href = "/onboarding";
+    navigate("/onboarding");
     return null;
   }
 
@@ -87,6 +89,7 @@ function AuthGuard({
 
 function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
+  const [, navigate] = useLocation();
 
   if (isLoading) {
     return (
@@ -98,11 +101,12 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
 
   if (user) {
     const requiresOnboarding = user.role === "client";
-    window.location.href = requiresOnboarding && !user.onboardingCompleted
+    const target = requiresOnboarding && !user.onboardingCompleted
       ? "/onboarding"
       : shouldShowWelcome() && user.role === "client"
         ? "/welcome"
       : homeRouteForRole(user.role);
+    navigate(target);
     return null;
   }
 
@@ -111,17 +115,18 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
 
 function DashboardRoute() {
   const { user } = useAuth();
+  const [, navigate] = useLocation();
 
   if (!user) return null;
 
   if (user.role === "client" && shouldShowWelcome()) {
-    window.location.href = "/welcome";
+    navigate("/welcome");
     return null;
   }
 
   const target = homeRouteForRole(user.role);
   if (target !== "/dashboard") {
-    window.location.href = target;
+    navigate(target);
     return null;
   }
 
@@ -228,14 +233,17 @@ function Router() {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
-      </I18nProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider>
+          <TooltipProvider>
+            <Toaster />
+            <OfflineIndicator />
+            <Router />
+          </TooltipProvider>
+        </I18nProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 

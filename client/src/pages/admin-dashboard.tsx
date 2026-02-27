@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AppLayout } from "@/components/app-layout";
+import { DashboardSidebarLayout } from "@/components/dashboard-sidebar-layout";
+import type { DashboardNavItem } from "@/components/dashboard-sidebar-layout";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
@@ -38,7 +39,8 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import type { TherapistVerification, AuditLog, DoctorPayout, TierUpgradeRequest } from "@shared/schema";
+import type { TherapistVerification, AuditLog, DoctorPayout, TierUpgradeRequest, UserSubscription } from "@shared/schema";
+import { PackageCheck, Clock, AlertTriangle, LayoutDashboard } from "lucide-react";
 
 interface AdminAnalytics {
   totalUsers: number;
@@ -76,16 +78,13 @@ export default function AdminDashboardPage() {
   const [userSearch, setUserSearch] = useState("");
   const [userPage, setUserPage] = useState(1);
 
-  const tr = (key: string, fallback: string) => {
-    const val = t(key);
-    return val === key ? fallback : val;
-  };
+  const [activeSection, setActiveSection] = useState("overview");
 
   if (user?.role !== "admin" && user?.role !== "moderator") {
     return (
       <AppLayout>
         <div className="flex items-center justify-center h-64">
-          <p className="text-muted-foreground">Access denied.</p>
+          <p className="text-muted-foreground">{t("admin.access_denied")}</p>
         </div>
       </AppLayout>
     );
@@ -155,13 +154,18 @@ export default function AdminDashboardPage() {
     enabled: user?.role === "admin",
   });
 
+  const { data: allSubscriptions = [], isLoading: subsLoading } = useQuery<UserSubscription[]>({
+    queryKey: ["/api/admin/subscriptions"],
+    enabled: user?.role === "admin",
+  });
+
   const updatePayoutMutation = useMutation({
     mutationFn: async ({ id, status }: { id: number; status: string }) => {
       await apiRequest("PATCH", `/api/admin/doctor-payouts/${id}`, { status });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/doctor-payouts"] });
-      toast({ title: "Payout status updated" });
+      toast({ title: t("admin.payout_status_updated") });
     },
     onError: () => {
       toast({ title: t("common.error"), variant: "destructive" });
@@ -183,7 +187,7 @@ export default function AdminDashboardPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/verifications"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/analytics"] });
-      toast({ title: tr("admin.verification_updated", "Verification updated") });
+      toast({ title: t("admin.verification_updated") });
     },
     onError: () => {
       toast({ title: t("common.error"), variant: "destructive" });
@@ -196,7 +200,7 @@ export default function AdminDashboardPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/content-flags"] });
-      toast({ title: "Flag reviewed" });
+      toast({ title: t("admin.flag_reviewed") });
     },
   });
 
@@ -206,7 +210,7 @@ export default function AdminDashboardPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users", userPage, userSearch] });
-      toast({ title: "User role updated" });
+      toast({ title: t("admin.user_role_updated") });
     },
     onError: () => {
       toast({ title: t("common.error"), variant: "destructive" });
@@ -219,7 +223,7 @@ export default function AdminDashboardPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/tier-upgrades"] });
-      toast({ title: "Tier upgrade request reviewed" });
+      toast({ title: t("admin.tier_upgrade_reviewed") });
     },
     onError: () => {
       toast({ title: t("common.error"), variant: "destructive" });
@@ -228,97 +232,75 @@ export default function AdminDashboardPage() {
 
   const pendingVerifications = verifications.filter((v) => v.status === "pending");
 
+  const navItems: DashboardNavItem[] = useMemo(() => {
+    const items: DashboardNavItem[] = [
+      { id: "overview", label: t("admin.overview"), icon: LayoutDashboard },
+      { id: "verifications", label: t("admin.verifications_tab"), icon: ShieldCheck, badge: pendingVerifications.length },
+    ];
+    if (user?.role === "admin") {
+      items.push(
+        { id: "users", label: t("admin.users_tab"), icon: Users },
+        { id: "revenue", label: t("admin.revenue_tab"), icon: BarChart3 },
+        { id: "payouts", label: t("admin.payouts_tab"), icon: DollarSign },
+        { id: "tier-upgrades", label: t("admin.tier_upgrades_tab"), icon: ArrowUpCircle, badge: tierUpgradeRequests.filter((r) => r.status === "pending").length },
+        { id: "subscriptions", label: t("admin.subscriptions_tab"), icon: PackageCheck },
+      );
+    }
+    items.push(
+      { id: "moderation", label: t("admin.moderation_tab"), icon: Flag, badge: contentFlags.filter((f) => f.status === "pending").length },
+      { id: "audit", label: t("admin.audit_tab"), icon: Activity },
+    );
+    return items;
+  }, [t, pendingVerifications.length, tierUpgradeRequests, contentFlags, user?.role]);
+
   return (
     <AppLayout>
-      <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">{tr("admin.dashboard_title", "Admin Dashboard")}</h1>
-          <p className="text-sm text-muted-foreground">
-            {tr("admin.dashboard_subtitle", "Platform overview and management")}
-          </p>
-        </div>
+      <DashboardSidebarLayout
+        items={navItems}
+        activeId={activeSection}
+        onNavigate={setActiveSection}
+        title={t("admin.dashboard_title")}
+        subtitle={t("admin.dashboard_subtitle")}
+      >
+        <div className="space-y-6">
 
-        {/* Analytics row */}
-        {analyticsLoading ? (
-          <div className="grid sm:grid-cols-3 lg:grid-cols-6 gap-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-24" />
-            ))}
-          </div>
-        ) : (
-          <div className="grid sm:grid-cols-3 lg:grid-cols-6 gap-4">
-            {[
-              { icon: Users, label: "Total Users", value: analytics?.totalUsers ?? 0, color: "text-primary" },
-              { icon: ShieldCheck, label: "Active Therapists", value: analytics?.activeTherapists ?? 0, color: "text-blue-500" },
-              { icon: Calendar, label: "Sessions This Week", value: analytics?.sessionsThisWeek ?? 0, color: "text-emerald-500" },
-              { icon: TrendingUp, label: "Revenue (month)", value: `${analytics?.revenueThisMonth ?? 0} د.ت`, color: "text-yellow-500" },
-              { icon: Users, label: "New Users (week)", value: analytics?.newUsersThisWeek ?? 0, color: "text-violet-500" },
-              { icon: FileText, label: "Pending Verif.", value: analytics?.pendingVerifications ?? 0, color: "text-orange-500" },
-            ].map(({ icon: Icon, label, value, color }) => (
-              <Card key={label}>
-                <CardContent className="p-4 flex items-center gap-3">
-                  <Icon className={`h-5 w-5 shrink-0 ${color}`} />
-                  <div>
-                    <p className="text-lg font-bold">{value}</p>
-                    <p className="text-xs text-muted-foreground">{label}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+        {/* Overview — Analytics row */}
+        {activeSection === "overview" && (
+          <>
+            {analyticsLoading ? (
+              <div className="grid sm:grid-cols-3 lg:grid-cols-6 gap-4">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="h-24" />
+                ))}
+              </div>
+            ) : (
+              <div className="grid sm:grid-cols-3 lg:grid-cols-6 gap-4">
+                {[
+                  { icon: Users, label: t("admin.total_users"), value: analytics?.totalUsers ?? 0, color: "text-primary" },
+                  { icon: ShieldCheck, label: t("admin.active_therapists"), value: analytics?.activeTherapists ?? 0, color: "text-blue-500" },
+                  { icon: Calendar, label: t("admin.sessions_this_week"), value: analytics?.sessionsThisWeek ?? 0, color: "text-emerald-500" },
+                  { icon: TrendingUp, label: t("admin.revenue_month"), value: `${analytics?.revenueThisMonth ?? 0} د.ت`, color: "text-yellow-500" },
+                  { icon: Users, label: t("admin.new_users_week"), value: analytics?.newUsersThisWeek ?? 0, color: "text-violet-500" },
+                  { icon: FileText, label: t("admin.pending_verif"), value: analytics?.pendingVerifications ?? 0, color: "text-orange-500" },
+                ].map(({ icon: Icon, label, value, color }) => (
+                  <Card key={label}>
+                    <CardContent className="p-4 flex items-center gap-3">
+                      <Icon className={`h-5 w-5 shrink-0 ${color}`} />
+                      <div>
+                        <p className="text-lg font-bold">{value}</p>
+                        <p className="text-xs text-muted-foreground">{label}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
-        <Tabs defaultValue="verifications">
-          <TabsList className="flex-wrap h-auto gap-1">
-            <TabsTrigger value="verifications">
-              <ShieldCheck className="h-4 w-4 me-1.5" />
-              Verifications
-              {pendingVerifications.length > 0 && (
-                <Badge className="ms-2" variant="destructive">{pendingVerifications.length}</Badge>
-              )}
-            </TabsTrigger>
-            {user?.role === "admin" && (
-              <>
-                <TabsTrigger value="users">
-                  <Users className="h-4 w-4 me-1.5" />
-                  Users
-                </TabsTrigger>
-                <TabsTrigger value="revenue">
-                  <BarChart3 className="h-4 w-4 me-1.5" />
-                  Revenue
-                </TabsTrigger>
-                <TabsTrigger value="payouts">
-                  <DollarSign className="h-4 w-4 me-1.5" />
-                  Payouts
-                </TabsTrigger>
-                <TabsTrigger value="tier-upgrades">
-                  <ArrowUpCircle className="h-4 w-4 me-1.5" />
-                  Tier Upgrades
-                  {tierUpgradeRequests.filter((r) => r.status === "pending").length > 0 && (
-                    <Badge className="ms-2" variant="destructive">
-                      {tierUpgradeRequests.filter((r) => r.status === "pending").length}
-                    </Badge>
-                  )}
-                </TabsTrigger>
-              </>
-            )}
-            <TabsTrigger value="moderation">
-              <Flag className="h-4 w-4 me-1.5" />
-              Moderation
-              {contentFlags.filter((f) => f.status === "pending").length > 0 && (
-                <Badge className="ms-2" variant="destructive">
-                  {contentFlags.filter((f) => f.status === "pending").length}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="audit">
-              <Activity className="h-4 w-4 me-1.5" />
-              Audit Log
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Verifications Tab */}
-          <TabsContent value="verifications" className="space-y-3 mt-4">
+        {/* Verifications Section */}
+        {activeSection === "verifications" && (
+          <div className="space-y-3">
             {verificationsLoading ? (
               <div className="space-y-3">
                 <Skeleton className="h-24 w-full" />
@@ -326,7 +308,7 @@ export default function AdminDashboardPage() {
               </div>
             ) : pendingVerifications.length === 0 ? (
               <div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground">
-                {tr("admin.no_pending", "No pending verifications.")}
+                {t("admin.no_pending")}
               </div>
             ) : (
               pendingVerifications.map((v) => (
@@ -336,24 +318,37 @@ export default function AdminDashboardPage() {
                       <div>
                         <p className="font-medium">{v.therapistName || `Therapist ${v.therapistId.slice(0, 8)}`}</p>
                         <p className="text-sm text-muted-foreground capitalize">
-                          {v.documentType.replace("_", " ")} document
+                          {t("admin.document_label").replace("{type}", v.documentType.replace("_", " "))}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Submitted {v.submittedAt ? new Date(v.submittedAt).toLocaleDateString() : "—"}
+                          {t("admin.submitted_date").replace("{date}", v.submittedAt ? new Date(v.submittedAt).toLocaleDateString() : "—")}
                         </p>
+                        {v.slaDeadline && (
+                          <p className="text-xs flex items-center gap-1 mt-0.5">
+                            {new Date(v.slaDeadline) < new Date() ? (
+                              <AlertTriangle className="h-3 w-3 text-destructive" />
+                            ) : (
+                              <Clock className="h-3 w-3 text-muted-foreground" />
+                            )}
+                            <span className={new Date(v.slaDeadline) < new Date() ? "text-destructive font-medium" : "text-muted-foreground"}>
+                              {t("admin.sla_label")} {new Date(v.slaDeadline).toLocaleDateString()}
+                            </span>
+                          </p>
+                        )}
                       </div>
                       <div className="flex gap-2 items-center flex-wrap">
-                        <Badge variant="secondary">Pending</Badge>
+                        {v.priority === "urgent" && <Badge variant="destructive" className="text-xs">{t("admin.urgent_badge")}</Badge>}
+                        <Badge variant="secondary">{t("admin.pending_badge")}</Badge>
                         <a href={v.documentUrl} target="_blank" rel="noopener noreferrer">
                           <Button variant="outline" size="sm">
                             <FileText className="h-4 w-4 me-1" />
-                            View Doc
+                            {t("admin.view_doc")}
                           </Button>
                         </a>
                       </div>
                     </div>
                     <Textarea
-                      placeholder={tr("admin.reviewer_notes", "Reviewer notes (optional)")}
+                      placeholder={t("admin.reviewer_notes")}
                       value={reviewNotes[v.id] || ""}
                       onChange={(e) =>
                         setReviewNotes((prev) => ({ ...prev, [v.id]: e.target.value }))
@@ -375,7 +370,7 @@ export default function AdminDashboardPage() {
                         disabled={reviewMutation.isPending}
                       >
                         <CheckCircle className="h-4 w-4" />
-                        Approve
+                        {t("admin.approve")}
                       </Button>
                       <Button
                         size="sm"
@@ -391,24 +386,25 @@ export default function AdminDashboardPage() {
                         disabled={reviewMutation.isPending}
                       >
                         <XCircle className="h-4 w-4" />
-                        Reject
+                        {t("admin.reject")}
                       </Button>
                     </div>
                   </CardContent>
                 </Card>
               ))
             )}
-          </TabsContent>
+          </div>
+        )}
 
-          {/* Users Tab (admin only) */}
-          {user?.role === "admin" && (
-            <TabsContent value="users" className="space-y-4 mt-4">
+        {/* Users Section */}
+        {activeSection === "users" && user?.role === "admin" && (
+          <div className="space-y-4">
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     className="pl-9"
-                    placeholder="Search by name or email..."
+                    placeholder={t("admin.search_placeholder")}
                     value={userSearch}
                     onChange={(e) => { setUserSearch(e.target.value); setUserPage(1); }}
                   />
@@ -423,10 +419,10 @@ export default function AdminDashboardPage() {
                     <table className="w-full text-sm">
                       <thead className="bg-muted/50">
                         <tr>
-                          <th className="text-left p-3 font-medium">User</th>
-                          <th className="text-left p-3 font-medium">Role</th>
-                          <th className="text-left p-3 font-medium">Joined</th>
-                          <th className="text-left p-3 font-medium">Actions</th>
+                          <th className="text-left p-3 font-medium">{t("admin.table_user")}</th>
+                          <th className="text-left p-3 font-medium">{t("admin.table_role")}</th>
+                          <th className="text-left p-3 font-medium">{t("admin.table_joined")}</th>
+                          <th className="text-left p-3 font-medium">{t("admin.table_actions")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -465,10 +461,10 @@ export default function AdminDashboardPage() {
                   </div>
 
                   <div className="flex items-center justify-between text-sm text-muted-foreground">
-                    <span>{usersData?.total ?? 0} total users</span>
+                    <span>{usersData?.total ?? 0} {t("admin.total_users_count")}</span>
                     <div className="flex gap-2">
                       <Button variant="outline" size="sm" disabled={userPage === 1} onClick={() => setUserPage((p) => p - 1)}>
-                        Previous
+                        {t("admin.previous")}
                       </Button>
                       <Button
                         variant="outline"
@@ -476,28 +472,27 @@ export default function AdminDashboardPage() {
                         disabled={(usersData?.total ?? 0) <= userPage * 20}
                         onClick={() => setUserPage((p) => p + 1)}
                       >
-                        Next
+                        {t("admin.next")}
                       </Button>
                     </div>
                   </div>
                 </>
               )}
-            </TabsContent>
-          )}
+          </div>
+        )}
 
-          {/* Revenue + Payouts Tabs (admin only) */}
-          {user?.role === "admin" && (
-            <>
-            <TabsContent value="revenue" className="mt-4">
+        {/* Revenue Section */}
+        {activeSection === "revenue" && user?.role === "admin" && (
+          <div>
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Revenue (Last 30 Days)</CardTitle>
+                  <CardTitle className="text-base">{t("admin.revenue_30_days")}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {revenueLoading ? (
                     <Skeleton className="h-48 w-full" />
                   ) : revenueData.length === 0 ? (
-                    <p className="text-muted-foreground text-center py-8">No revenue data yet.</p>
+                    <p className="text-muted-foreground text-center py-8">{t("admin.no_revenue_data")}</p>
                   ) : (
                     <ResponsiveContainer width="100%" height={220}>
                       <LineChart data={revenueData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
@@ -524,29 +519,31 @@ export default function AdminDashboardPage() {
                   )}
                 </CardContent>
               </Card>
-            </TabsContent>
+          </div>
+        )}
 
-            {/* Payouts Tab */}
-            <TabsContent value="payouts" className="space-y-4 mt-4">
+        {/* Payouts Section */}
+        {activeSection === "payouts" && user?.role === "admin" && (
+          <div className="space-y-4">
               {payoutsLoading ? (
                 <Skeleton className="h-48 w-full" />
               ) : allPayouts.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground">
-                  No payouts generated yet.
+                  {t("admin.no_payouts")}
                 </div>
               ) : (
                 <div className="rounded-lg border overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50">
                       <tr>
-                        <th className="text-left p-3 font-medium">Doctor</th>
-                        <th className="text-left p-3 font-medium">Period</th>
-                        <th className="text-left p-3 font-medium">Sessions</th>
-                        <th className="text-left p-3 font-medium">Gross</th>
-                        <th className="text-left p-3 font-medium">Fee</th>
-                        <th className="text-left p-3 font-medium">Net</th>
-                        <th className="text-left p-3 font-medium">Status</th>
-                        <th className="text-left p-3 font-medium">Actions</th>
+                        <th className="text-left p-3 font-medium">{t("admin.table_doctor")}</th>
+                        <th className="text-left p-3 font-medium">{t("admin.table_period")}</th>
+                        <th className="text-left p-3 font-medium">{t("admin.table_sessions")}</th>
+                        <th className="text-left p-3 font-medium">{t("admin.table_gross")}</th>
+                        <th className="text-left p-3 font-medium">{t("admin.table_fee")}</th>
+                        <th className="text-left p-3 font-medium">{t("admin.table_net")}</th>
+                        <th className="text-left p-3 font-medium">{t("admin.table_status")}</th>
+                        <th className="text-left p-3 font-medium">{t("admin.table_actions")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -590,15 +587,17 @@ export default function AdminDashboardPage() {
                   </table>
                 </div>
               )}
-            </TabsContent>
+          </div>
+        )}
 
-            {/* Tier Upgrades Tab */}
-            <TabsContent value="tier-upgrades" className="space-y-3 mt-4">
+        {/* Tier Upgrades Section */}
+        {activeSection === "tier-upgrades" && user?.role === "admin" && (
+          <div className="space-y-3">
               {tierUpgradesLoading ? (
                 <Skeleton className="h-48 w-full" />
               ) : tierUpgradeRequests.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground">
-                  No tier upgrade requests yet.
+                  {t("admin.no_tier_upgrades")}
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -635,7 +634,7 @@ export default function AdminDashboardPage() {
                             rel="noopener noreferrer"
                             className="text-xs text-primary underline underline-offset-2"
                           >
-                            View Portfolio
+                            {t("admin.view_portfolio")}
                           </a>
                         )}
                         {req.status === "pending" && (
@@ -645,7 +644,7 @@ export default function AdminDashboardPage() {
                               onClick={() => tierUpgradeReviewMutation.mutate({ id: req.id, status: "approved" })}
                               disabled={tierUpgradeReviewMutation.isPending}
                             >
-                              Approve & Upgrade
+                              {t("admin.approve_upgrade")}
                             </Button>
                             <Button
                               size="sm"
@@ -653,7 +652,7 @@ export default function AdminDashboardPage() {
                               onClick={() => tierUpgradeReviewMutation.mutate({ id: req.id, status: "rejected" })}
                               disabled={tierUpgradeReviewMutation.isPending}
                             >
-                              Reject
+                              {t("admin.reject")}
                             </Button>
                           </div>
                         )}
@@ -662,17 +661,62 @@ export default function AdminDashboardPage() {
                   ))}
                 </div>
               )}
-            </TabsContent>
-            </>
-          )}
+          </div>
+        )}
 
-          {/* Moderation Tab */}
-          <TabsContent value="moderation" className="space-y-3 mt-4">
+        {/* Subscriptions Section */}
+        {activeSection === "subscriptions" && user?.role === "admin" && (
+          <div>
+              {subsLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : allSubscriptions.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground">
+                  {t("admin.no_subscriptions")}
+                </div>
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-3 font-medium">{t("admin.table_user")}</th>
+                        <th className="text-left p-3 font-medium">{t("admin.table_plan")}</th>
+                        <th className="text-left p-3 font-medium">{t("admin.table_sessions_left")}</th>
+                        <th className="text-left p-3 font-medium">{t("admin.table_expires")}</th>
+                        <th className="text-left p-3 font-medium">{t("admin.table_status")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allSubscriptions.map((sub) => (
+                        <tr key={sub.id} className="border-t">
+                          <td className="p-3 text-xs text-muted-foreground">{sub.userId.slice(0, 8)}…</td>
+                          <td className="p-3 font-medium">{sub.plan?.nameAr ?? sub.plan?.name ?? `Plan ${sub.planId}`}</td>
+                          <td className="p-3">{sub.sessionsRemaining}</td>
+                          <td className="p-3 text-xs text-muted-foreground">{new Date(sub.expiresAt).toLocaleDateString()}</td>
+                          <td className="p-3">
+                            <Badge
+                              variant={sub.status === "active" ? "default" : sub.status === "cancelled" ? "destructive" : "secondary"}
+                              className="capitalize"
+                            >
+                              {sub.status}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+          </div>
+        )}
+
+        {/* Moderation Section */}
+        {activeSection === "moderation" && (
+          <div className="space-y-3">
             {flagsLoading ? (
               <Skeleton className="h-32 w-full" />
             ) : contentFlags.filter((f) => f.status === "pending").length === 0 ? (
               <div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground">
-                No pending content flags.
+                {t("admin.no_pending_flags")}
               </div>
             ) : (
               contentFlags
@@ -695,7 +739,7 @@ export default function AdminDashboardPage() {
                           <span className="text-sm font-medium capitalize">{flag.flagReason.replace("_", " ")}</span>
                         </div>
                         <p className="text-xs text-muted-foreground capitalize">
-                          {flag.messageType} message · {new Date(flag.createdAt).toLocaleDateString()}
+                          {flag.messageType} · {new Date(flag.createdAt).toLocaleDateString()}
                         </p>
                       </div>
                       <div className="flex gap-2">
@@ -705,7 +749,7 @@ export default function AdminDashboardPage() {
                           onClick={() => flagReviewMutation.mutate({ id: flag.id, action: "dismiss" })}
                           disabled={flagReviewMutation.isPending}
                         >
-                          Dismiss
+                          {t("admin.dismiss")}
                         </Button>
                         <Button
                           size="sm"
@@ -713,32 +757,34 @@ export default function AdminDashboardPage() {
                           onClick={() => flagReviewMutation.mutate({ id: flag.id, action: "escalate" })}
                           disabled={flagReviewMutation.isPending}
                         >
-                          Escalate
+                          {t("admin.escalate")}
                         </Button>
                       </div>
                     </CardContent>
                   </Card>
                 ))
             )}
-          </TabsContent>
+          </div>
+        )}
 
-          {/* Audit Log Tab */}
-          <TabsContent value="audit" className="mt-4">
+        {/* Audit Log Section */}
+        {activeSection === "audit" && (
+          <div>
             {auditLoading ? (
               <Skeleton className="h-48 w-full" />
             ) : auditLogs.length === 0 ? (
               <div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground">
-                No audit log entries.
+                {t("admin.no_audit_logs")}
               </div>
             ) : (
               <div className="rounded-lg border overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
                     <tr>
-                      <th className="text-left p-3 font-medium">Action</th>
-                      <th className="text-left p-3 font-medium">Resource</th>
-                      <th className="text-left p-3 font-medium">Actor</th>
-                      <th className="text-left p-3 font-medium">Time</th>
+                      <th className="text-left p-3 font-medium">{t("admin.table_action")}</th>
+                      <th className="text-left p-3 font-medium">{t("admin.table_resource")}</th>
+                      <th className="text-left p-3 font-medium">{t("admin.table_actor")}</th>
+                      <th className="text-left p-3 font-medium">{t("admin.table_time")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -761,9 +807,11 @@ export default function AdminDashboardPage() {
                 </table>
               </div>
             )}
-          </TabsContent>
-        </Tabs>
-      </div>
+          </div>
+        )}
+
+        </div>
+      </DashboardSidebarLayout>
     </AppLayout>
   );
 }

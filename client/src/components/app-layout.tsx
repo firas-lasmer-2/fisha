@@ -4,19 +4,12 @@ import { triggerHaptic } from "@/lib/haptics";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Heart, LayoutDashboard, Users, MessageCircle, Smile, BookOpen,
-  Calendar, Library, LogOut, Wind, UserCircle, AlertCircle,
-  HeartHandshake, ShieldCheck, UserPlus, Sparkles, TrendingUp, Leaf,
-  ChevronDown,
+  Heart, LayoutDashboard, Users, MessageCircle,
+  Calendar, CalendarDays, LogOut, UserCircle, AlertCircle,
+  ShieldCheck,
 } from "lucide-react";
 
 function homeHrefForRole(role: string | null | undefined): string {
@@ -49,7 +42,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   const desktopNavItems = [
-    { href: "/listen", icon: HeartHandshake, label: tr("nav.peer_support", "Peer Support") },
     { href: "/therapists", icon: Users, label: t("nav.therapists") },
     { href: "/appointments", icon: Calendar, label: t("nav.appointments") },
     { href: "/messages", icon: MessageCircle, label: t("nav.messages") },
@@ -64,20 +56,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       ? [
           { href: "/admin/listeners", icon: ShieldCheck, label: tr("nav.admin_listeners", "Listener Moderation") },
           { href: "/admin/dashboard", icon: LayoutDashboard, label: tr("nav.admin_dashboard", "Admin Dashboard") },
-        ]
-      : []),
-  ];
-
-  const wellnessNavItems = [
-    { href: "/grow", icon: Sparkles, label: tr("nav.grow", "Grow") },
-    { href: "/mood", icon: Smile, label: t("nav.mood") },
-    { href: "/journal", icon: BookOpen, label: t("nav.journal") },
-    { href: "/self-care", icon: Wind, label: t("nav.selfcare") },
-    { href: "/resources", icon: Library, label: t("nav.resources") },
-    ...(user?.role === "client"
-      ? [
-          { href: "/progress", icon: TrendingUp, label: tr("nav.progress", "Progress") },
-          { href: "/listener/apply", icon: UserPlus, label: tr("nav.listener_apply", "Become a Listener") },
         ]
       : []),
   ];
@@ -109,11 +87,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       active: location.startsWith("/therapists") || location.startsWith("/therapist/"),
     },
     {
-      key: "wellness",
-      href: "/grow",
-      icon: Leaf,
-      label: tr("nav.grow", "Grow"),
-      active: ["/grow", "/self-care", "/mood", "/journal", "/resources"].some((path) => location.startsWith(path)),
+      key: "appointments",
+      href: "/appointments",
+      icon: CalendarDays,
+      label: t("nav.appointments"),
+      active: location.startsWith("/appointments"),
     },
     {
       key: "profile",
@@ -149,32 +127,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 </Button>
               </Link>
             ))}
-
-            {/* Wellness dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant={wellnessNavItems.some((i) => location.startsWith(i.href)) ? "secondary" : "ghost"}
-                  size="sm"
-                  className="gap-1.5 text-xs"
-                  data-testid="nav-dropdown-wellness"
-                >
-                  <Leaf className="h-3.5 w-3.5" />
-                  {tr("nav.grow", "Grow")}
-                  <ChevronDown className="h-3 w-3 opacity-60" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="min-w-[160px]">
-                {wellnessNavItems.map((item) => (
-                  <Link key={item.href} href={item.href}>
-                    <DropdownMenuItem className="gap-2 cursor-pointer" data-testid={`nav-link-${item.href.slice(1)}`}>
-                      <item.icon className="h-3.5 w-3.5" />
-                      {item.label}
-                    </DropdownMenuItem>
-                  </Link>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
           </nav>
 
           <div className="flex items-center gap-1.5">
