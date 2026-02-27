@@ -630,7 +630,7 @@ export default function TherapistProfilePage() {
                   <Calendar className="h-4 w-4 text-primary" />
                 </div>
                 <p className="text-xs font-medium">Book a live session</p>
-                <p className="text-xs text-muted-foreground">20 TND Google Meet, when you're ready</p>
+                <p className="text-xs text-muted-foreground">20 TND via Jitsi Meet, when you're ready</p>
               </div>
               <div className="space-y-1">
                 <div className="mx-auto h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">

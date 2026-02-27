@@ -90,13 +90,14 @@ export default function TherapistLandingPage() {
 
   const { profile, user, reviews, openSlots } = data;
   const accentColor = profile.profileThemeColor || "#6366f1";
+  const customFont = (profile.customCss as any)?.font || "Inter";
   const therapistName = formatTherapistName(user);
   const inAppUrl = `/therapist/${profile.userId}`;
   const ctaUrl = profile.landingPageCtaUrl || inAppUrl;
   const ctaText = profile.landingPageCtaText || "Book a Session";
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background" style={{ fontFamily: `'${customFont}', sans-serif` }}>
       {/* Hero */}
       <div
         className="relative py-16 px-4"

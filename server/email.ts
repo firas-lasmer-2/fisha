@@ -122,6 +122,52 @@ export async function sendAppointmentConfirmation(
   await send(to, `تأكيد الموعد — ${details.therapistName} | ${APP_NAME}`, html);
 }
 
+export async function sendAppointmentBooked(
+  to: string,
+  details: AppointmentEmailDetails & { recipientRole: "client" | "therapist" },
+): Promise<void> {
+  const date = new Date(details.scheduledAt);
+  const dateStr = date.toLocaleString("ar-TN", {
+    weekday: "long", year: "numeric", month: "long", day: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+
+  const isTherapist = details.recipientRole === "therapist";
+  const whoAr = isTherapist
+    ? `العميل <strong>${details.clientName}</strong>`
+    : `المعالج <strong>${details.therapistName}</strong>`;
+  const whoFr = isTherapist
+    ? `Le client <strong>${details.clientName}</strong>`
+    : `Le thérapeute <strong>${details.therapistName}</strong>`;
+
+  const meetSection = details.meetLink
+    ? `
+    <div style="margin:24px 0;padding:16px;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0;">
+      <p style="margin:0 0 8px;font-weight:700;color:#065f46;">🎥 رابط جلسة Jitsi Meet</p>
+      <p style="margin:0 0 12px;font-size:13px;color:#666;">انسخ الرابط أو انقر عليه للانضمام وقت الجلسة</p>
+      <a href="${details.meetLink}" style="color:#1a6b55;word-break:break-all;">${details.meetLink}</a>
+      <br/>
+      <a href="${details.meetLink}" class="cta" style="margin-top:12px;display:inline-block;">انضم للجلسة · Rejoindre</a>
+    </div>`
+    : "";
+
+  const html = htmlWrap("حجز الموعد", `
+    <h2>📅 ${isTherapist ? "حجز جديد" : "تم حجز موعدك"}</h2>
+    <p>مرحباً <strong>${isTherapist ? details.therapistName : details.clientName}</strong>،</p>
+    <p>${whoAr} قام بحجز جلسة معك.</p>
+    <div class="detail-row"><span class="detail-label">التاريخ والوقت</span><span>${dateStr}</span></div>
+    <div class="detail-row"><span class="detail-label">المدة</span><span>${details.durationMinutes} دقيقة</span></div>
+    <div class="detail-row"><span class="detail-label">نوع الجلسة</span><span>${details.sessionType}</span></div>
+    ${details.priceDinar != null ? `<div class="detail-row"><span class="detail-label">السعر</span><span>${details.priceDinar} د.ت</span></div>` : ""}
+    ${meetSection}
+    <p style="margin-top:20px;color:#666;font-size:13px;">
+      ${whoFr} a réservé une séance avec vous le ${date.toLocaleDateString("fr-TN")} à ${date.toLocaleTimeString("fr-TN", { hour: "2-digit", minute: "2-digit" })}.
+    </p>
+  `);
+
+  await send(to, `${isTherapist ? "حجز جديد" : "تم حجز موعدك"} — ${APP_NAME}`, html);
+}
+
 export async function sendAppointmentReminder(
   to: string,
   details: AppointmentEmailDetails,

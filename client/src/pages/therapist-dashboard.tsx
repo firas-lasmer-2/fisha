@@ -18,7 +18,6 @@ import { Link } from "wouter";
 import { SlotCalendar } from "@/components/slot-calendar";
 import { FileUpload } from "@/components/file-upload";
 import { LandingPageBuilder } from "@/components/landing-page-builder";
-import { GoogleConnect } from "@/components/google-connect";
 import {
   Star,
   Save,
@@ -46,9 +45,14 @@ import {
   UserCircle,
   GraduationCap,
   DollarSign,
+  BookOpen,
+  Loader2,
+  X,
+  SmilePlus,
+  ArrowUpCircle,
 } from "lucide-react";
 import { useState, useEffect } from "react";
-import type { TherapistProfile, TherapistReview, TherapistSlot, TherapistVerification, Appointment, User, DoctorPayout } from "@shared/schema";
+import type { TherapistProfile, TherapistReview, TherapistSlot, TherapistVerification, Appointment, User, DoctorPayout, SessionHomework, TierUpgradeRequest } from "@shared/schema";
 
 interface DashboardData {
   profile: TherapistProfile;
@@ -129,6 +133,35 @@ export default function TherapistDashboardPage() {
   const { data: payouts = [] } = useQuery<DoctorPayout[]>({
     queryKey: ["/api/doctor/payouts"],
     enabled: !!user?.id,
+  });
+
+  const { data: myTierUpgradeRequests = [] } = useQuery<TierUpgradeRequest[]>({
+    queryKey: ["/api/doctor/tier-upgrade"],
+    enabled: !!user?.id,
+  });
+
+  const [upgradePortfolioUrl, setUpgradePortfolioUrl] = useState("");
+  const [upgradeJustification, setUpgradeJustification] = useState("");
+  const [showUpgradeForm, setShowUpgradeForm] = useState(false);
+
+  const tierUpgradeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/doctor/tier-upgrade", {
+        portfolioUrl: upgradePortfolioUrl || null,
+        justification: upgradeJustification || null,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/doctor/tier-upgrade"] });
+      toast({ title: "Upgrade request submitted!" });
+      setShowUpgradeForm(false);
+      setUpgradePortfolioUrl("");
+      setUpgradeJustification("");
+    },
+    onError: () => {
+      toast({ title: "Failed to submit upgrade request", variant: "destructive" });
+    },
   });
 
   // Clients who have appointments with this therapist, grouped with session count
@@ -289,6 +322,10 @@ export default function TherapistDashboardPage() {
         landingPageCtaText: landingCtaText || null,
         landingPageCtaUrl: landingCtaUrl || null,
         landingPageSections: landingSections,
+        profileThemeColor: themeColor,
+        customCss: { font: themeFont },
+        customBannerUrl: customBannerUrl || null,
+        consultationIntro: consultationIntro || null,
       });
     },
     onSuccess: () => {
@@ -473,6 +510,10 @@ export default function TherapistDashboardPage() {
               <DollarSign className="h-4 w-4 me-1.5" />
               {tr("therapist_dash.earnings_tab", "Earnings")}
             </TabsTrigger>
+            <TabsTrigger value="sessions" data-testid="tab-sessions">
+              <BookOpen className="h-4 w-4 me-1.5" />
+              {tr("therapist_dash.sessions_tab", "Sessions")}
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="profile" className="space-y-4">
@@ -525,15 +566,71 @@ export default function TherapistDashboardPage() {
                   )}
                 </div>
 
+                {/* Tier upgrade request for graduated doctors */}
+                {profile?.tier === "graduated_doctor" && (() => {
+                  const pendingRequest = myTierUpgradeRequests.find((r) => r.status === "pending");
+                  const approvedRequest = myTierUpgradeRequests.find((r) => r.status === "approved");
+                  if (approvedRequest) return null;
+                  return (
+                    <div className="rounded-lg border border-dashed p-3 space-y-2">
+                      <p className="text-sm font-medium flex items-center gap-1.5">
+                        <ArrowUpCircle className="h-4 w-4 text-primary" />
+                        Request Premium Upgrade
+                      </p>
+                      {pendingRequest ? (
+                        <p className="text-xs text-muted-foreground">
+                          Your upgrade request is under review. Submitted {new Date(pendingRequest.createdAt).toLocaleDateString()}.
+                        </p>
+                      ) : !showUpgradeForm ? (
+                        <Button size="sm" variant="outline" onClick={() => setShowUpgradeForm(true)}>
+                          Apply for Premium Tier
+                        </Button>
+                      ) : (
+                        <div className="space-y-2">
+                          <Input
+                            placeholder="Portfolio URL (optional)"
+                            value={upgradePortfolioUrl}
+                            onChange={(e) => setUpgradePortfolioUrl(e.target.value)}
+                            className="text-sm"
+                          />
+                          <Textarea
+                            placeholder="Why do you want to upgrade? Describe your experience, clientele, and specializations..."
+                            value={upgradeJustification}
+                            onChange={(e) => setUpgradeJustification(e.target.value)}
+                            rows={3}
+                            maxLength={2000}
+                            className="text-sm"
+                          />
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => tierUpgradeMutation.mutate()}
+                              disabled={tierUpgradeMutation.isPending}
+                            >
+                              {tierUpgradeMutation.isPending && <Loader2 className="h-3.5 w-3.5 me-1.5 animate-spin" />}
+                              Submit Request
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setShowUpgradeForm(false)}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 <Separator />
 
-                {/* Google Meet Integration */}
-                <div className="space-y-2">
+                {/* Video sessions */}
+                <div className="space-y-1">
                   <p className="text-sm font-medium flex items-center gap-2">
                     <Video className="h-4 w-4 text-primary" />
-                    {t("google.connect_title")}
+                    Video Sessions
                   </p>
-                  <GoogleConnect />
+                  <p className="text-xs text-muted-foreground">
+                    Each slot gets a unique Jitsi Meet link automatically — no setup needed. Share the link with your client before the session.
+                  </p>
                 </div>
 
                 <Separator />
@@ -1022,6 +1119,55 @@ export default function TherapistDashboardPage() {
                   </div>
                 )}
 
+                {/* Style Customization */}
+                <div className="rounded-lg border p-4 space-y-4">
+                  <p className="text-sm font-semibold">Style &amp; Appearance</p>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">Accent Color</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={themeColor}
+                          onChange={(e) => setThemeColor(e.target.value)}
+                          className="h-9 w-16 rounded border cursor-pointer bg-transparent p-0.5"
+                          data-testid="input-theme-color"
+                        />
+                        <code className="text-xs text-muted-foreground">{themeColor}</code>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">Font</label>
+                      <select
+                        value={themeFont}
+                        onChange={(e) => setThemeFont(e.target.value)}
+                        className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                        data-testid="select-theme-font"
+                      >
+                        <option value="Inter">Inter (Default)</option>
+                        <option value="Tajawal">Tajawal (Arabic)</option>
+                        <option value="Playfair Display">Playfair Display (Elegant)</option>
+                        <option value="DM Sans">DM Sans (Modern)</option>
+                        <option value="Nunito">Nunito (Friendly)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {profile?.slug && (
+                    <a
+                      href={`/p/${profile.slug}?embed=false`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      Preview your public page
+                    </a>
+                  )}
+                </div>
+
                 <div className="space-y-2">
                   <label className="text-sm font-medium">
                     {tr("therapist_dash.cta_text", "CTA Button Text")}
@@ -1311,8 +1457,324 @@ export default function TherapistDashboardPage() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {/* Sessions Tab — Phase 6: Homework + Notes + Consultation Prep */}
+          <TabsContent value="sessions" className="space-y-4">
+            <SessionsTab appointments={appointments} userId={user?.id ?? ""} t={t} tr={tr} toast={toast} />
+          </TabsContent>
         </Tabs>
       </div>
     </AppLayout>
+  );
+}
+
+// ---- Sessions Tab Component ----
+function SessionsTab({
+  appointments,
+  userId,
+  t,
+  tr,
+  toast,
+}: {
+  appointments: (Appointment & { otherUser: User })[];
+  userId: string;
+  t: (k: string) => string;
+  tr: (k: string, fallback: string) => string;
+  toast: any;
+}) {
+  const therapistAppointments = appointments
+    .filter((a) => a.therapistId === userId)
+    .sort((a, b) => (b.scheduledAt > a.scheduledAt ? 1 : -1));
+
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  if (therapistAppointments.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center text-muted-foreground">
+          <BookOpen className="h-10 w-10 mx-auto mb-3 opacity-30" />
+          <p className="text-sm">{tr("therapist_dash.no_sessions", "No sessions yet. Completed sessions will appear here.")}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-lg flex items-center gap-2">
+          <BookOpen className="h-5 w-5" />
+          {tr("therapist_dash.sessions_tab", "Sessions")}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {therapistAppointments.map((apt) => (
+          <div key={apt.id} className="rounded-lg border overflow-hidden">
+            <button
+              type="button"
+              className="w-full flex items-center justify-between p-3 text-left hover:bg-muted/40 transition-colors"
+              onClick={() => setExpandedId(expandedId === apt.id ? null : apt.id)}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 text-sm font-bold text-primary">
+                  {(apt.otherUser.firstName?.[0] || "?").toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">
+                    {apt.otherUser.firstName} {apt.otherUser.lastName}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(apt.scheduledAt).toLocaleDateString()} · {apt.status}
+                  </p>
+                </div>
+              </div>
+              {expandedId === apt.id ? <ChevronUp className="h-4 w-4 shrink-0" /> : <ChevronDown className="h-4 w-4 shrink-0" />}
+            </button>
+
+            {expandedId === apt.id && (
+              <div className="border-t p-3 space-y-4 bg-muted/20">
+                <SessionNotesPanel appointmentId={apt.id} therapistId={userId} clientId={apt.clientId} toast={toast} tr={tr} />
+                <PrepViewPanel appointmentId={apt.id} tr={tr} />
+              </div>
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+// Session notes + homework panel for therapist
+function SessionNotesPanel({
+  appointmentId,
+  therapistId,
+  clientId,
+  toast,
+  tr,
+}: {
+  appointmentId: number;
+  therapistId: string;
+  clientId: string;
+  toast: any;
+  tr: (k: string, fallback: string) => string;
+}) {
+  const [keyTopics, setKeyTopics] = useState<string[]>([]);
+  const [topicInput, setTopicInput] = useState("");
+  const [therapistNotes, setTherapistNotes] = useState("");
+  const [clientVisible, setClientVisible] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [newHwDesc, setNewHwDesc] = useState("");
+  const [newHwDue, setNewHwDue] = useState("");
+
+  const { data: summary, refetch: refetchSummary } = useQuery<any>({
+    queryKey: [`/api/session-summaries/${appointmentId}`],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/session-summaries/${appointmentId}`);
+      return res.json();
+    },
+  });
+
+  const { data: homework = [], refetch: refetchHw } = useQuery<SessionHomework[]>({
+    queryKey: [`/api/session-summaries/${appointmentId}/homework`],
+    queryFn: async () => {
+      if (!summary) return [];
+      const res = await apiRequest("GET", `/api/session-summaries/${summary.id}/homework`);
+      return res.json();
+    },
+    enabled: !!summary?.id,
+  });
+
+  useEffect(() => {
+    if (summary && !loaded) {
+      setKeyTopics(summary.keyTopics ?? []);
+      setTherapistNotes(summary.therapistNotes ?? "");
+      setClientVisible(summary.clientVisible ?? false);
+      setLoaded(true);
+    }
+  }, [summary, loaded]);
+
+  const saveSummaryMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", `/api/session-summaries/${appointmentId}`, {
+        keyTopics,
+        therapistNotes,
+        clientVisible,
+      });
+    },
+    onSuccess: () => {
+      refetchSummary();
+      toast({ title: tr("therapist_dash.notes_saved", "Session notes saved") });
+    },
+    onError: () => toast({ title: "Error", variant: "destructive" }),
+  });
+
+  const addHwMutation = useMutation({
+    mutationFn: async () => {
+      if (!summary?.id) throw new Error("No summary");
+      await apiRequest("POST", `/api/session-summaries/${summary.id}/homework`, {
+        description: newHwDesc,
+        dueDate: newHwDue || null,
+      });
+    },
+    onSuccess: () => {
+      refetchHw();
+      setNewHwDesc("");
+      setNewHwDue("");
+      toast({ title: tr("therapist_dash.homework_added", "Homework added") });
+    },
+    onError: () => toast({ title: "Error", variant: "destructive" }),
+  });
+
+  const deleteHwMutation = useMutation({
+    mutationFn: async (hwId: number) => {
+      await apiRequest("DELETE", `/api/homework/${hwId}`);
+    },
+    onSuccess: () => refetchHw(),
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* Session Notes */}
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Session Notes</p>
+
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Key Topics</label>
+          <div className="flex flex-wrap gap-1.5 mb-1">
+            {keyTopics.map((topic, i) => (
+              <Badge key={i} variant="secondary" className="gap-1 text-xs">
+                {topic}
+                <button type="button" onClick={() => setKeyTopics(keyTopics.filter((_, j) => j !== i))}>
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Input
+              value={topicInput}
+              onChange={(e) => setTopicInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && topicInput.trim()) {
+                  setKeyTopics([...keyTopics, topicInput.trim()]);
+                  setTopicInput("");
+                }
+              }}
+              placeholder="Add topic and press Enter..."
+              className="text-xs h-8"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Therapist Notes (private)</label>
+          <Textarea
+            value={therapistNotes}
+            onChange={(e) => setTherapistNotes(e.target.value)}
+            rows={3}
+            maxLength={5000}
+            className="text-xs"
+          />
+        </div>
+
+        <div className="flex items-center justify-between">
+          <label className="text-xs text-muted-foreground flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={clientVisible}
+              onChange={(e) => setClientVisible(e.target.checked)}
+              className="rounded"
+            />
+            Share summary with client
+          </label>
+          <Button size="sm" onClick={() => saveSummaryMutation.mutate()} disabled={saveSummaryMutation.isPending}>
+            {saveSummaryMutation.isPending && <Loader2 className="h-3 w-3 me-1.5 animate-spin" />}
+            <Save className="h-3 w-3 me-1.5" />
+            Save Notes
+          </Button>
+        </div>
+      </div>
+
+      {/* Homework */}
+      {summary?.id && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Homework Assignments</p>
+
+          {homework.length > 0 && (
+            <div className="space-y-1.5">
+              {homework.map((hw) => (
+                <div key={hw.id} className={`flex items-start gap-2 rounded-md border p-2 text-xs ${hw.completed ? "opacity-60" : ""}`}>
+                  <span className="mt-0.5">{hw.completed ? "✅" : "📝"}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className={hw.completed ? "line-through text-muted-foreground" : ""}>{hw.description}</p>
+                    {hw.dueDate && <p className="text-muted-foreground">Due: {new Date(hw.dueDate).toLocaleDateString()}</p>}
+                    {hw.clientNotes && <p className="text-muted-foreground italic">Client note: {hw.clientNotes}</p>}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => deleteHwMutation.mutate(hw.id)}
+                    className="text-muted-foreground hover:text-destructive shrink-0"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <Input
+              value={newHwDesc}
+              onChange={(e) => setNewHwDesc(e.target.value)}
+              placeholder="Assign homework..."
+              className="text-xs h-8 flex-1"
+            />
+            <Input
+              type="date"
+              value={newHwDue}
+              onChange={(e) => setNewHwDue(e.target.value)}
+              className="text-xs h-8 w-36"
+            />
+            <Button
+              size="sm"
+              className="h-8"
+              onClick={() => addHwMutation.mutate()}
+              disabled={!newHwDesc || addHwMutation.isPending}
+            >
+              {addHwMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Consultation prep viewer for therapist
+function PrepViewPanel({ appointmentId, tr }: { appointmentId: number; tr: (k: string, fallback: string) => string }) {
+  const { data: prep } = useQuery<any>({
+    queryKey: [`/api/appointments/${appointmentId}/prep`],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/appointments/${appointmentId}/prep`);
+      return res.json();
+    },
+  });
+
+  if (!prep) return null;
+
+  const MOOD_EMOJIS = ["😢", "😔", "😐", "🙂", "😊"];
+
+  return (
+    <div className="rounded-lg border border-dashed p-3 space-y-2 bg-muted/10">
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+        <ClipboardList className="h-3.5 w-3.5" />
+        Client's Session Prep
+      </p>
+      <p className="text-xs"><span className="font-medium">What's on their mind:</span> {prep.whatsOnMind}</p>
+      {prep.goalsForSession && <p className="text-xs"><span className="font-medium">Goals:</span> {prep.goalsForSession}</p>}
+      {prep.currentMood && (
+        <p className="text-xs"><span className="font-medium">Pre-session mood:</span> {MOOD_EMOJIS[prep.currentMood - 1]} ({prep.currentMood}/5)</p>
+      )}
+    </div>
   );
 }

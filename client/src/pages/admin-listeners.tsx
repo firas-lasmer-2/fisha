@@ -7,8 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ClipboardCheck, ShieldAlert, UserRoundCog } from "lucide-react";
-import type { ListenerApplication, ListenerQualificationTest, PeerReport, TherapistProfile, User } from "@shared/schema";
+import { ClipboardCheck, ShieldAlert, UserRoundCog, ArrowUpCircle } from "lucide-react";
+import type { ListenerApplication, ListenerQualificationTest, PeerReport, TherapistProfile, TierUpgradeRequest, User } from "@shared/schema";
 
 interface AdminListenersPayload {
   applications: ListenerApplication[];
@@ -101,6 +101,28 @@ export default function AdminListenersPage() {
     },
   });
 
+  const { data: tierUpgradeRequests = [] } = useQuery<(TierUpgradeRequest & { doctorName?: string })[]>({
+    queryKey: ["/api/admin/tier-upgrades"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/admin/tier-upgrades");
+      return res.json();
+    },
+  });
+
+  const tierUpgradeReviewMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: number; status: "approved" | "rejected" }) => {
+      await apiRequest("PATCH", `/api/admin/tier-upgrades/${id}`, { status });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/tier-upgrades"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/therapists"] });
+      toast({ title: "Tier upgrade reviewed" });
+    },
+    onError: () => {
+      toast({ title: t("common.error"), variant: "destructive" });
+    },
+  });
+
   const applications = data?.applications || [];
   const reports = data?.reports || [];
   const riskSnapshots = data?.riskSnapshots || [];
@@ -159,10 +181,19 @@ export default function AdminListenersPage() {
         </div>
 
         <Tabs defaultValue="applications" className="space-y-4">
-          <TabsList className="grid grid-cols-3">
+          <TabsList className="grid grid-cols-4">
             <TabsTrigger value="applications">{t("admin.listeners_title")}</TabsTrigger>
             <TabsTrigger value="reports">{t("admin.open_reports")}</TabsTrigger>
             <TabsTrigger value="tiers">{t("admin.therapist_tiers")}</TabsTrigger>
+            <TabsTrigger value="tier-upgrades">
+              <ArrowUpCircle className="h-3.5 w-3.5 me-1" />
+              Upgrades
+              {tierUpgradeRequests.filter((r) => r.status === "pending").length > 0 && (
+                <Badge className="ms-1.5" variant="destructive">
+                  {tierUpgradeRequests.filter((r) => r.status === "pending").length}
+                </Badge>
+              )}
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="applications">
@@ -221,9 +252,16 @@ export default function AdminListenersPage() {
                           </div>
                         </div>
                         {risk && (
-                          <p className="text-xs text-muted-foreground">
-                            {tr("admin.risk_details", "Open reports")} {risk.openReports} • {tr("admin.low_ratings", "Low ratings (30d)")} {risk.recentLowRatings} • {tr("admin.penalty_points", "Penalty points")} {risk.penaltyPoints}
-                          </p>
+                          <div className="text-xs text-muted-foreground space-y-0.5">
+                            <p>
+                              {tr("admin.risk_details", "Open reports")} {risk.openReports} • {tr("admin.low_ratings", "Low ratings (30d)")} {risk.recentLowRatings} • {tr("admin.penalty_points", "Penalty points")} {risk.penaltyPoints}
+                            </p>
+                            {risk.ratingCount > 0 && (
+                              <p>
+                                Avg rating: <span className="font-medium">{risk.averageRating.toFixed(1)}</span> ({risk.ratingCount} sessions)
+                              </p>
+                            )}
+                          </div>
                         )}
 
                         {application.motivation && (
@@ -403,6 +441,72 @@ export default function AdminListenersPage() {
                           {t("admin.set_premium_doctor")}
                         </Button>
                       </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="tier-upgrades" className="space-y-3">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <ArrowUpCircle className="h-4 w-4 text-primary" />
+                  Doctor Tier Upgrade Requests
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {tierUpgradeRequests.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No upgrade requests yet.</p>
+                ) : (
+                  tierUpgradeRequests.map((req) => (
+                    <div key={req.id} className="border rounded-md p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div>
+                          <p className="text-sm font-medium">{req.doctorName || `Doctor ${req.doctorId.slice(0, 8)}`}</p>
+                          <p className="text-xs text-muted-foreground">{req.currentTier} → {req.requestedTier}</p>
+                          <p className="text-xs text-muted-foreground">{new Date(req.createdAt).toLocaleDateString()}</p>
+                        </div>
+                        <Badge
+                          variant={req.status === "approved" ? "default" : req.status === "rejected" ? "destructive" : "secondary"}
+                          className="capitalize"
+                        >
+                          {req.status}
+                        </Badge>
+                      </div>
+                      {req.justification && (
+                        <p className="text-xs text-muted-foreground bg-muted/30 rounded p-2">{req.justification}</p>
+                      )}
+                      {req.portfolioUrl && (
+                        <a
+                          href={req.portfolioUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-primary underline underline-offset-2"
+                        >
+                          View Portfolio
+                        </a>
+                      )}
+                      {req.status === "pending" && (
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => tierUpgradeReviewMutation.mutate({ id: req.id, status: "approved" })}
+                            disabled={tierUpgradeReviewMutation.isPending}
+                          >
+                            Approve & Upgrade
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => tierUpgradeReviewMutation.mutate({ id: req.id, status: "rejected" })}
+                            disabled={tierUpgradeReviewMutation.isPending}
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   ))
                 )}

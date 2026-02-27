@@ -27,6 +27,32 @@ export const apiLimiter = rateLimit({
 });
 
 /**
+ * Payment initiation limiter — prevents duplicate charges and abuse.
+ * 10 payment attempts per 15 minutes per IP.
+ */
+export const paymentLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many payment attempts, please try again later." },
+  skipSuccessfulRequests: false,
+});
+
+/**
+ * Booking limiter — prevents slot booking spam.
+ * 20 booking attempts per 15 minutes per IP.
+ */
+export const bookingLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many booking attempts, please try again later." },
+  skipSuccessfulRequests: false,
+});
+
+/**
  * Webhook endpoints — external payment providers call these.
  * 60 requests per minute per IP.
  */

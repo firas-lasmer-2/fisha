@@ -27,6 +27,10 @@ import {
   type AuditLog,
   type TreatmentGoal, type InsertTreatmentGoal, type UpdateTreatmentGoal,
   type SessionSummary, type UpsertSessionSummary,
+  type SessionHomework, type InsertHomework, type UpdateHomework,
+  type SessionMoodRating, type UpsertMoodRating,
+  type ConsultationPrep, type UpsertConsultationPrep,
+  type TierUpgradeRequest, type CreateTierUpgradeRequest,
   type ListenerQualificationTest,
   type TherapistGoogleToken,
   type DoctorPayout,
@@ -40,6 +44,8 @@ import {
   mapListenerApplication, mapListenerQueueEntry,
   mapPeerSession, mapPeerMessage, mapPeerSessionFeedback, mapPeerReport,
   mapTherapistVerification, mapAuditLog, mapTreatmentGoal, mapSessionSummary,
+  mapSessionHomework, mapSessionMoodRating, mapConsultationPrep,
+  mapTierUpgradeRequest,
   mapListenerQualificationTest,
   toSnakeCase,
 } from "@shared/schema";
@@ -209,6 +215,7 @@ export interface IStorage {
   createMoodEntry(entry: InsertMoodEntry): Promise<MoodEntry>;
 
   getJournalEntries(userId: string): Promise<JournalEntry[]>;
+  getJournalEntry(id: number): Promise<JournalEntry | undefined>;
   createJournalEntry(entry: InsertJournalEntry): Promise<JournalEntry>;
   updateJournalEntry(id: number, data: Partial<InsertJournalEntry>): Promise<JournalEntry | undefined>;
   deleteJournalEntry(id: number): Promise<void>;
@@ -218,6 +225,7 @@ export interface IStorage {
 
   getReviewsByTherapist(therapistId: string): Promise<(TherapistReview & { client?: Partial<User> })[]>;
   getReviewByAppointment(appointmentId: number): Promise<TherapistReview | undefined>;
+  getReviewById(id: number): Promise<TherapistReview | undefined>;
   createReview(data: InsertTherapistReview): Promise<TherapistReview>;
   addTherapistResponse(reviewId: number, response: string): Promise<TherapistReview | undefined>;
   getTherapistBySlug(slug: string): Promise<TherapistProfile | undefined>;
@@ -364,6 +372,25 @@ export interface IStorage {
     netAmountDinar: number;
   }): Promise<DoctorPayout>;
   updateDoctorPayoutStatus(id: number, status: "pending" | "processing" | "paid" | "failed"): Promise<DoctorPayout | undefined>;
+
+  // Phase 6: Post-session features
+  getHomeworkBySummary(summaryId: number): Promise<SessionHomework[]>;
+  getHomeworkByClient(clientId: string): Promise<SessionHomework[]>;
+  createHomework(summaryId: number, data: InsertHomework): Promise<SessionHomework>;
+  updateHomework(id: number, data: UpdateHomework): Promise<SessionHomework | undefined>;
+  deleteHomework(id: number): Promise<void>;
+
+  getMoodRating(appointmentId: number): Promise<SessionMoodRating | undefined>;
+  upsertMoodRating(appointmentId: number, clientId: string, data: UpsertMoodRating): Promise<SessionMoodRating>;
+
+  getConsultationPrep(appointmentId: number): Promise<ConsultationPrep | undefined>;
+  upsertConsultationPrep(appointmentId: number, clientId: string, data: UpsertConsultationPrep): Promise<ConsultationPrep>;
+
+  // Phase 7: Tier upgrade requests
+  createTierUpgradeRequest(doctorId: string, currentTier: string, data: CreateTierUpgradeRequest): Promise<TierUpgradeRequest>;
+  getTierUpgradeRequestsByDoctor(doctorId: string): Promise<TierUpgradeRequest[]>;
+  getAllTierUpgradeRequests(status?: string): Promise<(TierUpgradeRequest & { doctorName?: string })[]>;
+  reviewTierUpgradeRequest(id: number, status: "approved" | "rejected", reviewedBy: string): Promise<TierUpgradeRequest | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -885,6 +912,16 @@ export class DatabaseStorage implements IStorage {
     return data.map(mapJournalEntry);
   }
 
+  async getJournalEntry(id: number): Promise<JournalEntry | undefined> {
+    const { data, error } = await supabase
+      .from("journal_entries")
+      .select("*")
+      .eq("id", id)
+      .single();
+    if (error || !data) return undefined;
+    return mapJournalEntry(data);
+  }
+
   async createJournalEntry(entry: InsertJournalEntry): Promise<JournalEntry> {
     const row = toSnakeCase(entry);
     const { data, error } = await supabase
@@ -975,6 +1012,16 @@ export class DatabaseStorage implements IStorage {
       .from("therapist_reviews")
       .select("*")
       .eq("appointment_id", appointmentId)
+      .single();
+    if (error || !data) return undefined;
+    return mapTherapistReview(data);
+  }
+
+  async getReviewById(id: number): Promise<TherapistReview | undefined> {
+    const { data, error } = await supabase
+      .from("therapist_reviews")
+      .select("*")
+      .eq("id", id)
       .single();
     if (error || !data) return undefined;
     return mapTherapistReview(data);
@@ -2406,6 +2453,177 @@ export class DatabaseStorage implements IStorage {
       .single();
     if (error || !data) return undefined;
     return mapDoctorPayout(data);
+  }
+
+  // ---- Phase 6: Post-session features ----
+
+  async getHomeworkBySummary(summaryId: number): Promise<SessionHomework[]> {
+    const { data, error } = await supabase
+      .from("session_homework")
+      .select("*")
+      .eq("summary_id", summaryId)
+      .order("created_at", { ascending: true });
+    if (error || !data) return [];
+    return data.map(mapSessionHomework);
+  }
+
+  async getHomeworkByClient(clientId: string): Promise<SessionHomework[]> {
+    // Join through session_summaries to get homework for a client
+    const { data, error } = await supabase
+      .from("session_homework")
+      .select("*, session_summaries!inner(client_id)")
+      .eq("session_summaries.client_id", clientId)
+      .order("created_at", { ascending: false });
+    if (error || !data) return [];
+    return data.map(mapSessionHomework);
+  }
+
+  async createHomework(summaryId: number, data: InsertHomework): Promise<SessionHomework> {
+    const { data: row, error } = await supabase
+      .from("session_homework")
+      .insert({ summary_id: summaryId, description: data.description, due_date: data.dueDate ?? null })
+      .select("*")
+      .single();
+    if (error || !row) throw error ?? new Error("Failed to create homework");
+    return mapSessionHomework(row);
+  }
+
+  async updateHomework(id: number, data: UpdateHomework): Promise<SessionHomework | undefined> {
+    const patch: Record<string, any> = {};
+    if (data.completed !== undefined) {
+      patch.completed = data.completed;
+      patch.completed_at = data.completed ? new Date().toISOString() : null;
+    }
+    if (data.clientNotes !== undefined) patch.client_notes = data.clientNotes;
+    const { data: row, error } = await supabase
+      .from("session_homework")
+      .update(patch)
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error || !row) return undefined;
+    return mapSessionHomework(row);
+  }
+
+  async deleteHomework(id: number): Promise<void> {
+    await supabase.from("session_homework").delete().eq("id", id);
+  }
+
+  async getMoodRating(appointmentId: number): Promise<SessionMoodRating | undefined> {
+    const { data, error } = await supabase
+      .from("session_mood_ratings")
+      .select("*")
+      .eq("appointment_id", appointmentId)
+      .maybeSingle();
+    if (error || !data) return undefined;
+    return mapSessionMoodRating(data);
+  }
+
+  async upsertMoodRating(appointmentId: number, clientId: string, data: UpsertMoodRating): Promise<SessionMoodRating> {
+    const now = new Date().toISOString();
+    const { data: row, error } = await supabase
+      .from("session_mood_ratings")
+      .upsert(
+        {
+          appointment_id: appointmentId,
+          client_id: clientId,
+          pre_session_mood: data.preSessionMood ?? null,
+          post_session_mood: data.postSessionMood ?? null,
+          updated_at: now,
+        },
+        { onConflict: "appointment_id" }
+      )
+      .select("*")
+      .single();
+    if (error || !row) throw error ?? new Error("Failed to upsert mood rating");
+    return mapSessionMoodRating(row);
+  }
+
+  async getConsultationPrep(appointmentId: number): Promise<ConsultationPrep | undefined> {
+    const { data, error } = await supabase
+      .from("consultation_prep")
+      .select("*")
+      .eq("appointment_id", appointmentId)
+      .maybeSingle();
+    if (error || !data) return undefined;
+    return mapConsultationPrep(data);
+  }
+
+  async upsertConsultationPrep(appointmentId: number, clientId: string, data: UpsertConsultationPrep): Promise<ConsultationPrep> {
+    const now = new Date().toISOString();
+    const { data: row, error } = await supabase
+      .from("consultation_prep")
+      .upsert(
+        {
+          appointment_id: appointmentId,
+          client_id: clientId,
+          whats_on_mind: data.whatsOnMind,
+          goals_for_session: data.goalsForSession ?? null,
+          current_mood: data.currentMood ?? null,
+          updated_at: now,
+        },
+        { onConflict: "appointment_id" }
+      )
+      .select("*")
+      .single();
+    if (error || !row) throw error ?? new Error("Failed to upsert consultation prep");
+    return mapConsultationPrep(row);
+  }
+
+  // ---- Phase 7: Tier Upgrade Requests ----
+
+  async createTierUpgradeRequest(doctorId: string, currentTier: string, data: CreateTierUpgradeRequest): Promise<TierUpgradeRequest> {
+    const { data: row, error } = await supabase
+      .from("tier_upgrade_requests")
+      .insert({
+        doctor_id: doctorId,
+        current_tier: currentTier,
+        requested_tier: "premium_doctor",
+        portfolio_url: data.portfolioUrl ?? null,
+        justification: data.justification ?? null,
+        status: "pending",
+      })
+      .select("*")
+      .single();
+    if (error || !row) throw error ?? new Error("Failed to create tier upgrade request");
+    return mapTierUpgradeRequest(row);
+  }
+
+  async getTierUpgradeRequestsByDoctor(doctorId: string): Promise<TierUpgradeRequest[]> {
+    const { data, error } = await supabase
+      .from("tier_upgrade_requests")
+      .select("*")
+      .eq("doctor_id", doctorId)
+      .order("created_at", { ascending: false });
+    if (error || !data) return [];
+    return data.map(mapTierUpgradeRequest);
+  }
+
+  async getAllTierUpgradeRequests(status?: string): Promise<(TierUpgradeRequest & { doctorName?: string })[]> {
+    let query = supabase
+      .from("tier_upgrade_requests")
+      .select("*, profiles(first_name, last_name)")
+      .order("created_at", { ascending: false });
+    if (status) query = query.eq("status", status);
+    const { data, error } = await query;
+    if (error || !data) return [];
+    return data.map((row: any) => ({
+      ...mapTierUpgradeRequest(row),
+      doctorName: row.profiles
+        ? `${row.profiles.first_name ?? ""} ${row.profiles.last_name ?? ""}`.trim()
+        : undefined,
+    }));
+  }
+
+  async reviewTierUpgradeRequest(id: number, status: "approved" | "rejected", reviewedBy: string): Promise<TierUpgradeRequest | undefined> {
+    const { data: row, error } = await supabase
+      .from("tier_upgrade_requests")
+      .update({ status, reviewed_by: reviewedBy, reviewed_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error || !row) return undefined;
+    return mapTierUpgradeRequest(row);
   }
 
 }

@@ -52,7 +52,6 @@ interface SlotCalendarProps {
   therapistId: string;
   defaultPriceDinar?: number;
   defaultDurationMinutes?: number;
-  meetLink?: string;
 }
 
 export function SlotCalendar({
@@ -60,7 +59,6 @@ export function SlotCalendar({
   therapistId,
   defaultPriceDinar = 20,
   defaultDurationMinutes = 50,
-  meetLink = "",
 }: SlotCalendarProps) {
   const { toast } = useToast();
   const [weekOffset, setWeekOffset] = useState(0);
@@ -68,7 +66,6 @@ export function SlotCalendar({
   const [selectedCell, setSelectedCell] = useState<{ date: Date; hour: number } | null>(null);
   const [duration, setDuration] = useState(defaultDurationMinutes);
   const [price, setPrice] = useState(defaultPriceDinar);
-  const [slotMeetLink, setSlotMeetLink] = useState(meetLink);
   const [recurWeeks, setRecurWeeks] = useState(1);
   const [isRecurring, setIsRecurring] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -114,7 +111,6 @@ export function SlotCalendar({
         startsAt: isoAt(d, selectedCell.hour),
         durationMinutes: duration,
         priceDinar: price,
-        meetLink: slotMeetLink || null,
       };
     });
 
@@ -280,17 +276,6 @@ export function SlotCalendar({
                     className="mt-1"
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium">Google Meet Link (optional)</label>
-                <Input
-                  type="url"
-                  placeholder="https://meet.google.com/..."
-                  value={slotMeetLink}
-                  onChange={(e) => setSlotMeetLink(e.target.value)}
-                  className="mt-1"
-                />
               </div>
 
               <div className="rounded-lg border p-3 space-y-2">

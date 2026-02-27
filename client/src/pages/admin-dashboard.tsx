@@ -27,6 +27,7 @@ import {
   Activity,
   DollarSign,
   GraduationCap,
+  ArrowUpCircle,
 } from "lucide-react";
 import {
   LineChart,
@@ -37,7 +38,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import type { TherapistVerification, AuditLog, DoctorPayout } from "@shared/schema";
+import type { TherapistVerification, AuditLog, DoctorPayout, TierUpgradeRequest } from "@shared/schema";
 
 interface AdminAnalytics {
   totalUsers: number;
@@ -145,6 +146,15 @@ export default function AdminDashboardPage() {
     enabled: user?.role === "admin",
   });
 
+  const { data: tierUpgradeRequests = [], isLoading: tierUpgradesLoading } = useQuery<(TierUpgradeRequest & { doctorName?: string })[]>({
+    queryKey: ["/api/admin/tier-upgrades"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/admin/tier-upgrades");
+      return res.json();
+    },
+    enabled: user?.role === "admin",
+  });
+
   const updatePayoutMutation = useMutation({
     mutationFn: async ({ id, status }: { id: number; status: string }) => {
       await apiRequest("PATCH", `/api/admin/doctor-payouts/${id}`, { status });
@@ -197,6 +207,19 @@ export default function AdminDashboardPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users", userPage, userSearch] });
       toast({ title: "User role updated" });
+    },
+    onError: () => {
+      toast({ title: t("common.error"), variant: "destructive" });
+    },
+  });
+
+  const tierUpgradeReviewMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: number; status: "approved" | "rejected" }) => {
+      await apiRequest("PATCH", `/api/admin/tier-upgrades/${id}`, { status });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/tier-upgrades"] });
+      toast({ title: "Tier upgrade request reviewed" });
     },
     onError: () => {
       toast({ title: t("common.error"), variant: "destructive" });
@@ -267,6 +290,15 @@ export default function AdminDashboardPage() {
                 <TabsTrigger value="payouts">
                   <DollarSign className="h-4 w-4 me-1.5" />
                   Payouts
+                </TabsTrigger>
+                <TabsTrigger value="tier-upgrades">
+                  <ArrowUpCircle className="h-4 w-4 me-1.5" />
+                  Tier Upgrades
+                  {tierUpgradeRequests.filter((r) => r.status === "pending").length > 0 && (
+                    <Badge className="ms-2" variant="destructive">
+                      {tierUpgradeRequests.filter((r) => r.status === "pending").length}
+                    </Badge>
+                  )}
                 </TabsTrigger>
               </>
             )}
@@ -556,6 +588,78 @@ export default function AdminDashboardPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+            </TabsContent>
+
+            {/* Tier Upgrades Tab */}
+            <TabsContent value="tier-upgrades" className="space-y-3 mt-4">
+              {tierUpgradesLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : tierUpgradeRequests.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground">
+                  No tier upgrade requests yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {tierUpgradeRequests.map((req) => (
+                    <Card key={req.id}>
+                      <CardContent className="p-4 space-y-3">
+                        <div className="flex items-start justify-between gap-3 flex-wrap">
+                          <div className="space-y-0.5">
+                            <p className="font-medium flex items-center gap-1.5">
+                              <GraduationCap className="h-4 w-4 text-primary" />
+                              {req.doctorName || `Doctor ${req.doctorId.slice(0, 8)}`}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {req.currentTier} → {req.requestedTier}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {new Date(req.createdAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <Badge
+                            variant={req.status === "approved" ? "default" : req.status === "rejected" ? "destructive" : "secondary"}
+                            className="capitalize"
+                          >
+                            {req.status}
+                          </Badge>
+                        </div>
+                        {req.justification && (
+                          <p className="text-sm text-muted-foreground bg-muted/30 rounded p-2">{req.justification}</p>
+                        )}
+                        {req.portfolioUrl && (
+                          <a
+                            href={req.portfolioUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-primary underline underline-offset-2"
+                          >
+                            View Portfolio
+                          </a>
+                        )}
+                        {req.status === "pending" && (
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => tierUpgradeReviewMutation.mutate({ id: req.id, status: "approved" })}
+                              disabled={tierUpgradeReviewMutation.isPending}
+                            >
+                              Approve & Upgrade
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => tierUpgradeReviewMutation.mutate({ id: req.id, status: "rejected" })}
+                              disabled={tierUpgradeReviewMutation.isPending}
+                            >
+                              Reject
+                            </Button>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
                 </div>
               )}
             </TabsContent>

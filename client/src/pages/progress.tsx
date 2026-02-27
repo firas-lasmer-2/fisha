@@ -23,6 +23,8 @@ import {
   Trash2,
   CheckCircle2,
   Clock,
+  Loader2,
+  ClipboardList,
 } from "lucide-react";
 import {
   LineChart,
@@ -36,6 +38,17 @@ import {
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { MoodEntry, JournalEntry, Appointment } from "@shared/schema";
+
+interface SessionHomework {
+  id: number;
+  summaryId: number;
+  description: string;
+  dueDate: string | null;
+  completed: boolean;
+  completedAt: string | null;
+  clientNotes: string | null;
+  createdAt: string;
+}
 
 interface TreatmentGoal {
   id: number;
@@ -189,6 +202,10 @@ export default function ProgressPage() {
     queryKey: ["/api/goals"],
   });
 
+  const { data: homework = [], isLoading: homeworkLoading } = useQuery<SessionHomework[]>({
+    queryKey: ["/api/homework"],
+  });
+
   const { data: analyticsData, isLoading: analyticsLoading } = useQuery<MoodAnalytics>({
     queryKey: ["/api/progress/analytics", analyticsDays],
     queryFn: async () => {
@@ -249,6 +266,16 @@ export default function ProgressPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/goals"] });
       toast({ title: "Goal deleted" });
+    },
+    onError: () => toast({ title: t("common.error"), variant: "destructive" }),
+  });
+
+  const completeHomeworkMutation = useMutation({
+    mutationFn: async ({ id, completed, clientNotes }: { id: number; completed: boolean; clientNotes?: string }) => {
+      await apiRequest("PATCH", `/api/homework/${id}`, { completed, clientNotes });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/homework"] });
     },
     onError: () => toast({ title: t("common.error"), variant: "destructive" }),
   });
@@ -515,6 +542,62 @@ export default function ProgressPage() {
         </Card>
 
         {/* Quick links */}
+        {/* Homework from Therapist */}
+        {(homework.length > 0 || homeworkLoading) && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <ClipboardList className="h-4 w-4 text-blue-500" />
+                Homework from Your Therapist
+                {homework.filter((h) => !h.completed).length > 0 && (
+                  <Badge variant="secondary">{homework.filter((h) => !h.completed).length} pending</Badge>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 space-y-2">
+              {homeworkLoading ? (
+                <Skeleton className="h-16 w-full" />
+              ) : (
+                homework.map((hw) => (
+                  <div
+                    key={hw.id}
+                    className={`flex items-start gap-3 rounded-lg border p-3 transition-opacity ${hw.completed ? "opacity-60" : ""}`}
+                    data-testid={`homework-item-${hw.id}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => completeHomeworkMutation.mutate({ id: hw.id, completed: !hw.completed })}
+                      className={`mt-0.5 shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+                        hw.completed
+                          ? "bg-emerald-500 border-emerald-500 text-white"
+                          : "border-muted-foreground hover:border-primary"
+                      }`}
+                    >
+                      {hw.completed && <CheckCircle2 className="h-3 w-3" />}
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm ${hw.completed ? "line-through text-muted-foreground" : ""}`}>
+                        {hw.description}
+                      </p>
+                      {hw.dueDate && (
+                        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                          <Clock className="h-3 w-3" />
+                          Due {new Date(hw.dueDate).toLocaleDateString()}
+                        </p>
+                      )}
+                      {hw.completedAt && (
+                        <p className="text-xs text-emerald-600 mt-0.5">
+                          Completed {new Date(hw.completedAt).toLocaleDateString()}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         <div className="grid sm:grid-cols-3 gap-3">
           <Link href="/journal">
             <Button variant="outline" className="w-full gap-2">
@@ -539,3 +622,4 @@ export default function ProgressPage() {
     </AppLayout>
   );
 }
+

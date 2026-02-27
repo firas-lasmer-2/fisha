@@ -723,6 +723,151 @@ export function mapSessionSummary(row: any): SessionSummary {
   };
 }
 
+// ---- Phase 6: Post-session features ----
+
+// Session Homework
+export interface SessionHomework {
+  id: number;
+  summaryId: number;
+  description: string;
+  dueDate: string | null;
+  completed: boolean;
+  completedAt: string | null;
+  clientNotes: string | null;
+  createdAt: string;
+}
+
+export const insertHomeworkSchema = z.object({
+  description: z.string().min(1).max(1000),
+  dueDate: z.string().optional().nullable(),
+});
+
+export const updateHomeworkSchema = z.object({
+  completed: z.boolean().optional(),
+  clientNotes: z.string().max(1000).optional().nullable(),
+});
+
+export type InsertHomework = z.infer<typeof insertHomeworkSchema>;
+export type UpdateHomework = z.infer<typeof updateHomeworkSchema>;
+
+export function mapSessionHomework(row: any): SessionHomework {
+  return {
+    id: row.id,
+    summaryId: row.summary_id,
+    description: row.description,
+    dueDate: row.due_date,
+    completed: row.completed,
+    completedAt: row.completed_at,
+    clientNotes: row.client_notes,
+    createdAt: row.created_at,
+  };
+}
+
+// Session Mood Rating
+export interface SessionMoodRating {
+  id: number;
+  appointmentId: number;
+  clientId: string;
+  preSessionMood: number | null;
+  postSessionMood: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const upsertMoodRatingSchema = z.object({
+  preSessionMood: z.number().int().min(1).max(5).optional().nullable(),
+  postSessionMood: z.number().int().min(1).max(5).optional().nullable(),
+});
+
+export type UpsertMoodRating = z.infer<typeof upsertMoodRatingSchema>;
+
+export function mapSessionMoodRating(row: any): SessionMoodRating {
+  return {
+    id: row.id,
+    appointmentId: row.appointment_id,
+    clientId: row.client_id,
+    preSessionMood: row.pre_session_mood,
+    postSessionMood: row.post_session_mood,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+// Consultation Prep
+export interface ConsultationPrep {
+  id: number;
+  appointmentId: number;
+  clientId: string;
+  whatsOnMind: string;
+  goalsForSession: string | null;
+  currentMood: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const upsertConsultationPrepSchema = z.object({
+  whatsOnMind: z.string().min(1).max(2000),
+  goalsForSession: z.string().max(1000).optional().nullable(),
+  currentMood: z.number().int().min(1).max(5).optional().nullable(),
+});
+
+export type UpsertConsultationPrep = z.infer<typeof upsertConsultationPrepSchema>;
+
+export function mapConsultationPrep(row: any): ConsultationPrep {
+  return {
+    id: row.id,
+    appointmentId: row.appointment_id,
+    clientId: row.client_id,
+    whatsOnMind: row.whats_on_mind,
+    goalsForSession: row.goals_for_session,
+    currentMood: row.current_mood,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+// ---- Tier Upgrade Requests (Phase 7) ----
+
+export interface TierUpgradeRequest {
+  id: number;
+  doctorId: string;
+  currentTier: string;
+  requestedTier: string;
+  portfolioUrl: string | null;
+  justification: string | null;
+  status: string;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+}
+
+export const createTierUpgradeRequestSchema = z.object({
+  portfolioUrl: z.string().url().optional().nullable(),
+  justification: z.string().max(2000).optional().nullable(),
+});
+
+export const reviewTierUpgradeRequestSchema = z.object({
+  status: z.enum(["approved", "rejected"]),
+});
+
+export type CreateTierUpgradeRequest = z.infer<typeof createTierUpgradeRequestSchema>;
+export type ReviewTierUpgradeRequest = z.infer<typeof reviewTierUpgradeRequestSchema>;
+
+export function mapTierUpgradeRequest(row: any): TierUpgradeRequest {
+  return {
+    id: row.id,
+    doctorId: row.doctor_id,
+    currentTier: row.current_tier,
+    requestedTier: row.requested_tier,
+    portfolioUrl: row.portfolio_url ?? null,
+    justification: row.justification ?? null,
+    status: row.status,
+    reviewedBy: row.reviewed_by ?? null,
+    reviewedAt: row.reviewed_at ?? null,
+    createdAt: row.created_at,
+  };
+}
+
 // ---- Therapist Google Token (metadata only — never expose raw tokens) ----
 
 export interface TherapistGoogleToken {
@@ -894,7 +1039,6 @@ export const slotCreateRequestSchema = z.object({
   startsAt: z.string().datetime({ message: "Must be ISO 8601 datetime" }),
   durationMinutes: z.number().int().min(15).max(180),
   priceDinar: z.number().nonnegative().max(1000),
-  meetLink: z.string().url().optional().nullable(),
 });
 
 export const paymentInitiateRequestSchema = z.object({

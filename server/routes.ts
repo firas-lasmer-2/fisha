@@ -10,24 +10,15 @@ import { mapProfile, type User,
   onboardingRequestSchema, reviewRequestSchema, slotCreateRequestSchema,
   paymentInitiateRequestSchema, queueJoinRequestSchema, peerMessageRequestSchema,
 } from "@shared/schema";
-import { authLimiter, webhookLimiter } from "./middleware/rate-limit";
+import { authLimiter, webhookLimiter, paymentLimiter, bookingLimiter } from "./middleware/rate-limit";
 import { QUALIFICATION_QUESTIONS, scoreAnswers } from "@shared/qualification-questions";
-import {
-  generateGoogleAuthUrl,
-  exchangeCodeForTokens,
-  refreshAccessToken,
-  revokeGoogleToken,
-  createCalendarEvent,
-  encryptToken,
-  decryptToken,
-  isGoogleConfigured,
-} from "./google-meet";
 import { validateBody } from "./middleware/validate";
 import { logAudit } from "./audit";
 import { createFlouciPayment } from "./payments/flouci";
 import { createKonnectPayment } from "./payments/konnect";
 import {
   sendAppointmentConfirmation,
+  sendAppointmentBooked,
   sendVerificationStatusUpdate,
   sendListenerApplicationUpdate,
   sendWelcome,
@@ -45,6 +36,11 @@ const CRISIS_KEYWORDS = [
 ];
 
 // ---- Auth middleware ----
+
+/** Generate a Jitsi Meet link for a session. No auth required. */
+function generateJitsiLink(): string {
+  return `https://meet.jit.si/shifa-${crypto.randomUUID()}`;
+}
 
 async function extractUser(req: Request): Promise<{ id: string; email?: string } | null> {
   const authHeader = req.headers.authorization;
@@ -522,6 +518,21 @@ export async function registerRoutes(
       delete payload.tierApprovedBy;
       delete payload.tierApprovedAt;
 
+      // Sanitize custom_css: strip anything that isn't a safe CSS property/value
+      if (typeof payload.customCss === "string") {
+        const SAFE_CSS_PROPS = /^(color|background(-color)?|font-(size|weight|family|style)|text-(align|decoration|transform)|margin|padding|border(-radius|-color|-width|-style)?|width|max-width|min-width|height|max-height|min-height|display|flex(-(direction|wrap|grow|shrink|basis|flow))?|gap|align-(items|self|content)|justify-(content|self|items)|opacity|line-height|letter-spacing|white-space|overflow(-x|-y)?|box-shadow|cursor|list-style)$/i;
+        const sanitized = (payload.customCss as string)
+          .split(";")
+          .filter((decl: string) => {
+            const [prop] = decl.split(":").map((s: string) => s.trim());
+            return prop && SAFE_CSS_PROPS.test(prop);
+          })
+          .join(";");
+        payload.customCss = sanitized;
+      } else if (payload.customCss !== undefined && payload.customCss !== null) {
+        delete payload.customCss;
+      }
+
       const nextRate =
         payload.rateDinar !== undefined && payload.rateDinar !== null
           ? Number(payload.rateDinar)
@@ -637,6 +648,12 @@ export async function registerRoutes(
     try {
       const convId = parseInt(req.params.id);
       const userId = req.user.id;
+      // Ownership check: user must be a participant in the conversation
+      const conv = await storage.getConversation(convId);
+      if (!conv) return res.status(404).json({ message: "Conversation not found" });
+      if (conv.clientId !== userId && conv.therapistId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
       await storage.markMessagesRead(convId, userId);
       const messages = await storage.getMessages(convId);
       res.json(messages);
@@ -649,6 +666,14 @@ export async function registerRoutes(
     try {
       const convId = parseInt(req.params.id);
       const userId = req.user.id;
+
+      // Ownership check: user must be a participant
+      const conv = await storage.getConversation(convId);
+      if (!conv) return res.status(404).json({ message: "Conversation not found" });
+      if (conv.clientId !== userId && conv.therapistId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
       const content = String(req.body.content || "");
       const crisisDetectedByClient = req.body.crisisDetectedByClient === true;
 
@@ -770,7 +795,16 @@ export async function registerRoutes(
   app.patch("/api/appointments/:id/status", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const apt = await storage.updateAppointmentStatus(parseInt(req.params.id), req.body.status);
+      const aptId = parseInt(req.params.id);
+
+      // Ownership check: only participants can change status
+      const existing = await storage.getAppointment(aptId);
+      if (!existing) return res.status(404).json({ message: "Appointment not found" });
+      if (existing.clientId !== userId && existing.therapistId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const apt = await storage.updateAppointmentStatus(aptId, req.body.status);
       if (apt) {
         const recipientId = apt.clientId === userId ? apt.therapistId : apt.clientId;
         await notifyUser(
@@ -863,7 +897,7 @@ export async function registerRoutes(
         durationMinutes,
         priceDinar,
         status: "open",
-        meetLink: req.body.meetLink ?? null,
+        meetLink: generateJitsiLink(),
       });
 
       res.status(201).json(slot);
@@ -939,7 +973,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/appointments/from-slot/:slotId", isAuthenticated, async (req: any, res) => {
+  app.post("/api/appointments/from-slot/:slotId", isAuthenticated, bookingLimiter, async (req: any, res) => {
     try {
       const slotId = Number(req.params.slotId);
       if (!Number.isInteger(slotId)) return res.status(400).json({ message: "Invalid slot id" });
@@ -961,44 +995,37 @@ export async function registerRoutes(
         { type: "appointment", appointmentId: String(result.appointment.id) },
       );
 
-      // Try to create a Google Meet event (if therapist has Google connected)
-      let meetLink: string | null = result.slot.meetLink ?? null;
-      if (isGoogleConfigured()) {
-        try {
-          const accessToken = await getValidAccessToken(result.appointment.therapistId);
-          if (accessToken) {
-            const [clientUser, therapistUser] = await Promise.all([
-              storage.getUser(clientId),
-              storage.getUser(result.appointment.therapistId),
-            ]);
-            const attendeeEmails: string[] = [];
-            if (clientUser?.email) attendeeEmails.push(clientUser.email);
-            if (therapistUser?.email) attendeeEmails.push(therapistUser.email);
-
-            const meetResult = await createCalendarEvent(accessToken, {
-              title: `Shifa — ${therapistUser?.firstName ?? "Therapist"} & ${clientUser?.firstName ?? "Client"}`,
-              description: `Session booked via Shifa. Appointment #${result.appointment.id}.`,
-              startIso: result.appointment.scheduledAt,
-              durationMinutes: result.appointment.durationMinutes ?? 50,
-              attendeeEmails,
-            });
-            meetLink = meetResult.meetLink;
-          }
-        } catch (meetErr: any) {
-          console.error("[google-meet] Failed to create Meet event:", meetErr?.message);
-          // Non-fatal: fall through to slot meetLink fallback
-        }
-      }
-
-      // Fallback: inherit meet link from slot if Google Meet wasn't created
-      if (!meetLink && result.slot.meetLink) {
-        meetLink = result.slot.meetLink;
-      }
-
+      // Use the Jitsi link already on the slot (auto-generated at slot creation)
+      const meetLink: string | null = result.slot.meetLink ?? generateJitsiLink();
       if (meetLink) {
         await storage.updateAppointment(result.appointment.id, { meetLink });
         result.appointment.meetLink = meetLink;
       }
+
+      // Send booking notification emails to both client and therapist (fire-and-forget)
+      (async () => {
+        try {
+          const [clientUser, therapistUser] = await Promise.all([
+            storage.getUser(clientId),
+            storage.getUser(result.appointment.therapistId),
+          ]);
+          const emailDetails = {
+            clientName: [clientUser?.firstName, clientUser?.lastName].filter(Boolean).join(" ") || clientUser?.email || "Client",
+            therapistName: [therapistUser?.firstName, therapistUser?.lastName].filter(Boolean).join(" ") || therapistUser?.email || "Therapist",
+            scheduledAt: result.appointment.scheduledAt,
+            durationMinutes: result.appointment.durationMinutes ?? 50,
+            sessionType: result.appointment.sessionType,
+            priceDinar: result.slot.priceDinar,
+            meetLink,
+          };
+          if (clientUser?.email) {
+            sendAppointmentBooked(clientUser.email, { ...emailDetails, recipientRole: "client" });
+          }
+          if (therapistUser?.email) {
+            sendAppointmentBooked(therapistUser.email, { ...emailDetails, recipientRole: "therapist" });
+          }
+        } catch {}
+      })();
 
       // Auto-initiate payment if price > 0
       let paymentUrl: string | null = null;
@@ -1083,7 +1110,12 @@ export async function registerRoutes(
 
   app.patch("/api/journal/:id", isAuthenticated, async (req: any, res) => {
     try {
-      const entry = await storage.updateJournalEntry(parseInt(req.params.id), req.body);
+      const userId = req.user.id;
+      const entryId = parseInt(req.params.id);
+      const existing = await storage.getJournalEntry(entryId);
+      if (!existing) return res.status(404).json({ message: "Journal entry not found" });
+      if (existing.userId !== userId) return res.status(403).json({ message: "Access denied" });
+      const entry = await storage.updateJournalEntry(entryId, req.body);
       res.json(entry);
     } catch (error) {
       res.status(500).json({ message: "Failed to update journal entry" });
@@ -1092,7 +1124,12 @@ export async function registerRoutes(
 
   app.delete("/api/journal/:id", isAuthenticated, async (req: any, res) => {
     try {
-      await storage.deleteJournalEntry(parseInt(req.params.id));
+      const userId = req.user.id;
+      const entryId = parseInt(req.params.id);
+      const existing = await storage.getJournalEntry(entryId);
+      if (!existing) return res.status(404).json({ message: "Journal entry not found" });
+      if (existing.userId !== userId) return res.status(403).json({ message: "Access denied" });
+      await storage.deleteJournalEntry(entryId);
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ message: "Failed to delete journal entry" });
@@ -1227,14 +1264,19 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/reviews/:id/respond", isAuthenticated, async (req: any, res) => {
+  app.post("/api/reviews/:id/respond", isAuthenticated, requireRoles(["therapist", "doctor", "graduated_doctor", "premium_doctor"]), async (req: any, res) => {
     try {
       const reviewId = parseInt(req.params.id);
       const { response } = req.body;
       if (!response) return res.status(400).json({ message: "Response text required" });
 
-      const review = await storage.addTherapistResponse(reviewId, response);
-      res.json(review);
+      // Ownership: only the therapist the review is about can respond
+      const review = await storage.getReviewById(reviewId);
+      if (!review) return res.status(404).json({ message: "Review not found" });
+      if (review.therapistId !== req.user.id) return res.status(403).json({ message: "Access denied" });
+
+      const updated = await storage.addTherapistResponse(reviewId, response);
+      res.json(updated);
     } catch (error) {
       res.status(500).json({ message: "Failed to respond to review" });
     }
@@ -1299,10 +1341,25 @@ export async function registerRoutes(
 
   // ---- Payment routes (MVP) ----
 
-  app.post("/api/payments/flouci/initiate", isAuthenticated, validateBody(paymentInitiateRequestSchema), async (req: any, res) => {
+  app.post("/api/payments/flouci/initiate", isAuthenticated, paymentLimiter, validateBody(paymentInitiateRequestSchema), async (req: any, res) => {
     try {
       const userId = req.user.id;
       const { appointmentId, therapistId, amount } = req.body;
+
+      // Verify the appointment belongs to this client
+      const apt = await storage.getAppointment(appointmentId);
+      if (!apt || apt.clientId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      // Double-charge prevention: block if a pending or completed transaction exists
+      const existingPayments = await storage.getPaymentsByUser(userId);
+      const duplicate = existingPayments.find(
+        (p) => p.appointmentId === appointmentId && (p.status === "pending" || p.status === "completed" || p.status === "paid"),
+      );
+      if (duplicate) {
+        return res.status(409).json({ message: "Payment already initiated or completed for this appointment" });
+      }
 
       const transaction = await storage.createPaymentTransaction({
         clientId: userId,
@@ -1355,10 +1412,25 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/payments/konnect/initiate", isAuthenticated, validateBody(paymentInitiateRequestSchema), async (req: any, res) => {
+  app.post("/api/payments/konnect/initiate", isAuthenticated, paymentLimiter, validateBody(paymentInitiateRequestSchema), async (req: any, res) => {
     try {
       const userId = req.user.id;
       const { appointmentId, therapistId, amount } = req.body;
+
+      // Verify the appointment belongs to this client
+      const apt = await storage.getAppointment(appointmentId);
+      if (!apt || apt.clientId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      // Double-charge prevention: block if a pending or completed transaction exists
+      const existingPayments = await storage.getPaymentsByUser(userId);
+      const duplicate = existingPayments.find(
+        (p) => p.appointmentId === appointmentId && (p.status === "pending" || p.status === "completed" || p.status === "paid"),
+      );
+      if (duplicate) {
+        return res.status(409).json({ message: "Payment already initiated or completed for this appointment" });
+      }
 
       const transaction = await storage.createPaymentTransaction({
         clientId: userId,
@@ -2196,99 +2268,6 @@ export async function registerRoutes(
     }
   });
 
-  // ---- Google Meet / Calendar integration ----
-
-  /** Get a fresh access token, refreshing if < 5 min to expiry. */
-  async function getValidAccessToken(therapistId: string): Promise<string | null> {
-    const raw = await storage.getGoogleTokensRaw(therapistId);
-    if (!raw) return null;
-
-    const expiresAt = raw.expiresAt ? new Date(raw.expiresAt) : null;
-    const fiveMinFromNow = new Date(Date.now() + 5 * 60_000);
-
-    if (expiresAt && expiresAt > fiveMinFromNow) {
-      return decryptToken(raw.accessTokenEncrypted);
-    }
-
-    // Need to refresh
-    const refreshToken = decryptToken(raw.refreshTokenEncrypted);
-    const refreshed = await refreshAccessToken(refreshToken);
-    await storage.updateGoogleAccessToken(therapistId, encryptToken(refreshed.accessToken), refreshed.expiresAt);
-    return refreshed.accessToken;
-  }
-
-  // GET /api/doctor/google/status — is Google connected?
-  app.get("/api/doctor/google/status", isAuthenticated, requireRoles(["therapist"]), async (req: any, res) => {
-    try {
-      if (!isGoogleConfigured()) {
-        return res.json({ connected: false, configured: false });
-      }
-      const meta = await storage.getGoogleTokenMeta(req.user.id);
-      res.json({
-        connected: Boolean(meta),
-        configured: true,
-        connectedAt: meta?.connectedAt ?? null,
-      });
-    } catch {
-      res.status(500).json({ message: "Failed to get Google status" });
-    }
-  });
-
-  // POST /api/doctor/google/connect — return OAuth URL
-  app.post("/api/doctor/google/connect", isAuthenticated, requireRoles(["therapist"]), async (req: any, res) => {
-    try {
-      if (!isGoogleConfigured()) {
-        return res.status(503).json({ message: "Google integration is not configured on this server." });
-      }
-      const authUrl = generateGoogleAuthUrl(req.user.id);
-      res.json({ authUrl });
-    } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to generate Google auth URL" });
-    }
-  });
-
-  // GET /api/doctor/google/callback — OAuth callback (redirect-based)
-  app.get("/api/doctor/google/callback", async (req: any, res) => {
-    const code = typeof req.query.code === "string" ? req.query.code : null;
-    const therapistId = typeof req.query.state === "string" ? req.query.state : null;
-    const origin = req.headers.origin || `${req.protocol}://${req.headers.host}`;
-
-    if (!code || !therapistId) {
-      return res.redirect(`${origin}/therapist-dashboard?google=error&msg=missing_params`);
-    }
-
-    try {
-      const tokens = await exchangeCodeForTokens(code);
-      await storage.upsertGoogleTokens(
-        therapistId,
-        encryptToken(tokens.accessToken),
-        encryptToken(tokens.refreshToken),
-        tokens.expiresAt,
-      );
-      res.redirect(`${origin}/therapist-dashboard?google=connected`);
-    } catch (err: any) {
-      console.error("[google/callback] token exchange failed:", err?.message);
-      res.redirect(`${origin}/therapist-dashboard?google=error&msg=exchange_failed`);
-    }
-  });
-
-  // DELETE /api/doctor/google/disconnect — revoke + delete tokens
-  app.delete("/api/doctor/google/disconnect", isAuthenticated, requireRoles(["therapist"]), async (req: any, res) => {
-    try {
-      const raw = await storage.getGoogleTokensRaw(req.user.id);
-      if (raw) {
-        // Revoke both tokens (best-effort)
-        const accessToken = decryptToken(raw.accessTokenEncrypted);
-        const refreshToken = decryptToken(raw.refreshTokenEncrypted);
-        await Promise.allSettled([revokeGoogleToken(accessToken), revokeGoogleToken(refreshToken)]);
-        await storage.deleteGoogleTokens(req.user.id);
-      }
-      res.json({ disconnected: true });
-    } catch {
-      res.status(500).json({ message: "Failed to disconnect Google account" });
-    }
-  });
-
   // ---- Admin moderation ----
 
   app.get("/api/admin/listeners", isAuthenticated, requireRoles(["moderator", "admin"]), async (req, res) => {
@@ -2769,7 +2748,7 @@ export async function registerRoutes(
           startsAt: parsed.data.startsAt,
           durationMinutes: parsed.data.durationMinutes,
           priceDinar: parsed.data.priceDinar,
-          meetLink: parsed.data.meetLink,
+          meetLink: generateJitsiLink(),
         });
         created.push(slot);
       }
@@ -2851,6 +2830,217 @@ export async function registerRoutes(
       res.json(payout);
     } catch {
       res.status(500).json({ message: "Failed to update payout" });
+    }
+  });
+
+  // ---- Phase 6: Post-session features ----
+
+  // --- Homework ---
+
+  // GET /api/session-summaries/:summaryId/homework — doctor or client reads homework for a summary
+  app.get("/api/session-summaries/:summaryId/homework", isAuthenticated, async (req: any, res) => {
+    try {
+      const summaryId = Number(req.params.summaryId);
+      if (!Number.isFinite(summaryId)) return res.status(400).json({ message: "Invalid summaryId" });
+      const homework = await storage.getHomeworkBySummary(summaryId);
+      res.json(homework);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch homework" });
+    }
+  });
+
+  // GET /api/homework — client fetches all their homework items
+  app.get("/api/homework", isAuthenticated, async (req: any, res) => {
+    try {
+      const homework = await storage.getHomeworkByClient(req.user.id);
+      res.json(homework);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch homework" });
+    }
+  });
+
+  // POST /api/session-summaries/:summaryId/homework — therapist creates a homework item
+  app.post("/api/session-summaries/:summaryId/homework", isAuthenticated, requireRoles(["therapist"]), async (req: any, res) => {
+    try {
+      const summaryId = Number(req.params.summaryId);
+      if (!Number.isFinite(summaryId)) return res.status(400).json({ message: "Invalid summaryId" });
+      const { insertHomeworkSchema } = await import("@shared/schema");
+      const parsed = insertHomeworkSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
+      const item = await storage.createHomework(summaryId, parsed.data);
+      res.status(201).json(item);
+    } catch {
+      res.status(500).json({ message: "Failed to create homework" });
+    }
+  });
+
+  // PATCH /api/homework/:id — client marks homework complete / adds notes; therapist can also update
+  app.patch("/api/homework/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
+      const { updateHomeworkSchema } = await import("@shared/schema");
+      const parsed = updateHomeworkSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
+      const item = await storage.updateHomework(id, parsed.data);
+      if (!item) return res.status(404).json({ message: "Homework not found" });
+      res.json(item);
+    } catch {
+      res.status(500).json({ message: "Failed to update homework" });
+    }
+  });
+
+  // DELETE /api/homework/:id — therapist deletes a homework item
+  app.delete("/api/homework/:id", isAuthenticated, requireRoles(["therapist"]), async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
+      await storage.deleteHomework(id);
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ message: "Failed to delete homework" });
+    }
+  });
+
+  // --- Session Mood Ratings ---
+
+  // GET /api/appointments/:id/mood-rating — client or therapist reads mood rating
+  app.get("/api/appointments/:id/mood-rating", isAuthenticated, async (req: any, res) => {
+    try {
+      const appointmentId = Number(req.params.id);
+      if (!Number.isFinite(appointmentId)) return res.status(400).json({ message: "Invalid id" });
+      const apt = await storage.getAppointment(appointmentId);
+      if (!apt) return res.status(404).json({ message: "Appointment not found" });
+      if (apt.clientId !== req.user.id && apt.therapistId !== req.user.id) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      const rating = await storage.getMoodRating(appointmentId);
+      res.json(rating ?? null);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch mood rating" });
+    }
+  });
+
+  // POST /api/appointments/:id/mood-rating — client upserts mood rating
+  app.post("/api/appointments/:id/mood-rating", isAuthenticated, requireRoles(["client"]), async (req: any, res) => {
+    try {
+      const appointmentId = Number(req.params.id);
+      if (!Number.isFinite(appointmentId)) return res.status(400).json({ message: "Invalid id" });
+      const { upsertMoodRatingSchema } = await import("@shared/schema");
+      const parsed = upsertMoodRatingSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
+      const rating = await storage.upsertMoodRating(appointmentId, req.user.id, parsed.data);
+      res.status(201).json(rating);
+    } catch {
+      res.status(500).json({ message: "Failed to save mood rating" });
+    }
+  });
+
+  // --- Consultation Prep ---
+
+  // GET /api/appointments/:id/prep — client or therapist reads prep
+  app.get("/api/appointments/:id/prep", isAuthenticated, async (req: any, res) => {
+    try {
+      const appointmentId = Number(req.params.id);
+      if (!Number.isFinite(appointmentId)) return res.status(400).json({ message: "Invalid id" });
+      const apt = await storage.getAppointment(appointmentId);
+      if (!apt) return res.status(404).json({ message: "Appointment not found" });
+      if (apt.clientId !== req.user.id && apt.therapistId !== req.user.id) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      const prep = await storage.getConsultationPrep(appointmentId);
+      res.json(prep ?? null);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch consultation prep" });
+    }
+  });
+
+  // POST /api/appointments/:id/prep — client submits/updates consultation prep
+  app.post("/api/appointments/:id/prep", isAuthenticated, requireRoles(["client"]), async (req: any, res) => {
+    try {
+      const appointmentId = Number(req.params.id);
+      if (!Number.isFinite(appointmentId)) return res.status(400).json({ message: "Invalid id" });
+      const { upsertConsultationPrepSchema } = await import("@shared/schema");
+      const parsed = upsertConsultationPrepSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
+      const prep = await storage.upsertConsultationPrep(appointmentId, req.user.id, parsed.data);
+      res.status(201).json(prep);
+    } catch {
+      res.status(500).json({ message: "Failed to save consultation prep" });
+    }
+  });
+
+  // ---- Phase 7: Tier Upgrade Requests ----
+
+  // POST /api/doctor/tier-upgrade — graduated_doctor requests premium upgrade
+  app.post("/api/doctor/tier-upgrade", isAuthenticated, requireRoles(["therapist"]), async (req: any, res) => {
+    try {
+      const { createTierUpgradeRequestSchema } = await import("@shared/schema");
+      const parsed = createTierUpgradeRequestSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
+
+      // Get the doctor's current tier
+      const profile = await storage.getTherapistProfile(req.user.id);
+      if (!profile) return res.status(404).json({ message: "Therapist profile not found" });
+      if (profile.tier !== "graduated_doctor") {
+        return res.status(400).json({ message: "Only graduated doctors can request a tier upgrade" });
+      }
+
+      // Check for existing pending request
+      const existing = await storage.getTierUpgradeRequestsByDoctor(req.user.id);
+      if (existing.some((r) => r.status === "pending")) {
+        return res.status(409).json({ message: "You already have a pending upgrade request" });
+      }
+
+      const request = await storage.createTierUpgradeRequest(req.user.id, profile.tier, parsed.data);
+      res.status(201).json(request);
+    } catch {
+      res.status(500).json({ message: "Failed to create tier upgrade request" });
+    }
+  });
+
+  // GET /api/doctor/tier-upgrade — doctor views their own requests
+  app.get("/api/doctor/tier-upgrade", isAuthenticated, requireRoles(["therapist"]), async (req: any, res) => {
+    try {
+      const requests = await storage.getTierUpgradeRequestsByDoctor(req.user.id);
+      res.json(requests);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch tier upgrade requests" });
+    }
+  });
+
+  // GET /api/admin/tier-upgrades — admin views all tier upgrade requests
+  app.get("/api/admin/tier-upgrades", isAuthenticated, requireRoles(["admin"]), async (req: any, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const requests = await storage.getAllTierUpgradeRequests(status);
+      res.json(requests);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch tier upgrade requests" });
+    }
+  });
+
+  // PATCH /api/admin/tier-upgrades/:id — admin approves or rejects
+  app.patch("/api/admin/tier-upgrades/:id", isAuthenticated, requireRoles(["admin"]), async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
+
+      const { reviewTierUpgradeRequestSchema } = await import("@shared/schema");
+      const parsed = reviewTierUpgradeRequestSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
+
+      const updated = await storage.reviewTierUpgradeRequest(id, parsed.data.status, req.user.id);
+      if (!updated) return res.status(404).json({ message: "Request not found" });
+
+      // If approved, upgrade the doctor's tier
+      if (parsed.data.status === "approved") {
+        await storage.updateTherapistProfile(updated.doctorId, { tier: "premium_doctor" } as any);
+      }
+
+      res.json(updated);
+    } catch {
+      res.status(500).json({ message: "Failed to review tier upgrade request" });
     }
   });
 
