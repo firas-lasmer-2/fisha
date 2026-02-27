@@ -81,10 +81,15 @@ export default function TherapistsPage() {
   if (gender && gender !== "all") queryStr.set("gender", gender);
   if (tier && tier !== "all") queryStr.set("tier", tier);
 
+  const queryStrString = queryStr.toString();
+  const therapistsUrl = queryStrString
+    ? `/api/therapists?${queryStrString}`
+    : "/api/therapists";
+
   const { data: therapists, isLoading } = useQuery<
     (TherapistProfile & { user: User })[]
   >({
-    queryKey: ["/api/therapists", `?${queryStr.toString()}`],
+    queryKey: [therapistsUrl],
   });
 
   const { data: onboarding } = useQuery<OnboardingResponse | null>({
@@ -276,13 +281,11 @@ export default function TherapistsPage() {
           />
         </motion.div>
 
-        <div className="space-y-3" data-testid="section-filters">
+        <div className="space-y-2" data-testid="section-filters">
+          {/* Row 1: specialization chips */}
           <ScrollArea className="w-full">
-            <div className="flex items-center gap-2 pb-2">
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
-                <Filter className="h-3.5 w-3.5" />
-              </div>
-
+            <div className="flex items-center gap-2 pb-1">
+              <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               {specializations.map((s, i) => (
                 <motion.div
                   key={s.value}
@@ -292,9 +295,7 @@ export default function TherapistsPage() {
                   animate="visible"
                 >
                   <Badge
-                    variant={
-                      specialization === s.value ? "default" : "secondary"
-                    }
+                    variant={specialization === s.value ? "default" : "secondary"}
                     className="cursor-pointer shrink-0 whitespace-nowrap"
                     onClick={() => toggleFilter("specialization", s.value)}
                     data-testid={`filter-spec-${s.value}`}
@@ -306,105 +307,92 @@ export default function TherapistsPage() {
             </div>
           </ScrollArea>
 
-          <ScrollArea className="w-full">
-            <div className="flex items-center gap-2 pb-2">
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
-                <Globe className="h-3.5 w-3.5" />
-              </div>
-              {languageOptions.map((l) => (
-                <Badge
-                  key={l.value}
-                  variant={language === l.value ? "default" : "secondary"}
-                  className="cursor-pointer shrink-0"
-                  onClick={() => toggleFilter("language", l.value)}
-                  data-testid={`filter-lang-${l.value}`}
-                >
-                  {l.label}
-                </Badge>
-              ))}
-
-              <div className="w-px h-5 bg-border shrink-0" />
-
+          {/* Row 2: quick toggles — language, online, gender */}
+          <div className="flex flex-wrap items-center gap-2">
+            {languageOptions.map((l) => (
               <Badge
-                variant={onlineOnly ? "default" : "secondary"}
-                className={`cursor-pointer shrink-0 whitespace-nowrap gap-1.5 ${onlineOnly ? "bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700" : ""}`}
-                onClick={() => setOnlineOnly(!onlineOnly)}
-                data-testid="filter-online-now"
+                key={l.value}
+                variant={language === l.value ? "default" : "outline"}
+                className="cursor-pointer"
+                onClick={() => toggleFilter("language", l.value)}
+                data-testid={`filter-lang-${l.value}`}
               >
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                </span>
-                {t("therapist.online_now")}
-                {onlineTherapists.size > 0 && (
-                  <span className="text-xs opacity-80">({onlineTherapists.size})</span>
-                )}
+                <Globe className="h-3 w-3 me-1" />
+                {l.label}
               </Badge>
+            ))}
 
-              <div className="w-px h-5 bg-border shrink-0" />
-
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
-                <Users className="h-3.5 w-3.5" />
-              </div>
-              {genderOptions.map((g) => (
-                <Badge
-                  key={g.value}
-                  variant={gender === g.value ? "default" : "secondary"}
-                  className="cursor-pointer shrink-0"
-                  onClick={() => toggleFilter("gender", g.value)}
-                  data-testid={`filter-gender-${g.value}`}
-                >
-                  {g.label}
-                </Badge>
-              ))}
-
-              <div className="w-px h-5 bg-border shrink-0" />
-
-              {tierOptions.map((tierOption) => (
-                <Badge
-                  key={tierOption.value}
-                  variant={tier === tierOption.value ? "default" : "secondary"}
-                  className="cursor-pointer shrink-0 whitespace-nowrap"
-                  onClick={() => toggleFilter("tier", tierOption.value)}
-                  data-testid={`filter-tier-${tierOption.value}`}
-                >
-                  {tierOption.label}
-                </Badge>
-              ))}
-
-              <div className="w-px h-5 bg-border shrink-0" />
-
-              {budgetOptions.map((b) => (
-                <Badge
-                  key={b.value}
-                  variant={budget === b.value ? "default" : "secondary"}
-                  className="cursor-pointer shrink-0 whitespace-nowrap"
-                  onClick={() => setBudget(budget === b.value ? "" : b.value)}
-                  data-testid={`filter-budget-${b.value}`}
-                >
-                  {b.label}
-                </Badge>
-              ))}
-
-              {(specialization || language || gender || tier || onlineOnly || budget) && (
-                <Badge
-                  variant="outline"
-                  className="cursor-pointer shrink-0 text-destructive"
-                  onClick={() => {
-                    setSpecialization("");
-                    setLanguage("");
-                    setGender("");
-                    setTier("");
-                    setBudget("");
-                    setOnlineOnly(false);
-                  }}
-                  data-testid="button-clear-filters"
-                >
-                  {t("therapist.clear_all")}
-                </Badge>
+            <Badge
+              variant={onlineOnly ? "default" : "outline"}
+              className={`cursor-pointer gap-1.5 ${onlineOnly ? "bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700 border-emerald-600" : ""}`}
+              onClick={() => setOnlineOnly(!onlineOnly)}
+              data-testid="filter-online-now"
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+              </span>
+              {t("therapist.online_now")}
+              {onlineTherapists.size > 0 && (
+                <span className="text-xs opacity-80">({onlineTherapists.size})</span>
               )}
-            </div>
-          </ScrollArea>
+            </Badge>
+
+            {genderOptions.map((g) => (
+              <Badge
+                key={g.value}
+                variant={gender === g.value ? "default" : "outline"}
+                className="cursor-pointer"
+                onClick={() => toggleFilter("gender", g.value)}
+                data-testid={`filter-gender-${g.value}`}
+              >
+                <Users className="h-3 w-3 me-1" />
+                {g.label}
+              </Badge>
+            ))}
+
+            {tierOptions.map((tierOption) => (
+              <Badge
+                key={tierOption.value}
+                variant={tier === tierOption.value ? "default" : "outline"}
+                className="cursor-pointer whitespace-nowrap"
+                onClick={() => toggleFilter("tier", tierOption.value)}
+                data-testid={`filter-tier-${tierOption.value}`}
+              >
+                {tierOption.label}
+              </Badge>
+            ))}
+
+            {budgetOptions.map((b) => (
+              <Badge
+                key={b.value}
+                variant={budget === b.value ? "default" : "outline"}
+                className="cursor-pointer whitespace-nowrap"
+                onClick={() => setBudget(budget === b.value ? "" : b.value)}
+                data-testid={`filter-budget-${b.value}`}
+              >
+                {b.label}
+              </Badge>
+            ))}
+
+            {(specialization || language || gender || tier || onlineOnly || budget) && (
+              <Badge
+                variant="outline"
+                className="cursor-pointer text-destructive border-destructive/40"
+                onClick={() => {
+                  setSpecialization("");
+                  setLanguage("");
+                  setGender("");
+                  setTier("");
+                  setBudget("");
+                  setOnlineOnly(false);
+                }}
+                data-testid="button-clear-filters"
+              >
+                {t("therapist.clear_all")}
+              </Badge>
+            )}
+          </div>
         </div>
 
         {recommendedMatches.length > 0 && (

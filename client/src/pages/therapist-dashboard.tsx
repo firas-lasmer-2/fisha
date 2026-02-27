@@ -1314,6 +1314,7 @@ export default function TherapistDashboardPage() {
                   therapistId={user?.id ?? ""}
                   defaultPriceDinar={slotPriceDinar}
                   defaultDurationMinutes={slotDurationMinutes}
+                  invalidateKey={["/api/therapists", user?.id, "slots"]}
                 />
               </CardContent>
             </Card>

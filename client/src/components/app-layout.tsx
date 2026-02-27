@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Heart, LayoutDashboard, Users, MessageCircle,
   Calendar, CalendarDays, LogOut, UserCircle, AlertCircle,
-  ShieldCheck,
+  ShieldCheck, Settings,
 } from "lucide-react";
 
 function homeHrefForRole(role: string | null | undefined): string {
@@ -132,6 +132,19 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-1.5">
             <ThemeToggle />
             <LanguageSwitcher variant="ghost" />
+            {user && (
+              <Link href="/settings">
+                <Button
+                  variant={location.startsWith("/settings") ? "secondary" : "ghost"}
+                  size="sm"
+                  data-testid="nav-link-settings"
+                  className="gap-1.5 text-xs hidden lg:flex"
+                >
+                  <Settings className="h-3.5 w-3.5" />
+                  {t("nav.settings") !== "nav.settings" ? t("nav.settings") : "Settings"}
+                </Button>
+              </Link>
+            )}
             {user && (
               <Button
                 variant="ghost"

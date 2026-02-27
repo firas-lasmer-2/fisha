@@ -112,18 +112,12 @@ export default function OnboardingPage() {
   }, [displayName]);
 
   const completeOnboardingMutation = useMutation({
-    mutationFn: async (includeOptional: boolean) => {
+    mutationFn: async () => {
       await apiRequest("POST", "/api/onboarding/quick-start", {
         primaryConcerns: concerns,
         preferredLanguage,
+        genderPreference: genderPreference || null,
       });
-
-      if (includeOptional && genderPreference) {
-        await apiRequest("POST", "/api/onboarding/preferences", {
-          preferredLanguage,
-          genderPreference: genderPreference || null,
-        });
-      }
 
       if (displayName && displayNameAvailable) {
         await apiRequest("PATCH", "/api/user/profile", { displayName });
@@ -302,9 +296,9 @@ export default function OnboardingPage() {
           {step === 3 && (
             <div className="space-y-5">
               <div className="space-y-1">
-                <h2 className="text-lg font-semibold">{tr("onboarding.optional_title", "Optional suggestions (recommended)")}</h2>
+                <h2 className="text-lg font-semibold">{tr("onboarding.optional_title", "One last thing (optional)")}</h2>
                 <p className="text-sm text-muted-foreground">
-                  {tr("onboarding.optional_desc", "These help us personalize your experience. You can skip for now.")}
+                  {tr("onboarding.optional_desc", "This helps us suggest the right therapist. You can skip and change it later.")}
                 </p>
               </div>
 
@@ -327,26 +321,6 @@ export default function OnboardingPage() {
                     </Label>
                   ))}
                 </RadioGroup>
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-sm font-medium">{tr("onboarding.start_path", "How would you like to start?")}</p>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { value: "peer", label: tr("onboarding.start_peer", "Peer support first") },
-                    { value: "therapist", label: tr("onboarding.start_therapist", "Find a therapist") },
-                    { value: "wellness", label: tr("onboarding.start_wellness", "Self-care tools") },
-                  ].map((item) => (
-                    <Badge
-                      key={item.value}
-                      variant={starterPath === item.value ? "default" : "secondary"}
-                      className="cursor-pointer py-1.5 px-3"
-                      onClick={() => setStarterPath(item.value as StarterPath)}
-                    >
-                      {item.label}
-                    </Badge>
-                  ))}
-                </div>
               </div>
             </div>
           )}
@@ -372,7 +346,7 @@ export default function OnboardingPage() {
                 </Button>
               ) : (
                 <Button
-                  onClick={() => completeOnboardingMutation.mutate(true)}
+                  onClick={() => completeOnboardingMutation.mutate()}
                   disabled={completeOnboardingMutation.isPending}
                   className="flex-1"
                   data-testid="button-onboarding-complete"
@@ -395,7 +369,7 @@ export default function OnboardingPage() {
 
             {step === totalSteps - 1 && (
               <button
-                onClick={() => completeOnboardingMutation.mutate(false)}
+                onClick={() => completeOnboardingMutation.mutate()}
                 disabled={completeOnboardingMutation.isPending}
                 className="w-full text-center text-xs text-muted-foreground hover:text-foreground transition-colors"
               >

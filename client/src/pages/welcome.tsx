@@ -44,7 +44,7 @@ export default function WelcomePage() {
     queryKey: ["/api/onboarding"],
   });
 
-  const therapistQuery = useMemo(() => {
+  const therapistUrl = useMemo(() => {
     const params = new URLSearchParams();
     if (onboarding?.primaryConcerns?.[0]) {
       params.set("specialization", onboarding.primaryConcerns[0]);
@@ -52,11 +52,12 @@ export default function WelcomePage() {
     if (onboarding?.preferredLanguage) {
       params.set("language", onboarding.preferredLanguage);
     }
-    return `?${params.toString()}`;
+    const qs = params.toString();
+    return qs ? `/api/therapists?${qs}` : "/api/therapists";
   }, [onboarding?.primaryConcerns, onboarding?.preferredLanguage]);
 
   const { data: therapists = [] } = useQuery<TherapistRow[]>({
-    queryKey: ["/api/therapists", therapistQuery],
+    queryKey: [therapistUrl],
     enabled: Boolean(onboarding),
   });
 

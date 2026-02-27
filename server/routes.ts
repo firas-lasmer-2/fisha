@@ -215,65 +215,48 @@ export async function registerRoutes(
     phone?: string | null;
   }) => {
     const nowIso = new Date().toISOString();
-    const profilePatch: Record<string, any> = {
+    const upsertPayload: Record<string, any> = {
+      id: payload.id,
       email: payload.email ?? null,
       role: normalizeRole(payload.role),
       updated_at: nowIso,
-    };
-    if (payload.firstName !== undefined) profilePatch.first_name = payload.firstName;
-    if (payload.lastName !== undefined) profilePatch.last_name = payload.lastName;
-    if (payload.phone !== undefined) profilePatch.phone = payload.phone;
-
-    const { data: updatedRows, error: updateError } = await supabaseAdmin
-      .from("profiles")
-      .update(profilePatch)
-      .eq("id", payload.id)
-      .select("*");
-    if (updateError) throw updateError;
-    if (updatedRows && updatedRows.length > 0) {
-      return updatedRows[0];
-    }
-
-    const insertPayload: Record<string, any> = {
-      id: payload.id,
       created_at: nowIso,
-      ...profilePatch,
     };
+    if (payload.firstName !== undefined) upsertPayload.first_name = payload.firstName;
+    if (payload.lastName !== undefined) upsertPayload.last_name = payload.lastName;
+    if (payload.phone !== undefined) upsertPayload.phone = payload.phone;
 
-    const { data: insertedRow, error: insertError } = await supabaseAdmin
+    const { data: upsertedRow, error: upsertError } = await supabaseAdmin
       .from("profiles")
-      .insert(insertPayload)
+      .upsert(upsertPayload, { onConflict: "id", ignoreDuplicates: false })
       .select("*")
       .single();
-    if (!insertError && insertedRow) {
-      return insertedRow;
+
+    if (!upsertError && upsertedRow) {
+      return upsertedRow;
     }
 
-    // If email is already associated with a legacy profile row, retry without email.
-    if ((insertError as any)?.code === "23505" && String((insertError as any)?.message || "").includes("profiles_email_key")) {
-      const retryPayload = { ...insertPayload, email: null };
+    // If email unique constraint fires, retry without email.
+    if ((upsertError as any)?.code === "23505" && String((upsertError as any)?.message || "").includes("profiles_email_key")) {
       const { data: retryRow, error: retryError } = await supabaseAdmin
         .from("profiles")
-        .insert(retryPayload)
+        .upsert({ ...upsertPayload, email: null }, { onConflict: "id", ignoreDuplicates: false })
         .select("*")
         .single();
-      if (!retryError && retryRow) {
-        return retryRow;
-      }
+      if (!retryError && retryRow) return retryRow;
     }
 
-    if ((insertError as any)?.code === "23505") {
-      const { data: existingRow, error: existingError } = await supabaseAdmin
+    // If we still have an error but the row exists (e.g. RLS edge case), return existing row.
+    if (upsertError) {
+      const { data: existingRow } = await supabaseAdmin
         .from("profiles")
         .select("*")
         .eq("id", payload.id)
         .maybeSingle();
-      if (!existingError && existingRow) {
-        return existingRow;
-      }
+      if (existingRow) return existingRow;
     }
 
-    throw insertError || new Error("Profile insert failed");
+    throw upsertError || new Error("Profile upsert failed");
   };
 
   const ensureProfile = async (authUser: { id: string; email?: string }) => {
@@ -1872,18 +1855,17 @@ export async function registerRoutes(
   app.post("/api/onboarding/quick-start", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
+      const preferredLanguage = typeof req.body.preferredLanguage === "string" ? req.body.preferredLanguage : null;
+      const genderPreference = typeof req.body.genderPreference === "string" ? req.body.genderPreference : null;
       const response = await storage.saveOnboardingResponse({
         userId,
         primaryConcerns: normalizeStringArray(req.body.primaryConcerns),
-        preferredLanguage: typeof req.body.preferredLanguage === "string" ? req.body.preferredLanguage : null,
-        genderPreference: null,
+        preferredLanguage,
+        genderPreference,
         budgetRange: null,
         howDidYouHear: "quick_start",
       });
-      await markOnboardingCompleted(
-        userId,
-        typeof req.body.preferredLanguage === "string" ? req.body.preferredLanguage : null,
-      );
+      await markOnboardingCompleted(userId, preferredLanguage);
       res.status(201).json(response);
     } catch (error) {
       res.status(500).json({ message: "Failed to save quick-start onboarding" });

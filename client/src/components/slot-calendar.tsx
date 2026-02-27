@@ -52,6 +52,7 @@ interface SlotCalendarProps {
   therapistId: string;
   defaultPriceDinar?: number;
   defaultDurationMinutes?: number;
+  invalidateKey?: unknown[];
 }
 
 export function SlotCalendar({
@@ -59,6 +60,7 @@ export function SlotCalendar({
   therapistId,
   defaultPriceDinar = 20,
   defaultDurationMinutes = 50,
+  invalidateKey,
 }: SlotCalendarProps) {
   const { toast } = useToast();
   const [weekOffset, setWeekOffset] = useState(0);
@@ -120,7 +122,8 @@ export function SlotCalendar({
       } else {
         await apiRequest("POST", "/api/therapist/slots/batch", { slots: slotsToCreate });
       }
-      queryClient.invalidateQueries({ queryKey: ["/api/therapist/slots"] });
+      const key = invalidateKey ?? ["/api/therapists", therapistId, "slots"];
+      queryClient.invalidateQueries({ queryKey: key });
       toast({ title: `${slotsToCreate.length} slot(s) created` });
       setDialogOpen(false);
     } catch {
@@ -133,7 +136,8 @@ export function SlotCalendar({
   const handleCancel = async (slotId: number) => {
     try {
       await apiRequest("DELETE", `/api/therapist/slots/${slotId}`);
-      queryClient.invalidateQueries({ queryKey: ["/api/therapist/slots"] });
+      const key = invalidateKey ?? ["/api/therapists", therapistId, "slots"];
+      queryClient.invalidateQueries({ queryKey: key });
       toast({ title: "Slot cancelled" });
     } catch {
       toast({ title: "Failed to cancel slot", variant: "destructive" });
