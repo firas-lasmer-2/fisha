@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -9,15 +9,24 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { ChevronLeft, ChevronRight, Repeat, CalendarCheck, Clock } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Repeat,
+  CalendarCheck,
+  Copy,
+  X,
+  Clock,
+  Plus,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { motion, AnimatePresence } from "framer-motion";
 import type { TherapistSlot } from "@shared/schema";
 
-// 07:00 – 21:00
-const HOURS = Array.from({ length: 15 }, (_, i) => i + 7);
-const HOUR_LABELS = HOURS.map((h) => `${String(h).padStart(2, "0")}:00`);
+// 07:00 – 20:00 (visible hours in day planner)
+const HOURS = Array.from({ length: 14 }, (_, i) => i + 7);
 
 const DURATION_PRESETS = [
   { label: "30 min", value: 30 },
@@ -25,6 +34,8 @@ const DURATION_PRESETS = [
   { label: "60 min", value: 60 },
   { label: "90 min", value: 90 },
 ];
+
+const DAY_NAMES_FR = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 
 function getWeekDates(referenceDate: Date): Date[] {
   const day = referenceDate.getDay();
@@ -61,13 +72,6 @@ function slotColor(slot: TherapistSlot): string {
   return "bg-emerald-100 border-emerald-400 text-emerald-900 dark:bg-emerald-900/30 dark:border-emerald-600 dark:text-emerald-200";
 }
 
-// How many grid rows a slot spans (capped at remaining hours in the day)
-function slotSpan(slot: TherapistSlot, startHour: number, maxHour: number): number {
-  const spans = Math.ceil(slot.durationMinutes / 60);
-  const remaining = maxHour - startHour;
-  return Math.min(spans, remaining);
-}
-
 interface SlotCalendarProps {
   slots: TherapistSlot[];
   therapistId: string;
@@ -86,15 +90,29 @@ export function SlotCalendar({
   const { toast } = useToast();
   const { t } = useI18n();
   const [weekOffset, setWeekOffset] = useState(0);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [detailSlot, setDetailSlot] = useState<TherapistSlot | null>(null);
-  const [selectedCell, setSelectedCell] = useState<{ date: Date; hour: number } | null>(null);
+
+  // Day planner panel state
+  const [plannerDay, setPlannerDay] = useState<Date | null>(null);
+  const [selectedHours, setSelectedHours] = useState<Set<number>>(new Set());
   const [duration, setDuration] = useState(defaultDurationMinutes);
   const [price, setPrice] = useState(defaultPriceDinar);
-  const [recurWeeks, setRecurWeeks] = useState(4);
   const [isRecurring, setIsRecurring] = useState(false);
+  const [recurWeeks, setRecurWeeks] = useState(4);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Drag-select state
+  const dragStartHour = useRef<number | null>(null);
+  const isDragging = useRef(false);
+
+  // Detail dialog
+  const [detailSlot, setDetailSlot] = useState<TherapistSlot | null>(null);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
+
+  // Copy-day state
+  const [copySourceDay, setCopySourceDay] = useState<Date | null>(null);
+  const [copyTargetDays, setCopyTargetDays] = useState<Set<number>>(new Set());
+  const [copyDialogOpen, setCopyDialogOpen] = useState(false);
+  const [isCopying, setIsCopying] = useState(false);
 
   const today = useMemo(() => new Date(), []);
   const referenceDate = useMemo(() => {
@@ -105,34 +123,31 @@ export function SlotCalendar({
 
   const weekDates = useMemo(() => getWeekDates(referenceDate), [referenceDate]);
 
-  // Map: "dateString_hour" → slots starting in that cell
-  const slotsByCell = useMemo(() => {
+  // Map slots by date string
+  const slotsByDate = useMemo(() => {
     const map: Record<string, TherapistSlot[]> = {};
     for (const slot of slots) {
-      const d = new Date(slot.startsAt);
-      const key = `${d.toDateString()}_${d.getHours()}`;
-      if (!map[key]) map[key] = [];
-      map[key].push(slot);
+      const ds = new Date(slot.startsAt).toDateString();
+      if (!map[ds]) map[ds] = [];
+      map[ds].push(slot);
     }
     return map;
   }, [slots]);
 
-  // Cells occupied by multi-hour slots (so we can mark them as taken)
-  const occupiedCells = useMemo(() => {
-    const set = new Set<string>();
-    for (const slot of slots) {
+  // Hours already occupied on the planner day
+  const occupiedHoursForDay = useMemo(() => {
+    if (!plannerDay) return new Set<number>();
+    const daySlots = slotsByDate[plannerDay.toDateString()] ?? [];
+    const set = new Set<number>();
+    for (const slot of daySlots) {
       if (slot.status === "cancelled") continue;
       const start = new Date(slot.startsAt);
       const spans = Math.ceil(slot.durationMinutes / 60);
-      for (let i = 0; i < spans; i++) {
-        const h = start.getHours() + i;
-        set.add(`${start.toDateString()}_${h}`);
-      }
+      for (let i = 0; i < spans; i++) set.add(start.getHours() + i);
     }
     return set;
-  }, [slots]);
+  }, [plannerDay, slotsByDate]);
 
-  // Weekly stats
   const weekStats = useMemo(() => {
     const weekDateStrings = new Set(weekDates.map((d) => d.toDateString()));
     let open = 0, booked = 0;
@@ -145,38 +160,87 @@ export function SlotCalendar({
     return { open, booked };
   }, [slots, weekDates]);
 
-  const openCreateDialog = (date: Date, hour: number) => {
+  const weekLabel = useMemo(() => {
+    const start = weekDates[0];
+    const end = weekDates[6];
+    return `${start.toLocaleDateString("fr", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("fr", { month: "short", day: "numeric", year: "numeric" })}`;
+  }, [weekDates]);
+
+  // Open day planner
+  const openPlanner = (date: Date) => {
     const dt = new Date(date);
-    dt.setHours(hour, 0, 0, 0);
-    if (dt < new Date()) return;
-    setSelectedCell({ date, hour });
+    dt.setHours(23, 59, 0, 0);
+    if (dt < new Date()) return; // past day
+    setPlannerDay(date);
+    setSelectedHours(new Set());
     setDuration(defaultDurationMinutes);
     setPrice(defaultPriceDinar);
     setIsRecurring(false);
     setRecurWeeks(4);
-    setDetailSlot(null);
-    setDialogOpen(true);
   };
 
-  const openDetailDialog = (slot: TherapistSlot) => {
-    setDetailSlot(slot);
-    setSelectedCell(null);
-    setDialogOpen(true);
-  };
-
-  const handleCreate = async () => {
-    if (!selectedCell) return;
-    setIsSubmitting(true);
-    const weeks = isRecurring ? Math.max(2, recurWeeks) : 1;
-    const slotsToCreate = Array.from({ length: weeks }, (_, i) => {
-      const d = new Date(selectedCell.date);
-      d.setDate(d.getDate() + i * 7);
-      return {
-        startsAt: isoAt(d, selectedCell.hour),
-        durationMinutes: duration,
-        priceDinar: price,
-      };
+  // Drag-to-select handlers
+  const handleHourPointerDown = useCallback((hour: number, occupied: boolean) => {
+    if (occupied) return;
+    isDragging.current = true;
+    dragStartHour.current = hour;
+    setSelectedHours((prev) => {
+      const next = new Set(prev);
+      if (next.has(hour)) next.delete(hour); else next.add(hour);
+      return next;
     });
+  }, []);
+
+  const handleHourPointerEnter = useCallback((hour: number, occupied: boolean) => {
+    if (!isDragging.current || dragStartHour.current === null || occupied) return;
+    const start = Math.min(dragStartHour.current, hour);
+    const end = Math.max(dragStartHour.current, hour);
+    setSelectedHours((prev) => {
+      const next = new Set(prev);
+      for (let h = start; h <= end; h++) next.add(h);
+      return next;
+    });
+  }, []);
+
+  const handlePointerUp = useCallback(() => {
+    isDragging.current = false;
+    dragStartHour.current = null;
+  }, []);
+
+  // Select all free hours for the day
+  const selectAll = () => {
+    const freeHours = HOURS.filter((h) => !occupiedHoursForDay.has(h));
+    const isPast = (h: number) => {
+      if (!plannerDay) return false;
+      const dt = new Date(plannerDay);
+      dt.setHours(h + 1, 0, 0, 0);
+      return dt < new Date();
+    };
+    setSelectedHours(new Set(freeHours.filter((h) => !isPast(h))));
+  };
+
+  const clearSelection = () => setSelectedHours(new Set());
+
+  // Create slots from selected hours
+  const handleCreate = async () => {
+    if (!plannerDay || selectedHours.size === 0) return;
+    setIsSubmitting(true);
+
+    const weeks = isRecurring ? Math.max(2, recurWeeks) : 1;
+    const sortedHours = Array.from(selectedHours).sort((a, b) => a - b);
+
+    const slotsToCreate: { startsAt: string; durationMinutes: number; priceDinar: number }[] = [];
+    for (let w = 0; w < weeks; w++) {
+      for (const hour of sortedHours) {
+        const d = new Date(plannerDay);
+        d.setDate(d.getDate() + w * 7);
+        slotsToCreate.push({
+          startsAt: isoAt(d, hour),
+          durationMinutes: duration,
+          priceDinar: price,
+        });
+      }
+    }
 
     try {
       if (slotsToCreate.length === 1) {
@@ -186,11 +250,11 @@ export function SlotCalendar({
       }
       queryClient.invalidateQueries({ queryKey: invalidateKey ?? ["/api/therapists", therapistId, "slots"] });
       toast({
-        title: isRecurring
-          ? `${weeks} créneaux créés avec succès`
-          : t("slots.published_success"),
+        title: slotsToCreate.length === 1
+          ? t("slots.published_success")
+          : `${slotsToCreate.length} créneaux créés`,
       });
-      setDialogOpen(false);
+      setPlannerDay(null);
     } catch {
       toast({ title: t("common.error"), variant: "destructive" });
     } finally {
@@ -198,13 +262,14 @@ export function SlotCalendar({
     }
   };
 
+  // Cancel a slot
   const handleCancel = async (slotId: number) => {
     setCancellingId(slotId);
     try {
       await apiRequest("DELETE", `/api/therapist/slots/${slotId}`);
       queryClient.invalidateQueries({ queryKey: invalidateKey ?? ["/api/therapists", therapistId, "slots"] });
       toast({ title: t("slots.cancelled_success") });
-      setDialogOpen(false);
+      setDetailSlot(null);
     } catch {
       toast({ title: t("common.error"), variant: "destructive" });
     } finally {
@@ -212,37 +277,70 @@ export function SlotCalendar({
     }
   };
 
-  const weekLabel = useMemo(() => {
-    const start = weekDates[0];
-    const end = weekDates[6];
-    return `${start.toLocaleDateString("fr", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("fr", { month: "short", day: "numeric", year: "numeric" })}`;
-  }, [weekDates]);
+  // Copy day's slots to other days
+  const openCopyDialog = (date: Date) => {
+    setCopySourceDay(date);
+    setCopyTargetDays(new Set());
+    setCopyDialogOpen(true);
+  };
 
-  const isCurrentWeek = weekOffset === 0;
+  const handleCopyDay = async () => {
+    if (!copySourceDay || copyTargetDays.size === 0) return;
+    const sourceSlots = (slotsByDate[copySourceDay.toDateString()] ?? []).filter(
+      (s) => s.status === "open"
+    );
+    if (sourceSlots.length === 0) return;
 
-  // Computed end time string for the create dialog
-  const dialogEndTime = selectedCell
-    ? (() => {
-        const end = new Date(selectedCell.date);
-        end.setHours(selectedCell.hour, 0, 0, 0);
-        end.setMinutes(duration);
-        return `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`;
-      })()
-    : null;
+    setIsCopying(true);
+    const slotsToCreate: { startsAt: string; durationMinutes: number; priceDinar: number }[] = [];
+
+    for (const targetDayIndex of Array.from(copyTargetDays)) {
+      const targetDate = weekDates[targetDayIndex];
+      for (const slot of sourceSlots) {
+        const srcDate = new Date(slot.startsAt);
+        const targetDt = new Date(targetDate);
+        targetDt.setHours(srcDate.getHours(), 0, 0, 0);
+        if (targetDt > new Date()) {
+          slotsToCreate.push({
+            startsAt: targetDt.toISOString(),
+            durationMinutes: slot.durationMinutes,
+            priceDinar: slot.priceDinar,
+          });
+        }
+      }
+    }
+
+    try {
+      if (slotsToCreate.length > 0) {
+        if (slotsToCreate.length === 1) {
+          await apiRequest("POST", "/api/therapist/slots", slotsToCreate[0]);
+        } else {
+          await apiRequest("POST", "/api/therapist/slots/batch", { slots: slotsToCreate });
+        }
+        queryClient.invalidateQueries({ queryKey: invalidateKey ?? ["/api/therapists", therapistId, "slots"] });
+        toast({ title: `${slotsToCreate.length} créneaux copiés` });
+      }
+      setCopyDialogOpen(false);
+    } catch {
+      toast({ title: t("common.error"), variant: "destructive" });
+    } finally {
+      setIsCopying(false);
+    }
+  };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" onPointerUp={handlePointerUp}>
       {/* Week navigation */}
       <div className="flex items-center gap-2 justify-between flex-wrap">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <Button variant="outline" size="sm" onClick={() => setWeekOffset((o) => o - 1)}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <Button variant="outline" size="sm" onClick={() => setWeekOffset((o) => o + 1)}>
             <ChevronRight className="h-4 w-4" />
           </Button>
-          {!isCurrentWeek && (
-            <Button variant="ghost" size="sm" onClick={() => setWeekOffset(0)} className="text-primary">
+          {weekOffset !== 0 && (
+            <Button variant="ghost" size="sm" onClick={() => setWeekOffset(0)} className="text-primary text-xs">
               Aujourd'hui
             </Button>
           )}
@@ -262,184 +360,225 @@ export function SlotCalendar({
 
       {/* Hint */}
       <p className="text-xs text-muted-foreground italic">
-        Cliquez sur une cellule vide pour créer un créneau. Cochez l'option récurrence pour répéter chaque semaine.
+        Cliquez sur un jour pour ouvrir le planificateur et sélectionner vos créneaux.
       </p>
 
-      {/* Calendar grid */}
-      <div className="overflow-x-auto rounded-lg border">
-        <div className="min-w-[640px]">
-          {/* Header row */}
-          <div className="grid grid-cols-[52px_repeat(7,1fr)] border-b bg-muted/30">
-            <div className="py-2" />
-            {weekDates.map((d, i) => {
-              const isToday = d.toDateString() === today.toDateString();
-              const isPast = d < new Date(today.getFullYear(), today.getMonth(), today.getDate());
-              return (
-                <div
-                  key={i}
-                  className={`py-2 text-center text-xs font-medium border-l border-muted/40 ${
-                    isToday
-                      ? "text-primary font-bold"
-                      : isPast
-                      ? "text-muted-foreground/50"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  {d.toLocaleDateString("fr", { weekday: "short" })}
-                  <br />
-                  <span className={`${isToday ? "bg-primary text-primary-foreground rounded-full px-1.5 py-0.5 text-[11px]" : ""}`}>
-                    {d.getDate()}
-                  </span>
+      {/* Week overview — 7 day cards */}
+      <div className="grid grid-cols-7 gap-1.5">
+        {weekDates.map((d, di) => {
+          const isToday = d.toDateString() === today.toDateString();
+          const isPastDay = new Date(d).setHours(23, 59) < Date.now();
+          const daySlots = slotsByDate[d.toDateString()] ?? [];
+          const openCount = daySlots.filter((s) => s.status === "open").length;
+          const bookedCount = daySlots.filter((s) => s.status === "booked").length;
+          const isPlannerOpen = plannerDay?.toDateString() === d.toDateString();
+
+          return (
+            <div key={di} className="flex flex-col gap-1">
+              {/* Day header button */}
+              <button
+                onClick={() => !isPastDay && openPlanner(d)}
+                className={`rounded-lg border p-2 text-center transition-all select-none ${
+                  isPlannerOpen
+                    ? "border-primary bg-primary/10 shadow-sm"
+                    : isPastDay
+                    ? "border-muted/30 bg-muted/20 opacity-40 cursor-not-allowed"
+                    : "border-border hover:border-primary/60 hover:bg-primary/5 cursor-pointer"
+                }`}
+              >
+                <p className={`text-[11px] font-medium ${isToday ? "text-primary" : "text-muted-foreground"}`}>
+                  {DAY_NAMES_FR[di]}
+                </p>
+                <p className={`text-sm font-bold leading-tight ${isToday ? "text-primary" : ""}`}>
+                  {d.getDate()}
+                </p>
+
+                {/* Slot summary dots */}
+                <div className="flex justify-center gap-0.5 mt-1 min-h-[8px]">
+                  {openCount > 0 && (
+                    <span className="inline-flex items-center justify-center w-4 h-3.5 rounded-sm bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 text-[9px] font-bold">
+                      {openCount}
+                    </span>
+                  )}
+                  {bookedCount > 0 && (
+                    <span className="inline-flex items-center justify-center w-4 h-3.5 rounded-sm bg-blue-500/20 text-blue-700 dark:text-blue-400 text-[9px] font-bold">
+                      {bookedCount}
+                    </span>
+                  )}
+                  {!isPastDay && openCount === 0 && bookedCount === 0 && (
+                    <Plus className="h-2.5 w-2.5 text-muted-foreground/40" />
+                  )}
                 </div>
-              );
-            })}
-          </div>
+              </button>
 
-          {/* Hour rows */}
-          {HOURS.map((hour, hi) => (
-            <div
-              key={hour}
-              className="grid grid-cols-[52px_repeat(7,1fr)] border-b last:border-b-0"
-            >
-              {/* Time label */}
-              <div className="text-[11px] text-muted-foreground text-right pr-2 pt-1.5 leading-none select-none">
-                {HOUR_LABELS[hi]}
-              </div>
-
-              {weekDates.map((d, di) => {
-                const key = `${d.toDateString()}_${hour}`;
-                const cellSlots = slotsByCell[key] ?? [];
-                const isOccupied = occupiedCells.has(key) && cellSlots.length === 0; // occupied by a multi-hour slot started earlier
-                const isPast = new Date(d).setHours(hour + 1) < Date.now();
-                const isToday = d.toDateString() === today.toDateString();
-                const canCreate = !isPast && !isOccupied && cellSlots.length === 0;
-
-                return (
-                  <div
-                    key={di}
-                    className={`min-h-[48px] p-0.5 relative group border-l border-muted/30 transition-colors ${
-                      isToday ? "bg-primary/[0.03]" : ""
-                    } ${
-                      canCreate
-                        ? "cursor-pointer hover:bg-primary/8"
-                        : isPast
-                        ? "opacity-35 cursor-not-allowed"
-                        : isOccupied
-                        ? "bg-muted/20"
-                        : ""
-                    }`}
-                    onClick={() => canCreate && openCreateDialog(d, hour)}
-                  >
-                    {/* Slots starting in this cell */}
-                    {cellSlots.map((slot) => {
-                      const span = slotSpan(slot, hour, 22);
-                      return (
-                        <div
-                          key={slot.id}
-                          className={`text-[10px] rounded border px-1 py-0.5 leading-tight mb-0.5 cursor-pointer select-none ${slotColor(slot)}`}
-                          style={{ minHeight: span > 1 ? `${span * 44}px` : undefined }}
-                          onClick={(e) => { e.stopPropagation(); openDetailDialog(slot); }}
-                          title={`${formatHour(hour)} – ${endHour(slot)} · ${slot.priceDinar} TND`}
-                        >
-                          <div className="font-medium">{formatHour(hour)}–{endHour(slot)}</div>
-                          <div className="opacity-80">{slot.priceDinar} TND</div>
-                        </div>
-                      );
-                    })}
-
-                    {/* + hover indicator for empty cells */}
-                    {canCreate && (
-                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-40 transition-opacity pointer-events-none">
-                        <div className="w-5 h-5 rounded-full bg-primary/30 flex items-center justify-center">
-                          <span className="text-primary text-sm leading-none font-bold">+</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+              {/* Copy button when day has open slots */}
+              {openCount > 0 && !isPastDay && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); openCopyDialog(d); }}
+                  title="Copier les créneaux de ce jour"
+                  className="flex items-center justify-center gap-0.5 text-[10px] text-muted-foreground hover:text-primary transition-colors py-0.5"
+                >
+                  <Copy className="h-2.5 w-2.5" />
+                  <span>Copier</span>
+                </button>
+              )}
             </div>
-          ))}
-        </div>
+          );
+        })}
       </div>
 
-      {/* Create slot dialog */}
-      <Dialog
-        open={dialogOpen && !!selectedCell}
-        onOpenChange={(open) => {
-          if (!open) { setDialogOpen(false); setSelectedCell(null); }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CalendarCheck className="h-4 w-4" />
-              Nouveau créneau
-            </DialogTitle>
-          </DialogHeader>
-          {selectedCell && (
-            <div className="space-y-4">
-              {/* Date/time summary */}
-              <div className="rounded-lg bg-muted/50 px-4 py-3 space-y-1">
-                <p className="text-sm font-semibold capitalize">
-                  {selectedCell.date.toLocaleDateString("fr", { weekday: "long", day: "numeric", month: "long" })}
-                </p>
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  {formatHour(selectedCell.hour)} → {dialogEndTime}
-                  <span className="ms-2 text-muted-foreground/60">({duration} min)</span>
-                </p>
+      {/* Day Planner Panel */}
+      <AnimatePresence>
+        {plannerDay && (
+          <motion.div
+            key={plannerDay.toDateString()}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.22 }}
+            className="rounded-xl border bg-card shadow-sm overflow-hidden"
+          >
+            {/* Panel header */}
+            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b bg-muted/30">
+              <div className="flex items-center gap-2">
+                <CalendarCheck className="h-4 w-4 text-primary" />
+                <span className="text-sm font-semibold capitalize">
+                  {plannerDay.toLocaleDateString("fr", { weekday: "long", day: "numeric", month: "long" })}
+                </span>
               </div>
+              <button onClick={() => setPlannerDay(null)} className="text-muted-foreground hover:text-foreground transition-colors">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
 
-              {/* Duration presets + custom */}
+            <div className="p-4 space-y-5">
+              {/* Time grid — tap or drag to select */}
               <div className="space-y-2">
-                <label className="text-sm font-medium">Durée</label>
-                <div className="flex flex-wrap gap-2">
-                  {DURATION_PRESETS.map((p) => (
-                    <Button
-                      key={p.value}
-                      type="button"
-                      size="sm"
-                      variant={duration === p.value ? "default" : "outline"}
-                      onClick={() => setDuration(p.value)}
-                    >
-                      {p.label}
-                    </Button>
-                  ))}
-                  <div className="flex items-center gap-1">
-                    <Input
-                      type="number"
-                      min={15}
-                      max={240}
-                      step={5}
-                      value={duration}
-                      onChange={(e) => setDuration(Number(e.target.value))}
-                      className="w-20 h-9"
-                    />
-                    <span className="text-xs text-muted-foreground">min</span>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-muted-foreground">Sélectionnez les heures de début</p>
+                  <div className="flex gap-2">
+                    <button onClick={selectAll} className="text-[11px] text-primary hover:underline">Tout sélectionner</button>
+                    {selectedHours.size > 0 && (
+                      <button onClick={clearSelection} className="text-[11px] text-muted-foreground hover:underline">Effacer</button>
+                    )}
                   </div>
                 </div>
+
+                {/* Drag hint */}
+                <p className="text-[11px] text-muted-foreground/70">
+                  Cliquez sur une heure ou faites glisser pour sélectionner une plage.
+                </p>
+
+                {/* Time blocks grid */}
+                <div
+                  className="grid gap-1.5 select-none"
+                  style={{ gridTemplateColumns: "repeat(7, 1fr)" }}
+                  onPointerLeave={() => { isDragging.current = false; }}
+                >
+                  {HOURS.map((hour) => {
+                    const occupied = occupiedHoursForDay.has(hour);
+                    const isPast = (() => {
+                      const dt = new Date(plannerDay);
+                      dt.setHours(hour + 1, 0, 0, 0);
+                      return dt < new Date();
+                    })();
+                    const selected = selectedHours.has(hour);
+                    const disabled = occupied || isPast;
+
+                    return (
+                      <button
+                        key={hour}
+                        type="button"
+                        disabled={disabled}
+                        onPointerDown={() => handleHourPointerDown(hour, disabled)}
+                        onPointerEnter={() => handleHourPointerEnter(hour, disabled)}
+                        className={`
+                          rounded-lg border py-2.5 text-xs font-medium transition-all touch-none
+                          ${disabled
+                            ? occupied
+                              ? "bg-blue-50 border-blue-200 text-blue-400 dark:bg-blue-900/20 dark:border-blue-800 cursor-not-allowed"
+                              : "opacity-30 cursor-not-allowed bg-muted/30 border-muted"
+                            : selected
+                            ? "bg-primary text-primary-foreground border-primary shadow-sm scale-[1.03]"
+                            : "bg-muted/30 border-border hover:border-primary/50 hover:bg-primary/8 cursor-pointer"
+                          }
+                        `}
+                      >
+                        {formatHour(hour)}
+                        {occupied && <div className="text-[9px] opacity-70 leading-tight">pris</div>}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {selectedHours.size > 0 && (
+                  <p className="text-xs text-primary font-medium">
+                    {selectedHours.size} heure{selectedHours.size > 1 ? "s" : ""} sélectionnée{selectedHours.size > 1 ? "s" : ""}
+                    {" · "}fin à{" "}
+                    {(() => {
+                      const maxH = Math.max(...Array.from(selectedHours));
+                      const endMin = new Date(plannerDay);
+                      endMin.setHours(maxH, 0, 0, 0);
+                      endMin.setMinutes(duration);
+                      return `${String(endMin.getHours()).padStart(2, "0")}:${String(endMin.getMinutes()).padStart(2, "0")}`;
+                    })()}
+                  </p>
+                )}
               </div>
 
-              {/* Price */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Prix (TND)</label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number"
-                    min={0}
-                    max={1000}
-                    step={5}
-                    value={price}
-                    onChange={(e) => setPrice(Number(e.target.value))}
-                    className="w-32"
-                  />
-                  <span className="text-sm text-muted-foreground">TND / séance</span>
+              {/* Duration & Price */}
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-medium">Durée par créneau</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {DURATION_PRESETS.map((p) => (
+                      <button
+                        key={p.value}
+                        type="button"
+                        onClick={() => setDuration(p.value)}
+                        className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-all ${
+                          duration === p.value
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "border-border text-muted-foreground hover:border-primary/50"
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                    <div className="flex items-center gap-1">
+                      <Input
+                        type="number"
+                        min={15}
+                        max={240}
+                        step={5}
+                        value={duration}
+                        onChange={(e) => setDuration(Number(e.target.value))}
+                        className="w-16 h-8 text-xs"
+                      />
+                      <span className="text-xs text-muted-foreground">min</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-medium">Prix (TND)</label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={1000}
+                      step={5}
+                      value={price}
+                      onChange={(e) => setPrice(Number(e.target.value))}
+                      className="w-24 h-8 text-xs"
+                    />
+                    <span className="text-xs text-muted-foreground">TND / séance</span>
+                  </div>
                 </div>
               </div>
 
               {/* Recurring */}
-              <div className="rounded-lg border p-3 space-y-3">
+              <div className="rounded-lg border p-3 space-y-2">
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -453,53 +592,75 @@ export function SlotCalendar({
                   </span>
                 </label>
                 {isRecurring && (
-                  <div className="space-y-2 ps-6">
-                    <div className="flex items-center gap-2">
-                      <label className="text-sm text-muted-foreground shrink-0">Pendant</label>
-                      <Input
-                        type="number"
-                        min={2}
-                        max={52}
-                        value={recurWeeks}
-                        onChange={(e) => setRecurWeeks(Math.max(2, Number(e.target.value)))}
-                        className="w-20"
-                      />
-                      <span className="text-sm text-muted-foreground">semaines</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Crée {recurWeeks} créneaux — jusqu'au{" "}
-                      {(() => {
-                        const end = new Date(selectedCell.date);
-                        end.setDate(end.getDate() + (recurWeeks - 1) * 7);
-                        return end.toLocaleDateString("fr", { day: "numeric", month: "long" });
-                      })()}
-                    </p>
+                  <div className="flex items-center gap-2 ps-6">
+                    <span className="text-sm text-muted-foreground shrink-0">Pendant</span>
+                    <Input
+                      type="number"
+                      min={2}
+                      max={52}
+                      value={recurWeeks}
+                      onChange={(e) => setRecurWeeks(Math.max(2, Number(e.target.value)))}
+                      className="w-16 h-8 text-xs"
+                    />
+                    <span className="text-sm text-muted-foreground">semaines</span>
+                    <span className="text-xs text-muted-foreground ms-auto">
+                      = {selectedHours.size * recurWeeks} créneaux
+                    </span>
                   </div>
                 )}
               </div>
+
+              {/* Actions */}
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" size="sm" onClick={() => setPlannerDay(null)}>
+                  Annuler
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleCreate}
+                  disabled={isSubmitting || selectedHours.size === 0}
+                >
+                  <CalendarCheck className="h-3.5 w-3.5 me-1.5" />
+                  {isSubmitting
+                    ? "Création..."
+                    : isRecurring
+                    ? `Créer ${selectedHours.size * recurWeeks} créneaux`
+                    : selectedHours.size > 1
+                    ? `Créer ${selectedHours.size} créneaux`
+                    : "Créer le créneau"}
+                </Button>
+              </div>
+
+              {/* Existing slots for this day */}
+              {(slotsByDate[plannerDay.toDateString()] ?? []).length > 0 && (
+                <div className="space-y-1.5 border-t pt-3">
+                  <p className="text-xs font-medium text-muted-foreground">Créneaux existants ce jour</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(slotsByDate[plannerDay.toDateString()] ?? [])
+                      .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
+                      .map((slot) => (
+                        <button
+                          key={slot.id}
+                          onClick={() => setDetailSlot(slot)}
+                          className={`text-[11px] rounded-lg border px-2.5 py-1.5 font-medium transition-colors ${slotColor(slot)}`}
+                        >
+                          <Clock className="h-2.5 w-2.5 inline me-0.5" />
+                          {formatHour(new Date(slot.startsAt).getHours())}–{endHour(slot)}
+                          <span className="ms-1 opacity-70">{slot.priceDinar}D</span>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Annuler
-            </Button>
-            <Button onClick={handleCreate} disabled={isSubmitting}>
-              {isSubmitting
-                ? "Création..."
-                : isRecurring
-                ? `Créer ${recurWeeks} créneaux`
-                : "Créer le créneau"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Slot detail dialog */}
       <Dialog
-        open={dialogOpen && !!detailSlot}
-        onOpenChange={(open) => {
-          if (!open) { setDialogOpen(false); setDetailSlot(null); }
-        }}
+        open={!!detailSlot}
+        onOpenChange={(open) => { if (!open) setDetailSlot(null); }}
       >
         <DialogContent>
           <DialogHeader>
@@ -550,7 +711,7 @@ export function SlotCalendar({
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setDialogOpen(false); setDetailSlot(null); }}>
+            <Button variant="outline" onClick={() => setDetailSlot(null)}>
               Fermer
             </Button>
             {detailSlot && detailSlot.status !== "cancelled" && (
@@ -562,6 +723,76 @@ export function SlotCalendar({
                 {cancellingId === detailSlot.id ? "Annulation..." : "Annuler ce créneau"}
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Copy day dialog */}
+      <Dialog open={copyDialogOpen} onOpenChange={(open) => { if (!open) setCopyDialogOpen(false); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Copy className="h-4 w-4" />
+              Copier les créneaux
+            </DialogTitle>
+          </DialogHeader>
+          {copySourceDay && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Copier les créneaux du{" "}
+                <span className="font-medium text-foreground capitalize">
+                  {copySourceDay.toLocaleDateString("fr", { weekday: "long", day: "numeric", month: "long" })}
+                </span>{" "}
+                vers :
+              </p>
+              <div className="grid grid-cols-7 gap-1.5">
+                {weekDates.map((d, di) => {
+                  const isSrc = d.toDateString() === copySourceDay.toDateString();
+                  const isPast = new Date(d).setHours(23, 59) < Date.now();
+                  const selected = copyTargetDays.has(di);
+                  return (
+                    <button
+                      key={di}
+                      disabled={isSrc || isPast}
+                      onClick={() => {
+                        setCopyTargetDays((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(di)) next.delete(di); else next.add(di);
+                          return next;
+                        });
+                      }}
+                      className={`rounded-lg border py-2 text-center text-xs font-medium transition-all ${
+                        isSrc
+                          ? "border-primary bg-primary/10 text-primary cursor-default"
+                          : isPast
+                          ? "opacity-30 cursor-not-allowed border-muted"
+                          : selected
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div>{DAY_NAMES_FR[di]}</div>
+                      <div className="font-bold">{d.getDate()}</div>
+                    </button>
+                  );
+                })}
+              </div>
+              {copyTargetDays.size > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {copyTargetDays.size} jour{copyTargetDays.size > 1 ? "s" : ""} sélectionné{copyTargetDays.size > 1 ? "s" : ""}
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCopyDialogOpen(false)}>Annuler</Button>
+            <Button
+              onClick={handleCopyDay}
+              disabled={isCopying || copyTargetDays.size === 0}
+            >
+              <Copy className="h-3.5 w-3.5 me-1.5" />
+              {isCopying ? "Copie..." : "Copier"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

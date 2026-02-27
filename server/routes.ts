@@ -167,6 +167,9 @@ export async function registerRoutes(
     data?: Record<string, string>,
   ) => {
     try {
+      // Write in-app notification (fire-and-forget)
+      storage.createNotification(userId, data?.type ?? "general", title, body, data).catch(() => undefined);
+      // FCM push notification
       const tokens = await storage.getFcmTokensByUser(userId);
       await sendPushToTokens(tokens, { title, body, data });
     } catch {
@@ -521,6 +524,17 @@ export async function registerRoutes(
       delete payload.tierApprovedAt;
       await storage.updateUser(userId, { role: "therapist" });
       const profile = await storage.createTherapistProfile({ ...payload, userId });
+
+      // Therapists are also listeners by default — auto-approve their listener profile
+      // so they can appear in the peer support directory immediately.
+      await storage.createOrUpdateListenerProfile({
+        userId,
+        verificationStatus: "approved",
+        activationStatus: "live",
+        isAvailable: true,
+        approvedAt: new Date().toISOString(),
+      });
+
       res.status(201).json(profile);
     } catch (error) {
       res.status(500).json({ message: "Failed to create therapist profile" });
@@ -875,6 +889,83 @@ export async function registerRoutes(
     }
   });
 
+  // Cancel appointment with 24h policy check
+  app.post("/api/appointments/:id/cancel", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const aptId = parseInt(req.params.id);
+      if (!Number.isInteger(aptId)) return res.status(400).json({ message: "Invalid appointment id" });
+
+      const existing = await storage.getAppointment(aptId);
+      if (!existing) return res.status(404).json({ message: "Appointment not found" });
+      if (existing.clientId !== userId && existing.therapistId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      if (existing.status === "cancelled" || existing.status === "completed") {
+        return res.status(400).json({ message: "Appointment cannot be cancelled in its current state" });
+      }
+
+      // 24h policy: clients cannot cancel within 24h of session
+      if (existing.clientId === userId) {
+        const hoursUntil = (new Date(existing.scheduledAt).getTime() - Date.now()) / 3_600_000;
+        if (hoursUntil < 24) {
+          return res.status(400).json({ message: "Cancellations must be made at least 24 hours before the session" });
+        }
+      }
+
+      const reason = typeof req.body.reason === "string" ? req.body.reason.trim() : undefined;
+      const apt = await storage.cancelAppointment(aptId, userId, reason);
+      if (!apt) return res.status(500).json({ message: "Failed to cancel appointment" });
+
+      // Notify the other party
+      const recipientId = apt.clientId === userId ? apt.therapistId : apt.clientId;
+      await notifyUser(
+        recipientId,
+        "Appointment cancelled",
+        `Your appointment has been cancelled${reason ? `: ${reason}` : "."}`,
+        { type: "appointment_cancelled", appointmentId: String(apt.id) },
+      );
+
+      res.json(apt);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to cancel appointment" });
+    }
+  });
+
+  // Reschedule appointment — cancels old, books a new slot
+  app.post("/api/appointments/:id/reschedule", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const aptId = parseInt(req.params.id);
+      const newSlotId = Number(req.body.slotId);
+      if (!Number.isInteger(aptId) || !Number.isInteger(newSlotId)) {
+        return res.status(400).json({ message: "Invalid appointment or slot id" });
+      }
+
+      const existing = await storage.getAppointment(aptId);
+      if (!existing) return res.status(404).json({ message: "Appointment not found" });
+      if (existing.clientId !== userId) return res.status(403).json({ message: "Only the client can reschedule" });
+      if (existing.status === "cancelled" || existing.status === "completed") {
+        return res.status(400).json({ message: "Appointment cannot be rescheduled" });
+      }
+
+      const result = await storage.rescheduleAppointment(aptId, newSlotId, userId);
+      if (!result) return res.status(409).json({ message: "The selected slot is no longer available" });
+
+      // Notify therapist
+      await notifyUser(
+        existing.therapistId,
+        "Appointment rescheduled",
+        `A client has rescheduled their appointment.`,
+        { type: "appointment_rescheduled", appointmentId: String(result.appointment.id) },
+      );
+
+      res.json(result.appointment);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to reschedule appointment" });
+    }
+  });
+
   app.get("/api/therapists/:userId/slots", async (req, res) => {
     try {
       const therapistId = req.params.userId;
@@ -926,6 +1017,14 @@ export async function registerRoutes(
         return res.status(400).json({
           message: `Graduated doctor slot price cannot exceed ${graduatedDoctorCapDinar()} TND`,
         });
+      }
+
+      // Overlap guard: reject if therapist already has an open/booked slot in this time range
+      const slotStart = new Date(startsAt);
+      const slotEnd = new Date(slotStart.getTime() + durationMinutes * 60_000);
+      const overlaps = await storage.hasOverlappingSlot(therapistId, slotStart, slotEnd);
+      if (overlaps) {
+        return res.status(409).json({ message: "This time slot overlaps with an existing slot" });
       }
 
       const slot = await storage.createTherapistSlot({
@@ -1278,6 +1377,11 @@ export async function registerRoutes(
 
       // Fetch all active therapists and convert to candidates
       const therapists = await storage.getTherapistProfiles({});
+
+      // Check if user has an active subscription (to apply tier bonus)
+      const activeSub = await storage.getActiveSubscription(userId);
+      const subTierRestriction = activeSub?.plan?.tierRestriction ?? null;
+
       const now = new Date();
       const in48h = new Date(now.getTime() + 48 * 60 * 60 * 1000);
 
@@ -1302,6 +1406,8 @@ export async function registerRoutes(
           verified: tp.verified ?? false,
           hasAvailabilityIn48h: false, // simplified — would require slot query per therapist
           hadPriorSession: priorTherapistIds.has(tp.userId),
+          // Subscription tier bonus: +10 when the user's plan targets this therapist's tier
+          subscriptionTierBonus: subTierRestriction && tp.tier === subTierRestriction ? 10 : 0,
         };
       });
 
@@ -1685,6 +1791,13 @@ export async function registerRoutes(
 
       const { transactionId, status, externalRef } = req.body;
       const providerEventId = req.body.eventId || req.body.event_id || req.body.id || req.body.payment_id;
+
+      // Idempotency: skip if we've already processed this event
+      if (providerEventId) {
+        const isNew = await storage.recordWebhookEvent(String(providerEventId), "flouci", req.body);
+        if (!isNew) return res.json({ received: true, duplicate: true });
+      }
+
       const transaction = await storage.updatePaymentStatus(
         transactionId,
         status === "success" ? "completed" : "failed",
@@ -1756,6 +1869,13 @@ export async function registerRoutes(
 
       const { transactionId, status, externalRef } = req.body;
       const providerEventId = req.body.eventId || req.body.event_id || req.body.id || req.body.payment_id;
+
+      // Idempotency: skip if we've already processed this event
+      if (providerEventId) {
+        const isNew = await storage.recordWebhookEvent(String(providerEventId), "konnect", req.body);
+        if (!isNew) return res.json({ received: true, duplicate: true });
+      }
+
       const transaction = await storage.updatePaymentStatus(
         transactionId,
         status === "success" ? "completed" : "failed",
@@ -1810,6 +1930,38 @@ export async function registerRoutes(
       });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch receipt" });
+    }
+  });
+
+  // ---- In-app Notifications ----
+
+  app.get("/api/notifications", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const limit = Math.min(Number(req.query.limit) || 20, 50);
+      const offset = Number(req.query.offset) || 0;
+      const notifications = await storage.getNotifications(userId, limit, offset);
+      res.json(notifications);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch notifications" });
+    }
+  });
+
+  app.patch("/api/notifications/:id/read", isAuthenticated, async (req: any, res) => {
+    try {
+      await storage.markNotificationRead(req.params.id);
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ message: "Failed to mark notification read" });
+    }
+  });
+
+  app.get("/api/notifications/unread-count", isAuthenticated, async (req: any, res) => {
+    try {
+      const count = await storage.getUnreadNotificationCount(req.user.id);
+      res.json({ count });
+    } catch {
+      res.status(500).json({ message: "Failed to fetch unread count" });
     }
   });
 
@@ -1967,6 +2119,18 @@ export async function registerRoutes(
       for (const key of Object.keys(answers)) {
         if (!knownIds.has(key)) {
           return res.status(400).json({ message: `Unknown question id: ${key}` });
+        }
+      }
+
+      // 24h cooldown: reject if the last (failed) attempt was less than 24h ago
+      const existingTest = await storage.getListenerQualificationTest(req.user.id);
+      if (existingTest && !existingTest.passed && existingTest.attemptedAt) {
+        const hoursSince = (Date.now() - new Date(existingTest.attemptedAt).getTime()) / 3_600_000;
+        if (hoursSince < 24) {
+          const hoursRemaining = Math.ceil(24 - hoursSince);
+          return res.status(429).json({
+            message: `You must wait ${hoursRemaining} more hour${hoursRemaining !== 1 ? "s" : ""} before retaking the test.`,
+          });
         }
       }
 
@@ -3131,6 +3295,25 @@ export async function registerRoutes(
       if (!["pending", "processing", "paid", "failed"].includes(status)) {
         return res.status(400).json({ message: "Invalid status" });
       }
+
+      // Enforce valid state transitions
+      const allPayouts = await storage.getAllDoctorPayouts();
+      const current = allPayouts.find((p) => p.id === id);
+      if (!current) return res.status(404).json({ message: "Payout not found" });
+
+      const validTransitions: Record<string, string[]> = {
+        pending: ["processing", "failed"],
+        processing: ["paid", "failed"],
+        paid: [],
+        failed: ["pending"],
+      };
+      const allowed = validTransitions[current.status] ?? [];
+      if (!allowed.includes(status)) {
+        return res.status(400).json({
+          message: `Cannot transition payout from '${current.status}' to '${status}'`,
+        });
+      }
+
       const payout = await storage.updateDoctorPayoutStatus(id, status);
       if (!payout) return res.status(404).json({ message: "Payout not found" });
       res.json(payout);
@@ -3439,6 +3622,90 @@ export async function registerRoutes(
       res.json(data);
     } catch {
       res.status(500).json({ message: "Failed to update listener profile" });
+    }
+  });
+
+  // ---- Admin: CSV export endpoint (W8) ----
+  app.get("/api/admin/export/:type", isAuthenticated, requireRoles(["admin"]), async (req: any, res) => {
+    const { type } = req.params;
+    const allowed = ["users", "therapists", "appointments"];
+    if (!allowed.includes(type)) {
+      return res.status(400).json({ message: `type must be one of: ${allowed.join(", ")}` });
+    }
+
+    try {
+      let rows: Record<string, unknown>[] = [];
+      let filename = "";
+
+      if (type === "users") {
+        const result = await storage.getUsersPaginated(1, 10000);
+        rows = (result.users || []).map((u: any) => ({
+          id: u.id,
+          email: u.email,
+          first_name: u.firstName,
+          last_name: u.lastName,
+          role: u.role,
+          created_at: u.createdAt ?? "",
+        }));
+        filename = "shifa-users.csv";
+
+      } else if (type === "therapists") {
+        const therapists = await storage.getTherapistProfiles({});
+        rows = therapists.map((tp: any) => ({
+          user_id: tp.userId,
+          name: `${tp.user?.firstName ?? ""} ${tp.user?.lastName ?? ""}`.trim(),
+          email: tp.user?.email ?? "",
+          tier: tp.tier ?? "",
+          verified: tp.verified,
+          rating: tp.rating ?? "",
+          review_count: tp.reviewCount ?? 0,
+          rate_dinar: tp.rateDinar ?? "",
+          specializations: (tp.specializations || []).join("|"),
+          languages: (tp.languages || []).join("|"),
+        }));
+        filename = "shifa-therapists.csv";
+
+      } else if (type === "appointments") {
+        const { data } = await (await import("./supabase")).supabaseAdmin
+          .from("appointments")
+          .select("id, client_id, therapist_id, scheduled_at, session_type, status, price_dinar, duration_minutes, created_at")
+          .order("scheduled_at", { ascending: false })
+          .limit(10000);
+        rows = (data || []).map((a: any) => ({
+          id: a.id,
+          client_id: a.client_id,
+          therapist_id: a.therapist_id,
+          scheduled_at: a.scheduled_at,
+          session_type: a.session_type,
+          status: a.status,
+          price_dinar: a.price_dinar ?? "",
+          duration_minutes: a.duration_minutes,
+          created_at: a.created_at,
+        }));
+        filename = "shifa-appointments.csv";
+      }
+
+      if (rows.length === 0) {
+        return res.status(200).send("");
+      }
+
+      const headers = Object.keys(rows[0]);
+      const csvLines = [
+        headers.join(","),
+        ...rows.map((row) =>
+          headers.map((h) => {
+            const val = String(row[h] ?? "").replace(/"/g, '""');
+            return val.includes(",") || val.includes('"') || val.includes("\n") ? `"${val}"` : val;
+          }).join(",")
+        ),
+      ];
+
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.send(csvLines.join("\r\n"));
+    } catch (err) {
+      console.error("[admin/export]", err);
+      res.status(500).json({ message: "Export failed" });
     }
   });
 

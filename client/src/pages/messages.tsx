@@ -215,17 +215,22 @@ export default function MessagesPage() {
 
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
-      if (!selectedConv || !conversationKey) {
-        throw new Error(t("messages.encryption_key_unavailable"));
-      }
+      if (!selectedConv) throw new Error("No conversation selected");
 
-      const encryptedContent = await encryptMessageContent(content, conversationKey);
+      let encryptedContent = content;
+      let encrypted = false;
       const lowerContent = content.toLowerCase();
       const crisisDetectedByClient = CRISIS_KEYWORDS.some((kw) => lowerContent.includes(kw));
 
+      // Encrypt if we have a key; otherwise send plaintext (graceful fallback)
+      if (conversationKey) {
+        encryptedContent = await encryptMessageContent(content, conversationKey);
+        encrypted = true;
+      }
+
       const res = await apiRequest("POST", `/api/conversations/${selectedConv}/messages`, {
         content: encryptedContent,
-        encrypted: true,
+        encrypted,
         crisisDetectedByClient,
       });
       return res.json();
@@ -238,7 +243,7 @@ export default function MessagesPage() {
   });
 
   const handleSend = () => {
-    if (!messageText.trim() || !selectedConv || !conversationKey) return;
+    if (!messageText.trim() || !selectedConv) return;
     sendMutation.mutate(messageText.trim());
   };
 
@@ -320,7 +325,7 @@ export default function MessagesPage() {
               {!conversationKey && (
                 <div className="p-3 border-b bg-muted/40 text-muted-foreground text-xs flex items-center gap-2">
                   <Lock className="h-3.5 w-3.5 shrink-0" />
-                  <span>{t("messages.encryption_waiting")}</span>
+                  <span>Messages are sent. End-to-end encryption will activate once both parties have set up their keys.</span>
                 </div>
               )}
 
@@ -371,12 +376,11 @@ export default function MessagesPage() {
                     placeholder={t("messages.type")}
                     className="flex-1"
                     data-testid="input-message"
-                    disabled={!conversationKey}
                   />
                   <Button
                     type="submit"
                     size="icon"
-                    disabled={!messageText.trim() || sendMutation.isPending || !conversationKey}
+                    disabled={!messageText.trim() || sendMutation.isPending}
                     data-testid="button-send-message"
                   >
                     <Send className="h-4 w-4" />

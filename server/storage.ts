@@ -54,6 +54,8 @@ import {
   SubscriptionPlan,
   UserSubscription,
   MatchingPreferences,
+  Notification,
+  mapNotification,
   toSnakeCase,
 } from "@shared/schema";
 
@@ -208,6 +210,9 @@ export interface IStorage {
   ): Promise<{ appointment: Appointment; slot: TherapistSlot } | undefined>;
   updateAppointmentStatus(id: number, status: string): Promise<Appointment | undefined>;
   updateAppointment(id: number, data: Partial<{ meetLink: string | null; notes: string | null; status: string }>): Promise<Appointment | undefined>;
+  hasOverlappingSlot(therapistId: string, startTime: Date, endTime: Date): Promise<boolean>;
+  cancelAppointment(id: number, cancelledBy: string, reason?: string): Promise<Appointment | undefined>;
+  rescheduleAppointment(id: number, newSlotId: number, clientId: string): Promise<{ appointment: Appointment; slot: TherapistSlot } | undefined>;
   getTherapistSlots(
     therapistId: string,
     from?: string,
@@ -249,10 +254,16 @@ export interface IStorage {
     providerEventId?: string,
   ): Promise<PaymentTransaction | undefined>;
   getPaymentsByUser(userId: string): Promise<PaymentTransaction[]>;
+  recordWebhookEvent(eventId: string, provider: string, payload: unknown): Promise<boolean>;
 
   saveFcmToken(userId: string, token: string, deviceType?: string): Promise<void>;
   getFcmTokensByUser(userId: string): Promise<string[]>;
   removeFcmToken(token: string): Promise<void>;
+
+  createNotification(userId: string, type: string, title: string, body?: string, data?: Record<string, string>): Promise<Notification>;
+  getNotifications(userId: string, limit?: number, offset?: number): Promise<Notification[]>;
+  markNotificationRead(id: string): Promise<void>;
+  getUnreadNotificationCount(userId: string): Promise<number>;
 
   createCrisisReport(data: InsertCrisisReport): Promise<CrisisReport>;
   updateCrisisReport(id: number, data: Partial<CrisisReport>): Promise<CrisisReport | undefined>;
@@ -911,6 +922,60 @@ export class DatabaseStorage implements IStorage {
     return mapTherapistSlot(data);
   }
 
+  async hasOverlappingSlot(therapistId: string, startTime: Date, endTime: Date): Promise<boolean> {
+    // Find any open/booked slot for this therapist whose time range overlaps [startTime, endTime)
+    const { data, error } = await supabase
+      .from("therapist_slots")
+      .select("id, starts_at, duration_minutes")
+      .eq("therapist_id", therapistId)
+      .in("status", ["open", "booked"])
+      .lt("starts_at", endTime.toISOString());
+    if (error || !data) return false;
+    return data.some((slot) => {
+      const slotEnd = new Date(new Date(slot.starts_at).getTime() + slot.duration_minutes * 60_000);
+      return slotEnd > startTime;
+    });
+  }
+
+  async cancelAppointment(id: number, cancelledBy: string, reason?: string): Promise<Appointment | undefined> {
+    const { data, error } = await supabase
+      .from("appointments")
+      .update({
+        status: "cancelled",
+        cancelled_by: cancelledBy,
+        cancellation_reason: reason ?? null,
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error || !data) return undefined;
+    // Re-open the linked slot (linked via therapist_slots.appointment_id)
+    await supabase
+      .from("therapist_slots")
+      .update({ status: "open", appointment_id: null })
+      .eq("appointment_id", id)
+      .eq("status", "booked");
+    return mapAppointment(data);
+  }
+
+  async rescheduleAppointment(
+    id: number,
+    newSlotId: number,
+    clientId: string,
+  ): Promise<{ appointment: Appointment; slot: TherapistSlot } | undefined> {
+    // Cancel the old appointment
+    await this.cancelAppointment(id, clientId, "rescheduled");
+    // Book the new slot
+    const result = await this.createAppointmentFromSlot(newSlotId, clientId);
+    if (!result) return undefined;
+    // Tag the new appointment with original_appointment_id
+    await supabase
+      .from("appointments")
+      .update({ original_appointment_id: id })
+      .eq("id", result.appointment.id);
+    return result;
+  }
+
   // ---- Mood Entries ----
 
   async getMoodEntries(userId: string, limit = 30): Promise<MoodEntry[]> {
@@ -1166,6 +1231,20 @@ export class DatabaseStorage implements IStorage {
     return data.map(mapPaymentTransaction);
   }
 
+  async recordWebhookEvent(eventId: string, provider: string, payload: unknown): Promise<boolean> {
+    // Returns true if new (not duplicate), false if already processed
+    const { error } = await supabaseAdmin
+      .from("webhook_events")
+      .insert({ event_id: eventId, provider, payload })
+      .select("id");
+    if (error) {
+      // Unique constraint violation = duplicate event
+      if (error.code === "23505") return false;
+      throw error;
+    }
+    return true;
+  }
+
   // ---- FCM Tokens (MVP) ----
 
   async saveFcmToken(userId: string, token: string, deviceType?: string): Promise<void> {
@@ -1187,6 +1266,48 @@ export class DatabaseStorage implements IStorage {
 
   async removeFcmToken(token: string): Promise<void> {
     await supabase.from("fcm_tokens").delete().eq("token", token);
+  }
+
+  // ---- In-app Notifications ----
+
+  async createNotification(
+    userId: string,
+    type: string,
+    title: string,
+    body?: string,
+    data?: Record<string, string>,
+  ): Promise<Notification> {
+    const { data: row, error } = await supabase
+      .from("notifications")
+      .insert({ user_id: userId, type, title, body: body ?? null, data: data ?? null })
+      .select("*")
+      .single();
+    if (error) throw error;
+    return mapNotification(row);
+  }
+
+  async getNotifications(userId: string, limit = 20, offset = 0): Promise<Notification[]> {
+    const { data, error } = await supabase
+      .from("notifications")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (error || !data) return [];
+    return data.map(mapNotification);
+  }
+
+  async markNotificationRead(id: string): Promise<void> {
+    await supabase.from("notifications").update({ read: true }).eq("id", id);
+  }
+
+  async getUnreadNotificationCount(userId: string): Promise<number> {
+    const { count, error } = await supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("read", false);
+    return error ? 0 : (count ?? 0);
   }
 
   // ---- Crisis Reports (MVP) ----
@@ -2827,18 +2948,31 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deductSubscriptionSession(id: number): Promise<UserSubscription | undefined> {
-    // Atomic decrement via RPC would be ideal; using optimistic client decrement here
-    const { data: current } = await supabase
-      .from("user_subscriptions").select("sessions_remaining").eq("id", id).single();
-    if (!current || current.sessions_remaining <= 0) return undefined;
-    const newCount = current.sessions_remaining - 1;
-    const updates: Record<string, any> = { sessions_remaining: newCount };
-    if (newCount === 0) updates.status = "expired";
+    // Fetch the subscription to get the user_id for the atomic RPC
+    const { data: sub } = await supabase
+      .from("user_subscriptions").select("user_id, sessions_remaining, status").eq("id", id).single();
+    if (!sub || sub.sessions_remaining <= 0 || sub.status !== "active") return undefined;
+
+    // Atomic decrement via migration-028 RPC — prevents double-spend
+    const { data: success, error: rpcError } = await supabaseAdmin.rpc("deduct_subscription_credit", {
+      p_user_id: sub.user_id,
+    });
+    if (rpcError || !success) return undefined;
+
+    // Expire subscription if now at zero
+    const { data: updated } = await supabase
+      .from("user_subscriptions")
+      .select("sessions_remaining")
+      .eq("id", id)
+      .single();
+    if (updated && updated.sessions_remaining === 0) {
+      await supabase.from("user_subscriptions").update({ status: "expired" }).eq("id", id);
+    }
+
     const { data, error } = await supabase
       .from("user_subscriptions")
-      .update(updates)
-      .eq("id", id)
       .select("*, subscription_plans(*)")
+      .eq("id", id)
       .single();
     if (error || !data) return undefined;
     return mapUserSubscription(data);

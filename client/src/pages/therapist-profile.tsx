@@ -168,6 +168,11 @@ export default function TherapistProfilePage() {
     (s) => s.status === "active" && s.sessionsRemaining > 0,
   ) ?? null;
 
+  const { data: allTherapists = [] } = useQuery<(TherapistProfile & { user: User })[]>({
+    queryKey: ["/api/therapists"],
+    enabled: !!profile,
+  });
+
   // Gate reviews: only users who have had a confirmed/completed appointment with this therapist can review
   const { data: myAppointments = [] } = useQuery<Appointment[]>({
     queryKey: ["/api/appointments"],
@@ -1270,6 +1275,43 @@ export default function TherapistProfilePage() {
           </Card>
         </motion.div>
       </div>
+
+      {/* Similar Therapists */}
+      {(() => {
+        const similar = allTherapists
+          .filter((t) => t.userId !== userId && t.verified)
+          .filter((t) =>
+            profile?.specializations?.some((s) => t.specializations?.includes(s))
+          )
+          .slice(0, 3);
+        if (similar.length === 0) return null;
+        return (
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 pb-6">
+            <h2 className="text-lg font-semibold mb-3">Similar therapists</h2>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {similar.map((t) => (
+                <Link key={t.userId} href={`/therapists/${t.userId}`}>
+                  <Card className="hover:border-primary/50 transition-colors cursor-pointer">
+                    <CardContent className="p-4 space-y-1">
+                      <p className="font-medium text-sm truncate">
+                        {t.user.firstName} {t.user.lastName}
+                      </p>
+                      {t.specializations && t.specializations.length > 0 && (
+                        <p className="text-xs text-muted-foreground truncate">
+                          {t.specializations.slice(0, 2).join(" · ")}
+                        </p>
+                      )}
+                      {t.rateDinar && (
+                        <p className="text-xs font-medium text-primary">{t.rateDinar} TND / session</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="fixed bottom-0 left-0 right-0 sm:hidden z-40 glass-effect border-t p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]" data-testid="sticky-cta-bar">
         <div className="flex items-center gap-2 max-w-4xl mx-auto">

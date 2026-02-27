@@ -98,9 +98,6 @@ export default function TherapistDashboardPage() {
   const [selectedSessionNotesId, setSelectedSessionNotesId] = useState<number | null>(null);
   const [responseText, setResponseText] = useState("");
   const [formLoaded, setFormLoaded] = useState(false);
-  const [slotStartsAt, setSlotStartsAt] = useState("");
-  const [slotDurationMinutes, setSlotDurationMinutes] = useState(50);
-  const [slotPriceDinar, setSlotPriceDinar] = useState(20);
   const [landingEnabled, setLandingEnabled] = useState(false);
   const [landingCtaText, setLandingCtaText] = useState("");
   const [landingCtaUrl, setLandingCtaUrl] = useState("");
@@ -205,7 +202,6 @@ export default function TherapistDashboardPage() {
       setSocialLinks((p.socialLinks as SocialLinks) || {});
       setSlug(p.slug || "");
       setAcceptingNewClients(p.acceptingNewClients ?? true);
-      setSlotPriceDinar(p.rateDinar || 20);
       setFormLoaded(true);
     }
     if (dashboardData?.profile && !landingFormLoaded) {
@@ -280,39 +276,6 @@ export default function TherapistDashboardPage() {
         title: t("common.error"),
         variant: "destructive",
       });
-    },
-  });
-
-  const createSlotMutation = useMutation({
-    mutationFn: async () => {
-      await apiRequest("POST", "/api/therapist/slots", {
-        startsAt: slotStartsAt,
-        durationMinutes: slotDurationMinutes,
-        priceDinar: slotPriceDinar,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/therapists", user?.id, "slots"] });
-      setSlotStartsAt("");
-      setSlotDurationMinutes(50);
-      setSlotPriceDinar(profile?.rateDinar || 20);
-      toast({ title: t("slots.published_success") });
-    },
-    onError: () => {
-      toast({ title: t("common.error"), variant: "destructive" });
-    },
-  });
-
-  const cancelSlotMutation = useMutation({
-    mutationFn: async (slotId: number) => {
-      await apiRequest("DELETE", `/api/therapist/slots/${slotId}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/therapists", user?.id, "slots"] });
-      toast({ title: t("slots.cancelled_success") });
-    },
-    onError: () => {
-      toast({ title: t("common.error"), variant: "destructive" });
     },
   });
 
@@ -875,77 +838,6 @@ export default function TherapistDashboardPage() {
                   />
                 </div>
 
-                <Separator />
-
-                <div className="space-y-3">
-                  <label className="text-sm font-medium">{t("slots.published_title")}</label>
-                  <div className="grid sm:grid-cols-3 gap-3">
-                    <Input
-                      type="datetime-local"
-                      value={slotStartsAt}
-                      onChange={(e) => setSlotStartsAt(e.target.value)}
-                    />
-                    <Input
-                      type="number"
-                      min={1}
-                      value={slotDurationMinutes}
-                      onChange={(e) => setSlotDurationMinutes(Number(e.target.value))}
-                    />
-                    <Input
-                      type="number"
-                      min={0}
-                      value={slotPriceDinar}
-                      onChange={(e) => setSlotPriceDinar(Number(e.target.value))}
-                    />
-                  </div>
-                  <Button
-                    variant="outline"
-                    onClick={() => createSlotMutation.mutate()}
-                    disabled={
-                      createSlotMutation.isPending
-                      || !slotStartsAt
-                      || slotDurationMinutes <= 0
-                      || slotPriceDinar < 0
-                    }
-                  >
-                    <Calendar className="h-4 w-4 me-2" />
-                    {t("slots.publish")}
-                  </Button>
-
-                  <div className="space-y-2">
-                    {openSlots.length > 0 ? (
-                      openSlots.map((slot) => (
-                        <div
-                          key={slot.id}
-                          className="border rounded-md p-3 flex items-center justify-between gap-2"
-                        >
-                          <div>
-                            <p className="text-sm font-medium">
-                              {new Date(slot.startsAt).toLocaleDateString()}{" "}
-                              {new Date(slot.startsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              <Clock className="h-3 w-3 inline me-1" />
-                              {slot.durationMinutes} {t("common.minutes")} • {slot.priceDinar} {t("common.dinar")}
-                            </p>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-destructive"
-                            onClick={() => cancelSlotMutation.mutate(slot.id)}
-                            disabled={cancelSlotMutation.isPending}
-                          >
-                            <Trash2 className="h-4 w-4 me-1" />
-                            {t("slots.cancel")}
-                          </Button>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-sm text-muted-foreground">{t("slots.none_published")}</p>
-                    )}
-                  </div>
-                </div>
               </CardContent>
             </Card>
           </div>
@@ -1372,8 +1264,8 @@ export default function TherapistDashboardPage() {
                 <SlotCalendar
                   slots={slots}
                   therapistId={user?.id ?? ""}
-                  defaultPriceDinar={slotPriceDinar}
-                  defaultDurationMinutes={slotDurationMinutes}
+                  defaultPriceDinar={profile?.rateDinar || 20}
+                  defaultDurationMinutes={50}
                   invalidateKey={["/api/therapists", user?.id, "slots"]}
                 />
               </CardContent>

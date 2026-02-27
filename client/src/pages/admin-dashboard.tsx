@@ -29,6 +29,7 @@ import {
   DollarSign,
   GraduationCap,
   ArrowUpCircle,
+  Download,
 } from "lucide-react";
 import {
   LineChart,
@@ -230,7 +231,46 @@ export default function AdminDashboardPage() {
     },
   });
 
-  const pendingVerifications = verifications.filter((v) => v.status === "pending");
+  const pendingVerifications = verifications
+    .filter((v) => v.status === "pending")
+    .sort((a, b) => {
+      // Overdue first, then closest deadline first
+      const aDeadline = a.slaDeadline ? new Date(a.slaDeadline).getTime() : Infinity;
+      const bDeadline = b.slaDeadline ? new Date(b.slaDeadline).getTime() : Infinity;
+      return aDeadline - bDeadline;
+    });
+
+  const getSlaInfo = (slaDeadline: string | null | undefined) => {
+    if (!slaDeadline) return null;
+    const deadline = new Date(slaDeadline);
+    const now = new Date();
+    const hoursLeft = (deadline.getTime() - now.getTime()) / 3_600_000;
+    if (hoursLeft < 0) return { label: "Overdue", color: "text-destructive font-semibold", icon: "🔴" };
+    if (hoursLeft < 24) return { label: `${Math.ceil(hoursLeft)}h left`, color: "text-orange-600 dark:text-orange-400 font-medium", icon: "🟠" };
+    if (hoursLeft < 48) return { label: `${Math.ceil(hoursLeft)}h left`, color: "text-yellow-600 dark:text-yellow-400", icon: "🟡" };
+    return { label: deadline.toLocaleDateString(), color: "text-muted-foreground", icon: "🟢" };
+  };
+
+  const exportUsersCsv = () => {
+    const rows = usersData?.users ?? [];
+    if (rows.length === 0) return;
+    const header = ["id", "email", "firstName", "lastName", "role", "createdAt"];
+    const lines = [
+      header.join(","),
+      ...rows.map((u) =>
+        [u.id, u.email ?? "", u.firstName ?? "", u.lastName ?? "", u.role, u.createdAt ?? ""]
+          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+          .join(","),
+      ),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `shifa-users-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const navItems: DashboardNavItem[] = useMemo(() => {
     const items: DashboardNavItem[] = [
@@ -323,18 +363,15 @@ export default function AdminDashboardPage() {
                         <p className="text-xs text-muted-foreground">
                           {t("admin.submitted_date").replace("{date}", v.submittedAt ? new Date(v.submittedAt).toLocaleDateString() : "—")}
                         </p>
-                        {v.slaDeadline && (
-                          <p className="text-xs flex items-center gap-1 mt-0.5">
-                            {new Date(v.slaDeadline) < new Date() ? (
-                              <AlertTriangle className="h-3 w-3 text-destructive" />
-                            ) : (
-                              <Clock className="h-3 w-3 text-muted-foreground" />
-                            )}
-                            <span className={new Date(v.slaDeadline) < new Date() ? "text-destructive font-medium" : "text-muted-foreground"}>
-                              {t("admin.sla_label")} {new Date(v.slaDeadline).toLocaleDateString()}
-                            </span>
-                          </p>
-                        )}
+                        {v.slaDeadline && (() => {
+                          const sla = getSlaInfo(v.slaDeadline);
+                          return sla ? (
+                            <p className={`text-xs flex items-center gap-1 mt-0.5 ${sla.color}`}>
+                              <span>{sla.icon}</span>
+                              <span>SLA: {sla.label}</span>
+                            </p>
+                          ) : null;
+                        })()}
                       </div>
                       <div className="flex gap-2 items-center flex-wrap">
                         {v.priority === "urgent" && <Badge variant="destructive" className="text-xs">{t("admin.urgent_badge")}</Badge>}
@@ -409,6 +446,10 @@ export default function AdminDashboardPage() {
                     onChange={(e) => { setUserSearch(e.target.value); setUserPage(1); }}
                   />
                 </div>
+                <Button variant="outline" size="sm" onClick={exportUsersCsv} disabled={!usersData?.users?.length}>
+                  <Download className="h-4 w-4 me-1.5" />
+                  Export CSV
+                </Button>
               </div>
 
               {usersLoading ? (
@@ -486,7 +527,22 @@ export default function AdminDashboardPage() {
           <div>
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">{t("admin.revenue_30_days")}</CardTitle>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <CardTitle className="text-base">{t("admin.revenue_30_days")}</CardTitle>
+                    <div className="flex gap-2">
+                      {(["users", "therapists", "appointments"] as const).map((type) => (
+                        <a
+                          key={type}
+                          href={`/api/admin/export/${type}`}
+                          download
+                          className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-muted/50 transition-colors font-medium"
+                        >
+                          <Download className="h-3 w-3" />
+                          {type.charAt(0).toUpperCase() + type.slice(1)}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {revenueLoading ? (

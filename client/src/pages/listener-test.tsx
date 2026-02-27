@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { AppLayout } from "@/components/app-layout";
@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { CheckCircle, XCircle, ChevronLeft, ChevronRight, ClipboardList } from "lucide-react";
+import { CheckCircle, XCircle, ChevronLeft, ChevronRight, ClipboardList, Clock } from "lucide-react";
 import { QUALIFICATION_QUESTIONS, PASSING_THRESHOLD_PCT } from "@shared/qualification-questions";
 import type { ListenerQualificationTest } from "@shared/schema";
 
@@ -27,6 +27,7 @@ export default function ListenerTestPage() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState<TestResult | null>(null);
+  const [countdown, setCountdown] = useState("");
 
   const { data: existingTest, isLoading } = useQuery<ListenerQualificationTest | null>({
     queryKey: ["/api/listener/qualification-test"],
@@ -49,6 +50,27 @@ export default function ListenerTestPage() {
   });
 
   const currentQuestion = QUALIFICATION_QUESTIONS[currentIndex];
+
+  // 24h cooldown: compute time remaining when a failed test exists
+  const cooldownUntil = !existingTest?.passed && existingTest?.attemptedAt
+    ? new Date(new Date(existingTest.attemptedAt).getTime() + 24 * 60 * 60 * 1000)
+    : null;
+  const inCooldown = cooldownUntil !== null && cooldownUntil > new Date();
+
+  useEffect(() => {
+    if (!cooldownUntil || !inCooldown) return;
+    const tick = () => {
+      const diff = cooldownUntil.getTime() - Date.now();
+      if (diff <= 0) { setCountdown(""); return; }
+      const h = Math.floor(diff / 3_600_000);
+      const m = Math.floor((diff % 3_600_000) / 60_000);
+      const s = Math.floor((diff % 60_000) / 1000);
+      setCountdown(`${h}h ${m.toString().padStart(2, "0")}m ${s.toString().padStart(2, "0")}s`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [cooldownUntil?.getTime(), inCooldown]);
   const totalQuestions = QUALIFICATION_QUESTIONS.length;
   const progressPct = Math.round(((currentIndex + 1) / totalQuestions) * 100);
   const allAnswered = QUALIFICATION_QUESTIONS.every((q) => answers[q.id] !== undefined);
@@ -88,6 +110,34 @@ export default function ListenerTestPage() {
               </p>
               <Link href="/listener/apply">
                 <Button>{t("listener.test_apply_now")}</Button>
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // 24h cooldown screen — failed test attempted recently
+  if (!isLoading && !submitted && inCooldown) {
+    return (
+      <AppLayout>
+        <div className="max-w-2xl mx-auto p-4 sm:p-6">
+          <Card>
+            <CardContent className="p-6 space-y-4 text-center">
+              <Clock className="h-12 w-12 text-muted-foreground mx-auto" />
+              <h2 className="text-xl font-semibold">Cooldown active</h2>
+              <p className="text-muted-foreground">
+                You can retake the listener test after a 24-hour cooldown period.
+              </p>
+              {countdown && (
+                <p className="text-3xl font-mono font-bold tabular-nums">{countdown}</p>
+              )}
+              <p className="text-sm text-muted-foreground">
+                Previous score: {existingTest?.score}%
+              </p>
+              <Link href="/listener/dashboard">
+                <Button variant="outline">Back to dashboard</Button>
               </Link>
             </CardContent>
           </Card>

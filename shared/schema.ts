@@ -212,6 +212,30 @@ export interface FcmToken {
   createdAt: string | null;
 }
 
+export interface Notification {
+  id: string;
+  userId: string;
+  type: string;
+  title: string;
+  body: string | null;
+  read: boolean;
+  data: Record<string, string> | null;
+  createdAt: string;
+}
+
+export function mapNotification(row: any): Notification {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    title: row.title,
+    body: row.body ?? null,
+    read: row.read ?? false,
+    data: row.data ?? null,
+    createdAt: row.created_at,
+  };
+}
+
 export interface ListenerProfile {
   userId: string;
   displayAlias: string | null;

@@ -6,13 +6,12 @@ import { useI18n } from "@/lib/i18n";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Dialog,
   DialogContent,
@@ -23,15 +22,19 @@ import {
 } from "@/components/ui/dialog";
 import {
   AlertTriangle,
+  ArrowLeft,
   HeartHandshake,
   MessageCircle,
+  Search,
   Send,
   ShieldCheck,
   Star,
   Users,
+  X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { BrowsableListener, PeerMessage, PeerSession, User } from "@shared/schema";
+import { Link } from "wouter";
 
 interface PeerSessionsResponse {
   sessions: (PeerSession & { otherUser: User })[];
@@ -41,20 +44,10 @@ interface PeerSessionsResponse {
 const peerQuickTopics = ["anxiety", "stress", "relationships", "self_esteem", "grief", "depression"];
 
 const languageOptions = [
-  { value: "", label: "All languages" },
-  { value: "ar", label: "العربية" },
-  { value: "fr", label: "Francais" },
+  { value: "", label: "All" },
+  { value: "ar", label: "عربية" },
+  { value: "fr", label: "FR" },
 ] as const;
-
-function readableQueueStatus(status: string, fallback: string): string {
-  const value = status.trim().toLowerCase();
-  if (value === "waiting") return "Waiting";
-  if (value === "matched") return "Matched";
-  if (value === "cancelled") return "Cancelled";
-  if (value === "active") return "Active";
-  if (value === "ended") return "Ended";
-  return fallback;
-}
 
 export default function PeerSupportPage() {
   const { t } = useI18n();
@@ -66,23 +59,26 @@ export default function PeerSupportPage() {
     return value === key ? fallback : value;
   };
 
+  // View state: "browse" | "chat"
+  const [view, setView] = useState<"browse" | "chat">("browse");
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [messageText, setMessageText] = useState("");
   const [rating, setRating] = useState(5);
   const [feedbackComment, setFeedbackComment] = useState("");
   const [reportReason, setReportReason] = useState("");
   const [reportDetails, setReportDetails] = useState("");
-  const [mobilePanel, setMobilePanel] = useState<"directory" | "sessions" | "chat">("directory");
   const [justEndedSessionId, setJustEndedSessionId] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const messageListEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Directory filters
+  // Filters
   const [filterLanguage, setFilterLanguage] = useState("");
   const [filterTopic, setFilterTopic] = useState("");
   const [filterAvailable, setFilterAvailable] = useState(false);
 
-  // Confirm dialog before starting a direct session
+  // Confirm dialog
   const [confirmListener, setConfirmListener] = useState<BrowsableListener | null>(null);
+  const [showReportDialog, setShowReportDialog] = useState(false);
 
   const { data: sessionsPayload, isLoading: sessionsLoading } = useQuery<PeerSessionsResponse>({
     queryKey: ["/api/peer/sessions"],
@@ -103,31 +99,30 @@ export default function PeerSupportPage() {
 
   const sessions = sessionsPayload?.sessions || [];
 
+  // Auto-select active session
   useEffect(() => {
     if (typeof window === "undefined") return;
     const sessionParam = new URLSearchParams(window.location.search).get("session");
     const parsed = Number(sessionParam);
     if (Number.isInteger(parsed) && parsed > 0) {
       setSelectedSessionId(parsed);
-      setMobilePanel("chat");
+      setView("chat");
     }
   }, []);
 
   useEffect(() => {
-    if (selectedSessionId && sessions.some((session) => session.id === selectedSessionId)) return;
-    const activeSession = sessions.find((session) => session.status === "active");
-    if (activeSession) {
-      setSelectedSessionId(activeSession.id);
-      setMobilePanel("chat");
-      return;
-    }
-    if (sessions.length > 0 && !selectedSessionId) {
+    if (selectedSessionId && sessions.some((s) => s.id === selectedSessionId)) return;
+    const active = sessions.find((s) => s.status === "active");
+    if (active) {
+      setSelectedSessionId(active.id);
+      setView("chat");
+    } else if (sessions.length > 0 && !selectedSessionId) {
       setSelectedSessionId(sessions[0].id);
     }
-  }, [selectedSessionId, sessions]);
+  }, [sessions]);
 
   const selectedSession = useMemo(
-    () => sessions.find((session) => session.id === selectedSessionId) || null,
+    () => sessions.find((s) => s.id === selectedSessionId) || null,
     [selectedSessionId, sessions],
   );
 
@@ -138,7 +133,6 @@ export default function PeerSupportPage() {
 
   useEffect(() => {
     if (!selectedSessionId) return;
-    if (typeof window === "undefined") return;
     const frame = window.requestAnimationFrame(() => {
       messageListEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     });
@@ -151,23 +145,13 @@ export default function PeerSupportPage() {
       .channel(`peer-session-${selectedSessionId}`)
       .on(
         "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "peer_messages",
-          filter: `session_id=eq.${selectedSessionId}`,
-        },
+        { event: "*", schema: "public", table: "peer_messages", filter: `session_id=eq.${selectedSessionId}` },
         () => {
-          queryClient.invalidateQueries({
-            queryKey: ["/api/peer/session", selectedSessionId, "messages"],
-          });
+          queryClient.invalidateQueries({ queryKey: ["/api/peer/session", selectedSessionId, "messages"] });
         },
       )
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [selectedSessionId]);
 
   const startDirectSessionMutation = useMutation({
@@ -180,8 +164,8 @@ export default function PeerSupportPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/peer/sessions"] });
       queryClient.invalidateQueries({ queryKey: ["/api/listeners/browse"] });
       setSelectedSessionId(session.id);
-      setMobilePanel("chat");
-      toast({ title: tr("peer.session_started", "Session started! Say hello.") });
+      setView("chat");
+      toast({ title: tr("peer.session_started", "Session started! Say hello 👋") });
     },
     onError: (error: Error) => {
       setConfirmListener(null);
@@ -196,16 +180,11 @@ export default function PeerSupportPage() {
   const sendMessageMutation = useMutation({
     mutationFn: async () => {
       if (!selectedSessionId) return;
-      await apiRequest("POST", `/api/peer/session/${selectedSessionId}/messages`, {
-        content: messageText,
-      });
+      await apiRequest("POST", `/api/peer/session/${selectedSessionId}/messages`, { content: messageText });
     },
     onSuccess: () => {
-      if (!selectedSessionId) return;
       setMessageText("");
-      queryClient.invalidateQueries({
-        queryKey: ["/api/peer/session", selectedSessionId, "messages"],
-      });
+      queryClient.invalidateQueries({ queryKey: ["/api/peer/session", selectedSessionId, "messages"] });
     },
   });
 
@@ -236,7 +215,7 @@ export default function PeerSupportPage() {
     },
     onError: (error: Error) => {
       const message = error.message.includes("Feedback already submitted")
-        ? tr("peer.feedback_already_submitted", "Feedback already submitted for this session")
+        ? tr("peer.feedback_already_submitted", "Feedback already submitted")
         : t("peer.feedback_error");
       toast({ title: message, variant: "destructive" });
     },
@@ -254,498 +233,570 @@ export default function PeerSupportPage() {
     onSuccess: () => {
       setReportReason("");
       setReportDetails("");
+      setShowReportDialog(false);
       toast({ title: t("peer.report_submitted") });
     },
   });
 
   const canSend = selectedSession?.status === "active" && messageText.trim().length > 0;
-  const isClientViewingEndedSession = Boolean(
-    selectedSession && selectedSession.status !== "active" && user?.id === selectedSession.clientId,
-  );
-  const shouldHighlightClosingCard = justEndedSessionId !== null && justEndedSessionId === selectedSession?.id;
+  const isEnded = Boolean(selectedSession && selectedSession.status !== "active" && user?.id === selectedSession.clientId);
+  const shouldHighlight = justEndedSessionId !== null && justEndedSessionId === selectedSession?.id;
 
   const availableCount = listeners.filter((l) => l.isAvailable).length;
 
+  const filteredListeners = useMemo(() => {
+    if (!searchQuery) return listeners;
+    const q = searchQuery.toLowerCase();
+    return listeners.filter(
+      (l) =>
+        (l.displayAlias || "").toLowerCase().includes(q) ||
+        (l.headline || "").toLowerCase().includes(q) ||
+        (l.topics || []).some((tp) => tp.includes(q)),
+    );
+  }, [listeners, searchQuery]);
+
+  // ─── Browse view ─────────────────────────────────────────────────────────────
+  const browseView = (
+    <div className="space-y-5">
+      {/* Hero */}
+      <div className="rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border p-6 space-y-2">
+        <div className="flex items-center gap-3">
+          <div className="h-11 w-11 rounded-xl bg-primary/15 flex items-center justify-center">
+            <HeartHandshake className="h-6 w-6 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold leading-tight">{tr("peer.directory_title", "Peer Listeners")}</h1>
+            <p className="text-sm text-muted-foreground">
+              {tr("peer.directory_subtitle", "Free, private conversations with trained volunteers")}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className={`h-2 w-2 rounded-full ${availableCount > 0 ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/30"}`} />
+          <span>
+            {availableCount > 0
+              ? `${availableCount} listener${availableCount === 1 ? "" : "s"} available now`
+              : "No listeners online right now"}
+          </span>
+          {sessions.length > 0 && (
+            <>
+              <span className="mx-1">·</span>
+              <button
+                onClick={() => { setView("chat"); }}
+                className="underline underline-offset-2 hover:text-foreground transition-colors"
+              >
+                {sessions.length} active session{sessions.length === 1 ? "" : "s"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Filters row */}
+      <div className="space-y-3">
+        <div className="relative">
+          <Search className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search listeners by name or topic…"
+            className="ps-9"
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2 items-center">
+          {/* Language */}
+          <div className="flex gap-1">
+            {languageOptions.map((lang) => (
+              <button
+                key={lang.value}
+                onClick={() => setFilterLanguage(lang.value)}
+                className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${
+                  filterLanguage === lang.value
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border text-muted-foreground hover:border-primary/40"
+                }`}
+              >
+                {lang.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Available toggle */}
+          <button
+            onClick={() => setFilterAvailable(!filterAvailable)}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-all flex items-center gap-1.5 ${
+              filterAvailable
+                ? "bg-emerald-600 text-white border-emerald-600"
+                : "border-border text-muted-foreground hover:border-primary/40"
+            }`}
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+            Available now
+          </button>
+
+          {/* Topics */}
+          <div className="flex flex-wrap gap-1">
+            {peerQuickTopics.map((topic) => (
+              <button
+                key={topic}
+                onClick={() => setFilterTopic(topic === filterTopic ? "" : topic)}
+                className={`px-2.5 py-1 rounded-full text-xs border transition-all ${
+                  filterTopic === topic
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-muted/40 border-transparent hover:border-border text-muted-foreground"
+                }`}
+              >
+                {t(`specialization.${topic}`)}
+              </button>
+            ))}
+          </div>
+
+          {(filterLanguage || filterTopic || filterAvailable || searchQuery) && (
+            <button
+              onClick={() => { setFilterLanguage(""); setFilterTopic(""); setFilterAvailable(false); setSearchQuery(""); }}
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+            >
+              <X className="h-3 w-3" /> Clear
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Listener grid */}
+      {listenersLoading ? (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <Skeleton key={i} className="h-44 rounded-xl" />
+          ))}
+        </div>
+      ) : filteredListeners.length === 0 ? (
+        <div className="py-16 text-center space-y-3 text-muted-foreground">
+          <Users className="h-10 w-10 mx-auto opacity-30" />
+          <p className="text-sm">No listeners match your filters right now.</p>
+          <button
+            onClick={() => { setFilterLanguage(""); setFilterTopic(""); setFilterAvailable(false); setSearchQuery(""); }}
+            className="text-xs underline underline-offset-2 hover:text-foreground transition-colors"
+          >
+            Clear all filters
+          </button>
+        </div>
+      ) : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <AnimatePresence initial={false}>
+            {filteredListeners.map((listener, index) => (
+              <motion.div
+                key={listener.userId}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ delay: index * 0.04 }}
+                className={`group relative rounded-xl border bg-card p-4 flex flex-col gap-3 transition-all hover:shadow-md hover:border-primary/30 ${
+                  !listener.isAvailable ? "opacity-70" : ""
+                }`}
+              >
+                {/* Available dot */}
+                <span
+                  className={`absolute top-3.5 end-3.5 h-2.5 w-2.5 rounded-full border-2 border-background ${
+                    listener.isAvailable ? "bg-emerald-500" : "bg-muted-foreground/40"
+                  }`}
+                />
+
+                {/* Top row */}
+                <div className="flex items-start gap-3">
+                  <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center text-2xl select-none shrink-0">
+                    {listener.avatarEmoji}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="text-sm font-semibold leading-tight">
+                        {listener.displayAlias || tr("peer.anonymous_listener", "Anonymous Listener")}
+                      </p>
+                      <Badge variant="outline" className="text-[10px] px-1.5">
+                        Lvl {listener.level}
+                      </Badge>
+                    </div>
+                    {listener.headline && (
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 leading-snug">
+                        {listener.headline}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Stats */}
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  {listener.totalSessions > 0 && (
+                    <span>{listener.totalSessions} sessions</span>
+                  )}
+                  {listener.averageRating != null && (
+                    <span className="flex items-center gap-0.5">
+                      <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                      {listener.averageRating.toFixed(1)}
+                    </span>
+                  )}
+                  {(listener.languages || []).length > 0 && (
+                    <span className="text-muted-foreground/70">
+                      {(listener.languages || []).join(" · ").toUpperCase()}
+                    </span>
+                  )}
+                </div>
+
+                {/* Topics */}
+                {(listener.topics || []).length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {(listener.topics || []).slice(0, 3).map((tp) => (
+                      <span key={tp} className="px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-[10px]">
+                        {t(`specialization.${tp}`)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* CTA */}
+                <Button
+                  size="sm"
+                  className="w-full mt-auto"
+                  variant={listener.isAvailable ? "default" : "outline"}
+                  disabled={!listener.isAvailable || startDirectSessionMutation.isPending}
+                  onClick={() => setConfirmListener(listener)}
+                >
+                  {listener.isAvailable ? "Start conversation" : "Currently busy"}
+                </Button>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+    </div>
+  );
+
+  // ─── Chat view ────────────────────────────────────────────────────────────────
+  const chatView = (
+    <div className="flex flex-col h-[calc(100vh-8rem)] max-h-[780px]">
+      {/* Chat header */}
+      <div className="flex items-center gap-3 pb-3 border-b mb-0">
+        <button
+          onClick={() => setView("browse")}
+          className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          <span>All listeners</span>
+        </button>
+
+        {selectedSession && (
+          <div className="flex items-center gap-2 ms-auto">
+            <span className="text-sm font-medium">
+              {selectedSession.otherUser.firstName || tr("peer.anonymous", "Listener")}
+            </span>
+            <Badge
+              variant={selectedSession.status === "active" ? "secondary" : "outline"}
+              className={selectedSession.status === "active" ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : ""}
+            >
+              {selectedSession.status === "active" ? "Active" : selectedSession.status}
+            </Badge>
+            {selectedSession.status === "active" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-destructive hover:text-destructive h-7 px-2"
+                onClick={() => endSessionMutation.mutate()}
+                disabled={endSessionMutation.isPending}
+              >
+                End
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Session picker if multiple */}
+      {sessions.length > 1 && (
+        <div className="flex gap-1.5 overflow-x-auto py-2 border-b">
+          {sessions.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => setSelectedSessionId(s.id)}
+              className={`shrink-0 px-3 py-1 rounded-full text-xs border transition-all ${
+                selectedSessionId === s.id
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "border-border text-muted-foreground hover:border-primary/30"
+              }`}
+            >
+              {s.otherUser.firstName || `Session #${s.id}`}
+              {s.status === "active" && <span className="ms-1 h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selectedSession ? (
+        <>
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto py-4 space-y-3 px-1">
+            {messagesLoading ? (
+              <div className="space-y-3">
+                <Skeleton className="h-10 w-2/3" />
+                <Skeleton className="h-10 w-1/2 ms-auto" />
+                <Skeleton className="h-10 w-3/5" />
+              </div>
+            ) : messages && messages.length > 0 ? (
+              <>
+                <AnimatePresence initial={false}>
+                  {messages.map((message) => {
+                    const mine = message.senderId === user?.id;
+                    return (
+                      <motion.div
+                        key={message.id}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={`flex ${mine ? "justify-end" : "justify-start"}`}
+                      >
+                        {!mine && (
+                          <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-sm me-2 shrink-0 self-end mb-1">
+                            {selectedSession.otherUser.firstName?.[0]?.toUpperCase() || "L"}
+                          </div>
+                        )}
+                        <div
+                          className={`max-w-[72%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                            mine
+                              ? "bg-primary text-primary-foreground rounded-ee-sm"
+                              : "bg-muted rounded-es-sm"
+                          }`}
+                        >
+                          {message.content}
+                          <div className={`text-[10px] mt-1 ${mine ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
+                            {new Date(message.createdAt!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
+                <div ref={messageListEndRef} />
+              </>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-3 py-12">
+                <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center">
+                  <MessageCircle className="h-7 w-7 text-primary/60" />
+                </div>
+                <p className="text-sm">Session started — say hello! 👋</p>
+              </div>
+            )}
+          </div>
+
+          {/* Post-session card */}
+          {isEnded && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`rounded-xl border p-4 space-y-3 mb-3 ${shouldHighlight ? "border-primary/40 bg-primary/5" : "bg-muted/30"}`}
+            >
+              <div className="flex items-center gap-2">
+                <HeartHandshake className="h-4 w-4 text-primary" />
+                <p className="text-sm font-medium">{tr("peer.not_alone_title", "You did something brave today.")}</p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {tr("peer.ended_help", "If you need more support, therapists are here for you.")}
+              </p>
+
+              {/* Rating */}
+              <div className="space-y-2">
+                <p className="text-xs font-medium">{t("peer.rate_session")}</p>
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map((score) => (
+                    <button
+                      key={score}
+                      onClick={() => setRating(score)}
+                      className="rounded p-0.5 hover:bg-muted transition-colors"
+                    >
+                      <Star className={`h-5 w-5 ${score <= rating ? "fill-amber-400 text-amber-400" : "text-muted-foreground"}`} />
+                    </button>
+                  ))}
+                </div>
+                <Textarea
+                  value={feedbackComment}
+                  onChange={(e) => setFeedbackComment(e.target.value)}
+                  placeholder={t("peer.optional_comment")}
+                  rows={2}
+                  className="text-sm"
+                />
+                <div className="flex gap-2 flex-wrap">
+                  <Button size="sm" onClick={() => rateSessionMutation.mutate()} disabled={rateSessionMutation.isPending}>
+                    {t("peer.submit_feedback")}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setShowReportDialog(true)}>
+                    <AlertTriangle className="h-3.5 w-3.5 me-1.5" />
+                    {t("peer.report_session")}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setView("browse")}>
+                    Browse more listeners
+                  </Button>
+                  <Link href="/therapists">
+                    <Button size="sm" className="gap-1.5">
+                      <HeartHandshake className="h-3.5 w-3.5" />
+                      Talk to a therapist
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Input bar */}
+          {selectedSession.status === "active" && (
+            <div className="flex gap-2 pt-2 border-t">
+              <Input
+                value={messageText}
+                onChange={(e) => setMessageText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" || e.shiftKey) return;
+                  e.preventDefault();
+                  if (canSend && !sendMessageMutation.isPending) sendMessageMutation.mutate();
+                }}
+                placeholder={tr("peer.type_message", "Type your message…")}
+                className="flex-1"
+                autoFocus
+              />
+              <Button
+                onClick={() => sendMessageMutation.mutate()}
+                disabled={!canSend || sendMessageMutation.isPending}
+                size="icon"
+                data-testid="button-peer-send"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center text-center gap-4 py-12">
+          <div className="h-16 w-16 rounded-2xl bg-muted flex items-center justify-center">
+            <ShieldCheck className="h-8 w-8 text-muted-foreground/50" />
+          </div>
+          <div className="space-y-1">
+            <p className="font-medium">No session selected</p>
+            <p className="text-sm text-muted-foreground">Choose a listener to start a private, free conversation.</p>
+          </div>
+          <Button onClick={() => setView("browse")} variant="outline" className="gap-2">
+            <Users className="h-4 w-4" />
+            Browse listeners
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <AppLayout>
-      <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-4">
-        {/* Header */}
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <HeartHandshake className="h-6 w-6 text-primary" />
-            {tr("peer.directory_title", "Peer Listeners")}
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {tr("peer.directory_subtitle", "Choose a listener and start a private, free conversation.")}
-          </p>
+      <div className="max-w-4xl mx-auto p-4 sm:p-6">
+        {/* Mobile tab strip */}
+        <div className="sm:hidden flex gap-1 mb-4 bg-muted/50 p-1 rounded-lg">
+          <button
+            onClick={() => setView("browse")}
+            className={`flex-1 py-2 rounded-md text-sm font-medium transition-all ${
+              view === "browse" ? "bg-background shadow-sm" : "text-muted-foreground"
+            }`}
+          >
+            Browse
+          </button>
+          <button
+            onClick={() => setView("chat")}
+            className={`flex-1 py-2 rounded-md text-sm font-medium transition-all flex items-center justify-center gap-1.5 ${
+              view === "chat" ? "bg-background shadow-sm" : "text-muted-foreground"
+            }`}
+          >
+            Chat
+            {sessions.some((s) => s.status === "active") && (
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            )}
+          </button>
         </div>
 
-        {/* Mobile tab bar */}
-        <div className="md:hidden grid grid-cols-3 gap-2">
-          <Button
-            size="sm"
-            variant={mobilePanel === "directory" ? "secondary" : "outline"}
-            onClick={() => setMobilePanel("directory")}
-          >
-            {tr("peer.browse", "Browse")}
-          </Button>
-          <Button
-            size="sm"
-            variant={mobilePanel === "sessions" ? "secondary" : "outline"}
-            onClick={() => setMobilePanel("sessions")}
-          >
-            {t("peer.sessions")}
-          </Button>
-          <Button
-            size="sm"
-            variant={mobilePanel === "chat" ? "secondary" : "outline"}
-            onClick={() => setMobilePanel("chat")}
-          >
-            {t("peer.conversation")}
-          </Button>
-        </div>
+        <AnimatePresence mode="wait">
+          {view === "browse" ? (
+            <motion.div
+              key="browse"
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 8 }}
+              transition={{ duration: 0.2 }}
+            >
+              {browseView}
+            </motion.div>
+          ) : (
+            <motion.div
+              key="chat"
+              initial={{ opacity: 0, x: 8 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -8 }}
+              transition={{ duration: 0.2 }}
+            >
+              {chatView}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        <div className="grid gap-4 md:grid-cols-[1fr_280px_minmax(0,1fr)]">
-          {/* ── Listener Directory ── */}
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={mobilePanel === "directory" ? "" : "hidden md:block"}
-          >
-            <Card className="h-full">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <Users className="h-4 w-4 text-primary" />
-                    {tr("peer.listeners_title", "Available Listeners")}
-                  </span>
-                  <span className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
-                    <span className={`h-2 w-2 rounded-full ${availableCount > 0 ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/40"}`} />
-                    {availableCount} {tr("peer.online", "online")}
-                  </span>
-                </CardTitle>
+        {/* Confirm start session dialog */}
+        <Dialog open={!!confirmListener} onOpenChange={(open) => { if (!open) setConfirmListener(null); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <span className="text-2xl">{confirmListener?.avatarEmoji}</span>
+                Start a session with {confirmListener?.displayAlias || "this listener"}?
+              </DialogTitle>
+              <DialogDescription>
+                {confirmListener?.headline || "A free, private peer support conversation."}
+                {" "}You can end the session at any time.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmListener(null)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => confirmListener && startDirectSessionMutation.mutate(confirmListener.userId)}
+                disabled={startDirectSessionMutation.isPending}
+              >
+                {startDirectSessionMutation.isPending ? "Starting…" : "Start conversation"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-                {/* Filters */}
-                <div className="space-y-2 pt-1">
-                  <div className="flex flex-wrap gap-1.5">
-                    {languageOptions.map((lang) => (
-                      <button
-                        key={lang.value}
-                        type="button"
-                        onClick={() => setFilterLanguage(lang.value)}
-                        className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
-                          filterLanguage === lang.value
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "bg-muted/40 hover:bg-muted"
-                        }`}
-                      >
-                        {lang.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setFilterTopic("")}
-                      className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
-                        filterTopic === ""
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-muted/40 hover:bg-muted"
-                      }`}
-                    >
-                      {tr("peer.all_topics", "All topics")}
-                    </button>
-                    {peerQuickTopics.map((topic) => (
-                      <button
-                        key={topic}
-                        type="button"
-                        onClick={() => setFilterTopic(topic === filterTopic ? "" : topic)}
-                        className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
-                          filterTopic === topic
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "bg-muted/40 hover:bg-muted"
-                        }`}
-                      >
-                        {t(`specialization.${topic}`)}
-                      </button>
-                    ))}
-                  </div>
-                  <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={filterAvailable}
-                      onChange={(e) => setFilterAvailable(e.target.checked)}
-                      className="rounded"
-                    />
-                    {tr("peer.available_only", "Available now only")}
-                  </label>
-                </div>
-              </CardHeader>
-
-              <CardContent className="p-0">
-                <ScrollArea className="h-[500px]">
-                  <div className="p-3 space-y-2">
-                    {listenersLoading ? (
-                      <>
-                        <Skeleton className="h-20 w-full" />
-                        <Skeleton className="h-20 w-full" />
-                        <Skeleton className="h-20 w-full" />
-                      </>
-                    ) : listeners.length === 0 ? (
-                      <div className="py-12 text-center text-sm text-muted-foreground space-y-2">
-                        <Users className="h-8 w-8 mx-auto text-muted-foreground/40" />
-                        <p>{tr("peer.no_listeners", "No listeners match your filters right now.")}</p>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setFilterLanguage("");
-                            setFilterTopic("");
-                            setFilterAvailable(false);
-                          }}
-                        >
-                          {tr("peer.clear_filters", "Clear filters")}
-                        </Button>
-                      </div>
-                    ) : (
-                      <AnimatePresence initial={false}>
-                        {listeners.map((listener, index) => (
-                          <motion.div
-                            key={listener.userId}
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ delay: index * 0.03 }}
-                            className="rounded-lg border bg-card p-3 space-y-2 hover:bg-muted/30 transition-colors"
-                          >
-                            <div className="flex items-start gap-3">
-                              <div className="relative">
-                                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-xl select-none">
-                                  {listener.avatarEmoji}
-                                </div>
-                                <span
-                                  className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background ${
-                                    listener.isAvailable ? "bg-emerald-500" : "bg-muted-foreground/40"
-                                  }`}
-                                />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <p className="text-sm font-medium">
-                                    {listener.displayAlias || tr("peer.anonymous_listener", "Anonymous Listener")}
-                                  </p>
-                                  <Badge variant="outline" className="text-xs">
-                                    {tr("peer.level", "Lvl")} {listener.level}
-                                  </Badge>
-                                  {listener.isAvailable ? (
-                                    <Badge className="text-xs bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200">
-                                      {tr("peer.available", "Available")}
-                                    </Badge>
-                                  ) : (
-                                    <Badge variant="outline" className="text-xs text-muted-foreground">
-                                      {tr("peer.busy", "Busy")}
-                                    </Badge>
-                                  )}
-                                </div>
-                                {listener.headline && (
-                                  <p className="text-xs text-muted-foreground mt-0.5 truncate">{listener.headline}</p>
-                                )}
-                                <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                                  {listener.totalSessions > 0 && (
-                                    <span>{listener.totalSessions} {tr("peer.sessions_count", "sessions")}</span>
-                                  )}
-                                  {listener.averageRating !== null && listener.averageRating !== undefined && (
-                                    <span className="flex items-center gap-0.5">
-                                      <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
-                                      {listener.averageRating.toFixed(1)}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                            <Button
-                              size="sm"
-                              className="w-full"
-                              disabled={!listener.isAvailable || startDirectSessionMutation.isPending}
-                              onClick={() => setConfirmListener(listener)}
-                            >
-                              {listener.isAvailable
-                                ? tr("peer.start_session", "Start session")
-                                : tr("peer.listener_unavailable", "Unavailable")}
-                            </Button>
-                          </motion.div>
-                        ))}
-                      </AnimatePresence>
-                    )}
-                  </div>
-                </ScrollArea>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          {/* ── Session List Sidebar ── */}
-          <motion.div
-            initial={{ opacity: 0, x: -12 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.08 }}
-            className={mobilePanel === "sessions" ? "" : "hidden md:block"}
-          >
-            <Card className="h-full">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{t("peer.sessions")}</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <ScrollArea className="h-[460px]">
-                  <div className="p-3 space-y-2">
-                    {sessionsLoading ? (
-                      <>
-                        <Skeleton className="h-14 w-full" />
-                        <Skeleton className="h-14 w-full" />
-                      </>
-                    ) : sessions.length === 0 ? (
-                      <p className="text-sm text-muted-foreground px-2 py-4">{t("peer.no_sessions")}</p>
-                    ) : (
-                      sessions.map((session, index) => (
-                        <motion.button
-                          key={session.id}
-                          type="button"
-                          initial={{ opacity: 0, x: -8 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: index * 0.03 }}
-                          className={`w-full rounded-md border px-3 py-2 text-start transition-colors ${selectedSessionId === session.id ? "bg-muted" : "hover:bg-muted/40"}`}
-                          onClick={() => {
-                            setSelectedSessionId(session.id);
-                            setMobilePanel("chat");
-                          }}
-                        >
-                          <p className="text-sm font-medium">
-                            {session.otherUser.firstName || t("peer.anonymous")} {session.otherUser.lastName || ""}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {tr(`peer.status_${session.status}`, readableQueueStatus(session.status, session.status))} • #{session.id}
-                          </p>
-                        </motion.button>
-                      ))
-                    )}
-                  </div>
-                </ScrollArea>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          {/* ── Chat Panel ── */}
-          <motion.div
-            initial={{ opacity: 0, x: 12 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.1 }}
-            className={mobilePanel === "chat" ? "" : "hidden md:block"}
-          >
-            <Card>
-              <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2">
-                <CardTitle className="text-base flex items-center gap-2">
-                  {t("peer.conversation")}
-                  {selectedSession && (
-                    <Badge variant={selectedSession.status === "active" ? "secondary" : "outline"}>
-                      {tr(`peer.status_${selectedSession.status}`, readableQueueStatus(selectedSession.status, selectedSession.status))}
-                    </Badge>
-                  )}
-                </CardTitle>
-                {selectedSession?.status === "active" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => endSessionMutation.mutate()}
-                    disabled={endSessionMutation.isPending}
-                    data-testid="button-peer-end-session"
-                  >
-                    {t("peer.end_session")}
-                  </Button>
-                )}
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {selectedSession ? (
-                  <>
-                    <ScrollArea className="h-[320px] rounded-md border p-3">
-                      {messagesLoading ? (
-                        <div className="space-y-2">
-                          <Skeleton className="h-10 w-2/3" />
-                          <Skeleton className="h-10 w-1/2 ms-auto" />
-                        </div>
-                      ) : messages && messages.length > 0 ? (
-                        <div className="space-y-2">
-                          <AnimatePresence initial={false}>
-                            {messages.map((message) => {
-                              const mine = message.senderId === user?.id;
-                              return (
-                                <motion.div
-                                  key={message.id}
-                                  initial={{ opacity: 0, y: 6 }}
-                                  animate={{ opacity: 1, y: 0 }}
-                                  exit={{ opacity: 0, y: -6 }}
-                                  className={`flex ${mine ? "justify-end" : "justify-start"}`}
-                                >
-                                  <div className={`max-w-[75%] rounded-xl px-3 py-2 text-sm ${mine ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                                    {message.content}
-                                  </div>
-                                </motion.div>
-                              );
-                            })}
-                          </AnimatePresence>
-                          <div ref={messageListEndRef} />
-                        </div>
-                      ) : (
-                        <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-                          <MessageCircle className="h-4 w-4 me-1" />
-                          {t("peer.no_messages")}
-                        </div>
-                      )}
-                    </ScrollArea>
-
-                    <div className="flex gap-2">
-                      <Input
-                        value={messageText}
-                        onChange={(e) => setMessageText(e.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter") return;
-                          event.preventDefault();
-                          if (!canSend || sendMessageMutation.isPending) return;
-                          sendMessageMutation.mutate();
-                        }}
-                        placeholder={tr("peer.type_message", "Type your message...")}
-                        disabled={selectedSession.status !== "active"}
-                      />
-                      <Button
-                        onClick={() => sendMessageMutation.mutate()}
-                        disabled={!canSend || sendMessageMutation.isPending}
-                        data-testid="button-peer-send"
-                      >
-                        <Send className="h-4 w-4" />
-                      </Button>
-                    </div>
-
-                    {isClientViewingEndedSession && (
-                      <Card className={`safe-surface border-0 ${shouldHighlightClosingCard ? "ring-1 ring-primary/40" : ""}`} data-testid="peer-closing-card">
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm flex items-center gap-2">
-                            <HeartHandshake className="h-4 w-4 text-primary" />
-                            {tr("peer.not_alone_title", "You are not alone")}
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                          <p className="text-sm text-muted-foreground">
-                            {tr("peer.ended_help", "You did something brave today. If you need more structured support, therapists are available.")}
-                          </p>
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setMobilePanel("directory")}
-                            >
-                              {tr("peer.browse_more", "Browse more listeners")}
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={() => { window.location.href = "/self-care"; }}>
-                              {tr("peer.open_selfcare", "Open self-care")}
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={() => { window.location.href = "/crisis"; }}>
-                              {tr("peer.crisis_support", "Crisis support")}
-                            </Button>
-                            <Button size="sm" className="gap-1.5" onClick={() => { window.location.href = "/therapists"; }}>
-                              <HeartHandshake className="h-3.5 w-3.5" />
-                              {tr("peer.find_therapist", "Talk to a therapist")}
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )}
-
-                    {selectedSession.status !== "active" && user?.id === selectedSession.clientId && (
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <Card className="border-dashed">
-                          <CardHeader className="pb-2">
-                            <CardTitle className="text-sm flex items-center gap-2">
-                              <Star className="h-4 w-4" />
-                              {t("peer.rate_session")}
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent className="space-y-3">
-                            <div className="flex items-center gap-1" data-testid="peer-star-rating">
-                              {[1, 2, 3, 4, 5].map((score) => (
-                                <button
-                                  key={score}
-                                  type="button"
-                                  onClick={() => setRating(score)}
-                                  className="rounded-md p-1 hover:bg-muted"
-                                  aria-label={`rate-${score}`}
-                                >
-                                  <Star
-                                    className={`h-5 w-5 ${score <= rating ? "text-amber-500 fill-amber-400" : "text-muted-foreground"}`}
-                                  />
-                                </button>
-                              ))}
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                              {tr("peer.rating_selected", "Selected")}: {rating}/5
-                            </p>
-                            <Textarea
-                              value={feedbackComment}
-                              onChange={(e) => setFeedbackComment(e.target.value)}
-                              placeholder={t("peer.optional_comment")}
-                              rows={3}
-                            />
-                            <Button
-                              size="sm"
-                              onClick={() => rateSessionMutation.mutate()}
-                              disabled={rateSessionMutation.isPending}
-                              data-testid="button-peer-rate"
-                            >
-                              {t("peer.submit_feedback")}
-                            </Button>
-                          </CardContent>
-                        </Card>
-
-                        <Card className="border-dashed">
-                          <CardHeader className="pb-2">
-                            <CardTitle className="text-sm flex items-center gap-2">
-                              <AlertTriangle className="h-4 w-4" />
-                              {t("peer.report_session")}
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent className="space-y-2">
-                            <Input
-                              value={reportReason}
-                              onChange={(e) => setReportReason(e.target.value)}
-                              placeholder={t("peer.reason")}
-                            />
-                            <Textarea
-                              value={reportDetails}
-                              onChange={(e) => setReportDetails(e.target.value)}
-                              placeholder={t("peer.details_optional")}
-                              rows={3}
-                            />
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => reportSessionMutation.mutate()}
-                              disabled={!reportReason.trim() || reportSessionMutation.isPending}
-                              data-testid="button-peer-report"
-                            >
-                              {t("peer.submit_report")}
-                            </Button>
-                          </CardContent>
-                        </Card>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="h-[360px] flex flex-col items-center justify-center text-sm text-muted-foreground gap-3">
-                    <ShieldCheck className="h-8 w-8 text-muted-foreground/40" />
-                    <p>{tr("peer.pick_listener", "Pick a listener from the directory to start a private session.")}</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </motion.div>
-        </div>
+        {/* Report dialog */}
+        <Dialog open={showReportDialog} onOpenChange={setShowReportDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t("peer.report_session")}</DialogTitle>
+              <DialogDescription>Let us know what happened and we'll review it.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Input
+                value={reportReason}
+                onChange={(e) => setReportReason(e.target.value)}
+                placeholder={t("peer.reason")}
+              />
+              <Textarea
+                value={reportDetails}
+                onChange={(e) => setReportDetails(e.target.value)}
+                placeholder={t("peer.details_optional")}
+                rows={4}
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowReportDialog(false)}>Cancel</Button>
+              <Button
+                onClick={() => reportSessionMutation.mutate()}
+                disabled={!reportReason.trim() || reportSessionMutation.isPending}
+                variant="destructive"
+                data-testid="button-peer-report"
+              >
+                {t("peer.submit_report")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );

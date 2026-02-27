@@ -5,15 +5,16 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
-import { Calendar, Clock, CheckCircle, XCircle, AlertCircle, Loader2, CreditCard, Video, ClipboardList, SmilePlus, Copy, Check } from "lucide-react";
+import { Calendar, Clock, CheckCircle, XCircle, AlertCircle, Loader2, CreditCard, Video, ClipboardList, SmilePlus, Copy, Check, Ban, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
-import type { Appointment, User, PaymentTransaction } from "@shared/schema";
+import type { Appointment, User, PaymentTransaction, TherapistSlot } from "@shared/schema";
 
 function isNearSessionTime(scheduledAt: string): boolean {
   const sessionTime = new Date(scheduledAt).getTime();
@@ -246,6 +247,12 @@ export default function AppointmentsPage() {
   const { toast } = useToast();
   const [location] = useLocation();
   const [now, setNow] = useState(() => Date.now());
+  // Cancel dialog state
+  const [cancelDialogApt, setCancelDialogApt] = useState<number | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  // Reschedule dialog state
+  const [rescheduleDialogApt, setRescheduleDialogApt] = useState<Appointment & { otherUser: User } | null>(null);
+  const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
 
   // Tick every minute to re-evaluate "Join Meeting" eligibility
   useEffect(() => {
@@ -283,6 +290,52 @@ export default function AppointmentsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/appointments"] });
     },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: async ({ id, reason }: { id: number; reason: string }) => {
+      const res = await apiRequest("POST", `/api/appointments/${id}/cancel`, { reason });
+      if (!res.ok) {
+        const body = await res.json();
+        throw new Error(body.message || "Failed to cancel");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/appointments"] });
+      setCancelDialogApt(null);
+      setCancelReason("");
+      toast({ title: "Appointment cancelled" });
+    },
+    onError: (err: Error) => {
+      toast({ title: err.message, variant: "destructive" });
+    },
+  });
+
+  const rescheduleMutation = useMutation({
+    mutationFn: async ({ id, slotId }: { id: number; slotId: number }) => {
+      const res = await apiRequest("POST", `/api/appointments/${id}/reschedule`, { slotId });
+      if (!res.ok) {
+        const body = await res.json();
+        throw new Error(body.message || "Failed to reschedule");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/appointments"] });
+      setRescheduleDialogApt(null);
+      setSelectedSlotId(null);
+      toast({ title: "Appointment rescheduled" });
+    },
+    onError: (err: Error) => {
+      toast({ title: err.message, variant: "destructive" });
+    },
+  });
+
+  // Fetch available slots for reschedule dialog
+  const { data: availableSlots = [] } = useQuery<TherapistSlot[]>({
+    queryKey: [`/api/therapists/${rescheduleDialogApt?.therapistId}/slots`],
+    enabled: !!rescheduleDialogApt,
   });
 
   useEffect(() => {
@@ -329,8 +382,8 @@ export default function AppointmentsPage() {
   const statusConfig: Record<string, { icon: any; color: string; label: string }> = {
     pending: { icon: AlertCircle, color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400", label: t("appointment.pending") },
     confirmed: { icon: CheckCircle, color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400", label: t("appointment.confirmed") },
-    completed: { icon: CheckCircle, color: "bg-primary/10 text-primary", label: t("appointment.completed") },
-    cancelled: { icon: XCircle, color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400", label: t("appointment.cancel") },
+    completed: { icon: CheckCircle, color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400", label: t("appointment.completed") },
+    cancelled: { icon: XCircle, color: "bg-muted text-muted-foreground", label: t("appointment.cancel") },
   };
 
   return (
@@ -420,13 +473,47 @@ export default function AppointmentsPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => updateStatusMutation.mutate({ id: apt.id, status: "cancelled" })}
-                              disabled={updateStatusMutation.isPending}
+                              onClick={() => setCancelDialogApt(apt.id)}
+                              disabled={cancelMutation.isPending}
                               data-testid={`button-cancel-${apt.id}`}
                             >
-                              {updateStatusMutation.isPending && <Loader2 className="h-3.5 w-3.5 me-1.5 animate-spin" />}
+                              <Ban className="h-3.5 w-3.5 me-1" />
                               {t("appointment.cancel")}
                             </Button>
+                            {user?.role === "client" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => { setRescheduleDialogApt(apt); setSelectedSlotId(null); }}
+                              >
+                                <RefreshCw className="h-3.5 w-3.5 me-1" />
+                                Reschedule
+                              </Button>
+                            )}
+                          </div>
+                        )}
+
+                        {apt.status === "confirmed" && (
+                          <div className="flex gap-2 mt-3">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setCancelDialogApt(apt.id)}
+                              disabled={cancelMutation.isPending}
+                            >
+                              <Ban className="h-3.5 w-3.5 me-1" />
+                              {t("appointment.cancel")}
+                            </Button>
+                            {user?.role === "client" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => { setRescheduleDialogApt(apt); setSelectedSlotId(null); }}
+                              >
+                                <RefreshCw className="h-3.5 w-3.5 me-1" />
+                                Reschedule
+                              </Button>
+                            )}
                           </div>
                         )}
 
@@ -453,6 +540,84 @@ export default function AppointmentsPage() {
           </div>
         )}
       </div>
+
+      {/* Cancel confirmation dialog */}
+      <Dialog open={cancelDialogApt !== null} onOpenChange={(open) => { if (!open) { setCancelDialogApt(null); setCancelReason(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel appointment</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to cancel this appointment? Clients must cancel at least 24 hours in advance.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Textarea
+              placeholder="Reason for cancellation (optional)..."
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              rows={3}
+              maxLength={500}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setCancelDialogApt(null); setCancelReason(""); }}>
+              Keep appointment
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={cancelMutation.isPending}
+              onClick={() => cancelDialogApt !== null && cancelMutation.mutate({ id: cancelDialogApt, reason: cancelReason })}
+            >
+              {cancelMutation.isPending && <Loader2 className="h-3.5 w-3.5 me-1.5 animate-spin" />}
+              Cancel appointment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reschedule dialog */}
+      <Dialog open={rescheduleDialogApt !== null} onOpenChange={(open) => { if (!open) { setRescheduleDialogApt(null); setSelectedSlotId(null); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Reschedule appointment</DialogTitle>
+            <DialogDescription>
+              Choose a new available slot with {rescheduleDialogApt?.otherUser.firstName} {rescheduleDialogApt?.otherUser.lastName}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {availableSlots.filter((s) => s.status === "open" && new Date(s.startsAt) > new Date()).map((slot) => (
+              <button
+                key={slot.id}
+                type="button"
+                onClick={() => setSelectedSlotId(slot.id)}
+                className={`w-full text-left p-3 rounded-lg border text-sm transition-colors ${selectedSlotId === slot.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"}`}
+              >
+                <span className="font-medium">{new Date(slot.startsAt).toLocaleDateString()}</span>
+                {" — "}
+                {new Date(slot.startsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                {" · "}
+                {slot.durationMinutes} min
+                {slot.priceDinar ? ` · ${slot.priceDinar} TND` : ""}
+              </button>
+            ))}
+            {availableSlots.filter((s) => s.status === "open" && new Date(s.startsAt) > new Date()).length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No available slots found.</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setRescheduleDialogApt(null); setSelectedSlotId(null); }}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!selectedSlotId || rescheduleMutation.isPending}
+              onClick={() => rescheduleDialogApt && selectedSlotId && rescheduleMutation.mutate({ id: rescheduleDialogApt.id, slotId: selectedSlotId })}
+            >
+              {rescheduleMutation.isPending && <Loader2 className="h-3.5 w-3.5 me-1.5 animate-spin" />}
+              Confirm reschedule
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

@@ -155,6 +155,13 @@ export default function ListenerDashboardPage() {
   const leaderboard = leaderboardPayload?.leaderboard || [];
   const myRank = leaderboardPayload?.myRank ?? null;
 
+  // Session history & stats
+  const completedSessions = sessions.filter((s) => s.status === "ended" || s.status === "completed");
+  const now = new Date();
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const sessionsThisWeek = sessions.filter((s) => new Date((s as any).createdAt ?? 0) >= weekAgo);
+  const hoursThisWeek = sessionsThisWeek.reduce((sum, s) => sum + ((s as any).durationMinutes ?? 30) / 60, 0);
+
   const eventLabel = (eventType: string) => {
     switch (eventType) {
       case "session_base":
@@ -382,7 +389,14 @@ export default function ListenerDashboardPage() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">{t("listener.current_sessions")}</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">{t("listener.current_sessions")}</CardTitle>
+              <div className="text-xs text-muted-foreground">
+                {hoursThisWeek > 0 && (
+                  <span className="font-medium text-foreground">{hoursThisWeek.toFixed(1)}h</span>
+                )}{hoursThisWeek > 0 && " this week"}
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="space-y-2">
             {activeSessions.length > 0 ? (
@@ -408,6 +422,45 @@ export default function ListenerDashboardPage() {
                 {t("listener.total_sessions")}: {sessions.length}
               </p>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Session history */}
+        {completedSessions.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Session History</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {completedSessions.slice(0, 10).map((session) => (
+                <div key={session.id} className="border rounded-md p-2.5 flex items-center justify-between gap-2 text-sm">
+                  <div>
+                    <p className="font-medium">
+                      {session.otherUser.firstName || t("common.client")} {session.otherUser.lastName || ""}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      #{session.id} · {(session as any).createdAt ? new Date((session as any).createdAt).toLocaleDateString() : "—"}
+                    </p>
+                  </div>
+                  <Badge variant="secondary" className="text-xs capitalize shrink-0">
+                    {session.status}
+                  </Badge>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Retake listener test */}
+        <Card>
+          <CardContent className="p-4 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium">Listener assessment</p>
+              <p className="text-xs text-muted-foreground">Retake the test to unlock higher levels</p>
+            </div>
+            <Link href="/listener/test">
+              <Button variant="outline" size="sm">Retake test</Button>
+            </Link>
           </CardContent>
         </Card>
       </div>

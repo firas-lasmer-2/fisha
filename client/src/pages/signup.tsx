@@ -10,7 +10,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
-import { Heart, Loader2, Users, UserCircle } from "lucide-react";
+import { Heart, Loader2, Users, UserCircle, Headphones } from "lucide-react";
 
 export default function SignupPage() {
   const { t } = useI18n();
@@ -55,7 +55,7 @@ export default function SignupPage() {
       }
 
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      const nextPath = postAuthRouteForUser(payload?.user) || (role === "therapist" ? "/therapist-dashboard" : "/onboarding");
+      const nextPath = postAuthRouteForUser(payload?.user) || (role === "therapist" ? "/therapist-dashboard" : role === "listener" ? "/onboarding" : "/onboarding");
       window.location.href = nextPath;
     } catch {
       toast({ title: t("common.error"), variant: "destructive" });
@@ -122,26 +122,45 @@ export default function SignupPage() {
 
             <div className="space-y-2">
               <Label className="text-sm font-medium">{t("auth.select_role")}</Label>
-              <RadioGroup value={role} onValueChange={setRole} className="grid grid-cols-2 gap-3">
+              <RadioGroup value={role} onValueChange={setRole} className="grid grid-cols-1 gap-3">
                 <Label
                   htmlFor="role-client"
-                  className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${
+                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
                     role === "client" ? "border-primary bg-primary/5" : "border-border"
                   }`}
                 >
                   <RadioGroupItem value="client" id="role-client" />
-                  <Users className="h-4 w-4" />
-                  <span className="text-sm">{t("auth.role_client")}</span>
+                  <Users className="h-4 w-4 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium">{t("auth.role_client")}</p>
+                    <p className="text-xs text-muted-foreground">I need support</p>
+                  </div>
+                </Label>
+                <Label
+                  htmlFor="role-listener"
+                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                    role === "listener" ? "border-primary bg-primary/5" : "border-border"
+                  }`}
+                >
+                  <RadioGroupItem value="listener" id="role-listener" />
+                  <Headphones className="h-4 w-4 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium">Listener</p>
+                    <p className="text-xs text-muted-foreground">I want to help</p>
+                  </div>
                 </Label>
                 <Label
                   htmlFor="role-therapist"
-                  className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${
+                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
                     role === "therapist" ? "border-primary bg-primary/5" : "border-border"
                   }`}
                 >
                   <RadioGroupItem value="therapist" id="role-therapist" />
-                  <UserCircle className="h-4 w-4" />
-                  <span className="text-sm">{t("auth.role_therapist")}</span>
+                  <UserCircle className="h-4 w-4 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium">{t("auth.role_therapist")}</p>
+                    <p className="text-xs text-muted-foreground">I'm a professional</p>
+                  </div>
                 </Label>
               </RadioGroup>
             </div>

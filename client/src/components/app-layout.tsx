@@ -3,6 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { triggerHaptic } from "@/lib/haptics";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { NotificationBell } from "@/components/notification-bell";
 import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -133,6 +134,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-1.5">
             <ThemeToggle />
             <LanguageSwitcher variant="ghost" />
+            {user && <NotificationBell />}
             {user && (
               <Link href="/settings">
                 <Button

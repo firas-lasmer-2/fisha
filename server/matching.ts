@@ -29,6 +29,8 @@ export interface TherapistCandidate {
   verified: boolean | null;
   hasAvailabilityIn48h: boolean;
   hadPriorSession: boolean;
+  /** +10 bonus when the user's active subscription targets this therapist's tier */
+  subscriptionTierBonus?: number;
 }
 
 export interface MatchRequest {
@@ -117,6 +119,9 @@ function deterministicScore(candidate: TherapistCandidate, req: MatchRequest): n
 
   // Rating bonus
   if (candidate.rating) score += Math.min(Math.round(candidate.rating * 3), 15);
+
+  // Subscription tier bonus
+  if (candidate.subscriptionTierBonus) score += candidate.subscriptionTierBonus;
 
   return Math.min(score, 100);
 }

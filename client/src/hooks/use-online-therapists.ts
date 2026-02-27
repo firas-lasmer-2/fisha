@@ -44,7 +44,20 @@ export function useOnlineTherapists() {
       }
     });
 
+    // Heartbeat: re-track every 30s so presence doesn't go stale
+    let heartbeatRef: ReturnType<typeof setInterval> | null = null;
+    if (user) {
+      heartbeatRef = setInterval(() => {
+        channel.track({
+          user_id: user.id,
+          role: user.role,
+          online_at: new Date().toISOString(),
+        }).catch(() => undefined);
+      }, 30_000);
+    }
+
     return () => {
+      if (heartbeatRef) clearInterval(heartbeatRef);
       channel.untrack().catch(() => undefined);
       supabase.removeChannel(channel);
     };
