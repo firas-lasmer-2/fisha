@@ -485,7 +485,9 @@ export class DatabaseStorage implements IStorage {
       .from("therapist_profiles")
       .select("*")
       .eq("user_id", userId)
-      .single();
+      .order("id", { ascending: true })
+      .limit(1)
+      .maybeSingle();
     if (error || !data) return undefined;
     return mapTherapistProfile(data);
   }

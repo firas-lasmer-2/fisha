@@ -281,81 +281,102 @@ export default function TherapistsPage() {
           />
         </motion.div>
 
-        <div className="space-y-2" data-testid="section-filters">
-          {/* Row 1: specialization chips */}
-          <ScrollArea className="w-full">
-            <div className="flex items-center gap-2 pb-1">
-              <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              {specializations.map((s, i) => (
-                <motion.div
-                  key={s.value}
-                  custom={i}
-                  variants={filterChipVariants}
-                  initial="hidden"
-                  animate="visible"
-                >
-                  <Badge
-                    variant={specialization === s.value ? "default" : "secondary"}
-                    className="cursor-pointer shrink-0 whitespace-nowrap"
-                    onClick={() => toggleFilter("specialization", s.value)}
-                    data-testid={`filter-spec-${s.value}`}
+        <div className="rounded-xl border bg-card/50 p-3 space-y-3" data-testid="section-filters">
+          {/* Row 1: Specializations */}
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+              <Filter className="h-3 w-3" />
+              {t("therapist.filter_specialization")}
+            </p>
+            <ScrollArea className="w-full">
+              <div className="flex items-center gap-1.5 pb-1">
+                {specializations.map((s, i) => (
+                  <motion.div
+                    key={s.value}
+                    custom={i}
+                    variants={filterChipVariants}
+                    initial="hidden"
+                    animate="visible"
                   >
-                    {s.label}
-                  </Badge>
-                </motion.div>
+                    <Badge
+                      variant={specialization === s.value ? "default" : "secondary"}
+                      className="cursor-pointer shrink-0 whitespace-nowrap text-xs"
+                      onClick={() => toggleFilter("specialization", s.value)}
+                      data-testid={`filter-spec-${s.value}`}
+                    >
+                      {s.label}
+                    </Badge>
+                  </motion.div>
+                ))}
+              </div>
+            </ScrollArea>
+          </div>
+
+          {/* Divider */}
+          <div className="border-t" />
+
+          {/* Row 2: All other filters in one clean row */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Language */}
+            <div className="flex items-center gap-1.5">
+              <Globe className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              {languageOptions.map((l) => (
+                <Badge
+                  key={l.value}
+                  variant={language === l.value ? "default" : "outline"}
+                  className="cursor-pointer text-xs"
+                  onClick={() => toggleFilter("language", l.value)}
+                  data-testid={`filter-lang-${l.value}`}
+                >
+                  {l.label}
+                </Badge>
               ))}
             </div>
-          </ScrollArea>
 
-          {/* Row 2: quick toggles — language, online, gender */}
-          <div className="flex flex-wrap items-center gap-2">
-            {languageOptions.map((l) => (
-              <Badge
-                key={l.value}
-                variant={language === l.value ? "default" : "outline"}
-                className="cursor-pointer"
-                onClick={() => toggleFilter("language", l.value)}
-                data-testid={`filter-lang-${l.value}`}
-              >
-                <Globe className="h-3 w-3 me-1" />
-                {l.label}
-              </Badge>
-            ))}
+            <span className="text-muted-foreground/40 text-sm">|</span>
 
+            {/* Online now */}
             <Badge
               variant={onlineOnly ? "default" : "outline"}
-              className={`cursor-pointer gap-1.5 ${onlineOnly ? "bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700 border-emerald-600" : ""}`}
+              className={`cursor-pointer gap-1.5 text-xs transition-colors ${
+                onlineOnly ? "bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700 border-emerald-600 text-white" : ""
+              }`}
               onClick={() => setOnlineOnly(!onlineOnly)}
               data-testid="filter-online-now"
             >
-              <span className="relative flex h-2 w-2">
+              <span className="relative flex h-2 w-2 shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
               </span>
               {t("therapist.online_now")}
               {onlineTherapists.size > 0 && (
-                <span className="text-xs opacity-80">({onlineTherapists.size})</span>
+                <span className="opacity-80">({onlineTherapists.size})</span>
               )}
             </Badge>
 
+            <span className="text-muted-foreground/40 text-sm">|</span>
+
+            {/* Gender */}
             {genderOptions.map((g) => (
               <Badge
                 key={g.value}
                 variant={gender === g.value ? "default" : "outline"}
-                className="cursor-pointer"
+                className="cursor-pointer text-xs"
                 onClick={() => toggleFilter("gender", g.value)}
                 data-testid={`filter-gender-${g.value}`}
               >
-                <Users className="h-3 w-3 me-1" />
                 {g.label}
               </Badge>
             ))}
 
+            <span className="text-muted-foreground/40 text-sm">|</span>
+
+            {/* Tier */}
             {tierOptions.map((tierOption) => (
               <Badge
                 key={tierOption.value}
                 variant={tier === tierOption.value ? "default" : "outline"}
-                className="cursor-pointer whitespace-nowrap"
+                className="cursor-pointer whitespace-nowrap text-xs"
                 onClick={() => toggleFilter("tier", tierOption.value)}
                 data-testid={`filter-tier-${tierOption.value}`}
               >
@@ -363,11 +384,14 @@ export default function TherapistsPage() {
               </Badge>
             ))}
 
+            <span className="text-muted-foreground/40 text-sm">|</span>
+
+            {/* Budget */}
             {budgetOptions.map((b) => (
               <Badge
                 key={b.value}
                 variant={budget === b.value ? "default" : "outline"}
-                className="cursor-pointer whitespace-nowrap"
+                className="cursor-pointer whitespace-nowrap text-xs"
                 onClick={() => setBudget(budget === b.value ? "" : b.value)}
                 data-testid={`filter-budget-${b.value}`}
               >
@@ -376,21 +400,24 @@ export default function TherapistsPage() {
             ))}
 
             {(specialization || language || gender || tier || onlineOnly || budget) && (
-              <Badge
-                variant="outline"
-                className="cursor-pointer text-destructive border-destructive/40"
-                onClick={() => {
-                  setSpecialization("");
-                  setLanguage("");
-                  setGender("");
-                  setTier("");
-                  setBudget("");
-                  setOnlineOnly(false);
-                }}
-                data-testid="button-clear-filters"
-              >
-                {t("therapist.clear_all")}
-              </Badge>
+              <>
+                <span className="text-muted-foreground/40 text-sm">|</span>
+                <Badge
+                  variant="outline"
+                  className="cursor-pointer text-destructive border-destructive/40 text-xs"
+                  onClick={() => {
+                    setSpecialization("");
+                    setLanguage("");
+                    setGender("");
+                    setTier("");
+                    setBudget("");
+                    setOnlineOnly(false);
+                  }}
+                  data-testid="button-clear-filters"
+                >
+                  {t("therapist.clear_all")}
+                </Badge>
+              </>
             )}
           </div>
         </div>

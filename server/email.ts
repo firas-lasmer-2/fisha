@@ -12,11 +12,19 @@
 import { Resend } from "resend";
 
 let _resend: Resend | null = null;
+let _missingResendKeyLogged = false;
 
-function getResend(): Resend {
+function getResend(): Resend | null {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) {
+    if (!_missingResendKeyLogged) {
+      console.warn("[email] RESEND_API_KEY is not set. Email sending is disabled.");
+      _missingResendKeyLogged = true;
+    }
+    return null;
+  }
+
   if (!_resend) {
-    const key = process.env.RESEND_API_KEY;
-    if (!key) throw new Error("RESEND_API_KEY is not set");
     _resend = new Resend(key);
   }
   return _resend;
@@ -73,6 +81,7 @@ function htmlWrap(title: string, bodyHtml: string): string {
 async function send(to: string, subject: string, html: string): Promise<void> {
   try {
     const resend = getResend();
+    if (!resend) return;
     await resend.emails.send({ from: FROM, to, subject, html });
   } catch (err) {
     console.error("[email] Failed to send email:", err);

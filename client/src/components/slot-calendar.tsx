@@ -10,11 +10,11 @@ import {
 } from "@/components/ui/dialog";
 import { ChevronLeft, ChevronRight, Plus, Repeat } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useI18n } from "@/lib/i18n";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { TherapistSlot } from "@shared/schema";
 
 const HOUR_LABELS = Array.from({ length: 14 }, (_, i) => `${(i + 7).toString().padStart(2, "0")}:00`); // 07:00–20:00
-const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 function getWeekDates(referenceDate: Date): Date[] {
   const day = referenceDate.getDay();
@@ -63,6 +63,7 @@ export function SlotCalendar({
   invalidateKey,
 }: SlotCalendarProps) {
   const { toast } = useToast();
+  const { t } = useI18n();
   const [weekOffset, setWeekOffset] = useState(0);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedCell, setSelectedCell] = useState<{ date: Date; hour: number } | null>(null);
@@ -94,7 +95,7 @@ export function SlotCalendar({
 
   const openDialog = (date: Date, hour: number) => {
     const dt = new Date(date);
-    dt.setHours(hour);
+    dt.setHours(hour, 0, 0, 0);
     if (dt < new Date()) return; // past cells ignored
     setSelectedCell({ date, hour });
     setIsRecurring(false);
@@ -124,10 +125,10 @@ export function SlotCalendar({
       }
       const key = invalidateKey ?? ["/api/therapists", therapistId, "slots"];
       queryClient.invalidateQueries({ queryKey: key });
-      toast({ title: `${slotsToCreate.length} slot(s) created` });
+      toast({ title: t("slots.published_success") });
       setDialogOpen(false);
     } catch {
-      toast({ title: "Failed to create slots", variant: "destructive" });
+      toast({ title: t("common.error"), variant: "destructive" });
     } finally {
       setIsSubmitting(false);
     }
@@ -138,9 +139,9 @@ export function SlotCalendar({
       await apiRequest("DELETE", `/api/therapist/slots/${slotId}`);
       const key = invalidateKey ?? ["/api/therapists", therapistId, "slots"];
       queryClient.invalidateQueries({ queryKey: key });
-      toast({ title: "Slot cancelled" });
+      toast({ title: t("slots.cancelled_success") });
     } catch {
-      toast({ title: "Failed to cancel slot", variant: "destructive" });
+      toast({ title: t("common.error"), variant: "destructive" });
     }
   };
 
@@ -165,9 +166,10 @@ export function SlotCalendar({
 
       {/* Legend */}
       <div className="flex gap-3 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-200 border border-emerald-300 inline-block" /> Open</span>
-        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-200 border border-blue-300 inline-block" /> Booked</span>
-        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-muted border inline-block" /> Cancelled</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-200 border border-emerald-300 dark:bg-emerald-900/40 inline-block" /> {t("slots.status_open")}</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-200 border border-blue-300 dark:bg-blue-900/40 inline-block" /> {t("slots.status_booked")}</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-muted border inline-block" /> {t("slots.status_cancelled")}</span>
+        <span className="ms-auto text-muted-foreground/60 italic">{t("slots.click_empty_hint")}</span>
       </div>
 
       {/* Calendar grid */}
@@ -180,7 +182,7 @@ export function SlotCalendar({
               const isToday = d.toDateString() === today.toDateString();
               return (
                 <div key={i} className={`pb-1.5 ${isToday ? "text-primary font-bold" : "text-muted-foreground"}`}>
-                  {DAY_LABELS[i]}
+                  {d.toLocaleDateString(undefined, { weekday: "short" })}
                   <br />
                   {d.getDate()}
                 </div>
@@ -208,7 +210,13 @@ export function SlotCalendar({
                     return (
                       <div
                         key={di}
-                        className={`min-h-[40px] p-0.5 relative group ${!isPast ? "cursor-pointer hover:bg-muted/40" : "opacity-40"}`}
+                        className={`min-h-[52px] p-0.5 relative group border-s border-muted/30 ${
+                          !isPast && cellSlots.length === 0
+                            ? "cursor-pointer hover:bg-primary/5 hover:border-primary/20"
+                            : !isPast
+                            ? "cursor-default"
+                            : "opacity-30 cursor-not-allowed"
+                        }`}
                         onClick={() => !isPast && cellSlots.length === 0 && openDialog(d, hour)}
                       >
                         {cellSlots.map((slot) => (
@@ -220,9 +228,10 @@ export function SlotCalendar({
                             <span>{slot.priceDinar}د.ت</span>
                             {slot.status === "open" && (
                               <button
+                                type="button"
                                 className="ms-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
-                                onClick={() => handleCancel(slot.id)}
-                                title="Cancel slot"
+                                onClick={(e) => { e.stopPropagation(); handleCancel(slot.id); }}
+                                title={t("slots.cancel_slot")}
                               >
                                 ×
                               </button>
@@ -230,8 +239,8 @@ export function SlotCalendar({
                           </div>
                         ))}
                         {!isPast && cellSlots.length === 0 && (
-                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100">
-                            <Plus className="h-3 w-3 text-muted-foreground" />
+                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-60 transition-opacity">
+                            <Plus className="h-4 w-4 text-primary" />
                           </div>
                         )}
                       </div>
@@ -248,18 +257,22 @@ export function SlotCalendar({
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create Slot</DialogTitle>
+            <DialogTitle>{t("slots.create_slot_title")}</DialogTitle>
           </DialogHeader>
           {selectedCell && (
             <div className="space-y-4 pt-1">
-              <p className="text-sm text-muted-foreground">
-                {selectedCell.date.toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" })} at{" "}
-                {String(selectedCell.hour).padStart(2, "0")}:00
-              </p>
+              <div className="rounded-lg bg-muted/50 px-3 py-2">
+                <p className="text-sm font-medium">
+                  {selectedCell.date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {String(selectedCell.hour).padStart(2, "0")}:00 – {String(selectedCell.hour + 1).padStart(2, "0")}:00
+                </p>
+              </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-sm font-medium">Duration (min)</label>
+                  <label className="text-sm font-medium">{t("slots.duration_label")}</label>
                   <Input
                     type="number"
                     min={15}
@@ -270,7 +283,7 @@ export function SlotCalendar({
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium">Price (TND)</label>
+                  <label className="text-sm font-medium">{t("slots.price_label")}</label>
                   <Input
                     type="number"
                     min={0}
@@ -291,14 +304,14 @@ export function SlotCalendar({
                     onChange={(e) => setIsRecurring(e.target.checked)}
                     className="accent-primary"
                   />
-                  <label htmlFor="recurring" className="text-sm font-medium flex items-center gap-1.5">
+                  <label htmlFor="recurring" className="text-sm font-medium flex items-center gap-1.5 cursor-pointer">
                     <Repeat className="h-3.5 w-3.5" />
-                    Repeat weekly
+                    {t("slots.repeat_weekly")}
                   </label>
                 </div>
                 {isRecurring && (
                   <div className="flex items-center gap-2">
-                    <label className="text-sm text-muted-foreground shrink-0">for</label>
+                    <label className="text-sm text-muted-foreground shrink-0">{t("slots.repeat_for")}</label>
                     <Input
                       type="number"
                       min={2}
@@ -307,7 +320,7 @@ export function SlotCalendar({
                       onChange={(e) => setRecurWeeks(Number(e.target.value))}
                       className="w-20"
                     />
-                    <span className="text-sm text-muted-foreground">weeks</span>
+                    <span className="text-sm text-muted-foreground">{t("slots.weeks")}</span>
                   </div>
                 )}
               </div>
@@ -318,10 +331,10 @@ export function SlotCalendar({
                 disabled={isSubmitting}
               >
                 {isSubmitting
-                  ? "Creating..."
+                  ? t("common.loading")
                   : isRecurring
-                  ? `Create ${recurWeeks} slots`
-                  : "Create slot"}
+                  ? t("slots.create_n_slots").replace("{n}", String(recurWeeks))
+                  : t("slots.create_slot_btn")}
               </Button>
             </div>
           )}

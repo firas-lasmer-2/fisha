@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/app-layout";
 import { useAuth } from "@/hooks/use-auth";
@@ -31,6 +31,7 @@ import {
   Sparkles,
   Star,
 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import type { ListenerQueueEntry, PeerMessage, PeerSession, User } from "@shared/schema";
 
 interface PeerSessionsResponse {
@@ -83,6 +84,7 @@ export default function PeerSupportPage() {
   const [mobilePanel, setMobilePanel] = useState<"sessions" | "chat">("chat");
   const [expectationsOpen, setExpectationsOpen] = useState(false);
   const [justEndedSessionId, setJustEndedSessionId] = useState<number | null>(null);
+  const messageListEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (user?.languagePreference && ["ar", "fr"].includes(user.languagePreference)) {
@@ -131,6 +133,15 @@ export default function PeerSupportPage() {
     queryKey: ["/api/peer/session", selectedSessionId, "messages"],
     enabled: !!selectedSessionId,
   });
+
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    if (typeof window === "undefined") return;
+    const frame = window.requestAnimationFrame(() => {
+      messageListEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages?.length, selectedSessionId]);
 
   useEffect(() => {
     if (!selectedSessionId) return;
@@ -280,11 +291,29 @@ export default function PeerSupportPage() {
   };
 
   const isJoinDisabled = joinQueueMutation.isPending || !!queueEntry;
+  const supportFlow = [
+    {
+      title: tr("peer.flow_1_title", "1. Set your preferences"),
+      desc: tr("peer.flow_1_desc", "Choose language and topics so we can match you faster."),
+      icon: Sparkles,
+    },
+    {
+      title: tr("peer.flow_2_title", "2. Join the queue"),
+      desc: tr("peer.flow_2_desc", "You'll see your place in line and estimated wait time."),
+      icon: Clock3,
+    },
+    {
+      title: tr("peer.flow_3_title", "3. Start chatting"),
+      desc: tr("peer.flow_3_desc", "Share what you need, then rate the session at the end."),
+      icon: MessageCircle,
+    },
+  ];
 
   return (
     <AppLayout>
       <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-4">
-        <Card>
+        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}>
+          <Card className="overflow-hidden">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-2">
               <CardTitle className="flex items-center gap-2 text-lg">
@@ -295,8 +324,29 @@ export default function PeerSupportPage() {
                 {tr("peer.what_to_expect", "What to expect")}
               </Button>
             </div>
+            <p className="text-sm text-muted-foreground">
+              {tr("peer.clear_intro", "Get matched with a listener in a few steps. You're always in control.")}
+            </p>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="grid gap-2 sm:grid-cols-3">
+              {supportFlow.map((item, index) => (
+                <motion.div
+                  key={item.title}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.06 + index * 0.05 }}
+                  className="rounded-lg border bg-muted/30 p-3"
+                >
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <item.icon className="h-4 w-4 text-primary" />
+                    <p className="text-sm font-medium">{item.title}</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{item.desc}</p>
+                </motion.div>
+              ))}
+            </div>
+
             <div className="rounded-lg border p-3 flex flex-wrap items-center justify-between gap-3" data-testid="peer-availability-banner">
               <div className="flex items-center gap-2">
                 <span
@@ -359,7 +409,7 @@ export default function PeerSupportPage() {
                 <div className="rounded-lg bg-muted/60 p-3">
                   <p className="text-xs text-muted-foreground">Your place in line</p>
                   <p className="text-lg font-semibold">{queuePosition || "-"}</p>
-                  {queuePosition && <p className="text-xs text-primary">A listener will be with you shortly 💙</p>}
+                  {queuePosition && <p className="text-xs text-primary">{tr("peer.shortly", "A listener will be with you shortly.")}</p>}
                 </div>
                 <div className="rounded-lg bg-muted/60 p-3">
                   <p className="text-xs text-muted-foreground">{tr("peer.eta", "Estimated wait")}</p>
@@ -373,9 +423,11 @@ export default function PeerSupportPage() {
             )}
 
             {queueEntry && (
-              <Badge variant="outline" data-testid="peer-queue-status-badge">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                <Badge variant="outline" data-testid="peer-queue-status-badge">
                 {t("peer.queue_status")}: {tr(`peer.status_${queueEntry.status}`, readableQueueStatus(queueEntry.status, queueEntry.status))}
-              </Badge>
+                </Badge>
+              </motion.div>
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -396,7 +448,8 @@ export default function PeerSupportPage() {
               </Button>
             </div>
           </CardContent>
-        </Card>
+          </Card>
+        </motion.div>
 
         <Dialog open={expectationsOpen} onOpenChange={setExpectationsOpen}>
           <DialogContent>
@@ -440,12 +493,12 @@ export default function PeerSupportPage() {
           </DialogContent>
         </Dialog>
 
-        <div className="md:hidden flex items-center gap-2">
+        <div className="md:hidden grid grid-cols-2 gap-2">
           <Button
             size="sm"
             variant={mobilePanel === "sessions" ? "secondary" : "outline"}
             onClick={() => setMobilePanel("sessions")}
-            className="flex-1"
+            className="w-full"
           >
             {t("peer.sessions")}
           </Button>
@@ -453,241 +506,273 @@ export default function PeerSupportPage() {
             size="sm"
             variant={mobilePanel === "chat" ? "secondary" : "outline"}
             onClick={() => setMobilePanel("chat")}
-            className="flex-1"
+            className="w-full"
           >
             {t("peer.conversation")}
           </Button>
         </div>
 
         <div className="grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
-          <Card className={mobilePanel === "sessions" ? "" : "hidden md:block"}>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">{t("peer.sessions")}</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <ScrollArea className="h-[460px]">
-                <div className="p-3 space-y-2">
-                  {sessionsLoading ? (
-                    <>
-                      <Skeleton className="h-14 w-full" />
-                      <Skeleton className="h-14 w-full" />
-                    </>
-                  ) : sessions.length === 0 ? (
-                    <p className="text-sm text-muted-foreground px-2 py-4">{t("peer.no_sessions")}</p>
-                  ) : (
-                    sessions.map((session) => (
-                      <button
-                        key={session.id}
-                        type="button"
-                        className={`w-full rounded-md border px-3 py-2 text-start ${selectedSessionId === session.id ? "bg-muted" : ""}`}
-                        onClick={() => {
-                          setSelectedSessionId(session.id);
-                          setMobilePanel("chat");
-                        }}
-                      >
-                        <p className="text-sm font-medium">
-                          {session.otherUser.firstName || t("peer.anonymous")} {session.otherUser.lastName || ""}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {tr(`peer.status_${session.status}`, readableQueueStatus(session.status, session.status))} • #{session.id}
-                        </p>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-
-          <Card className={mobilePanel === "chat" ? "" : "hidden md:block"}>
-            <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                {t("peer.conversation")}
-                {selectedSession && (
-                  <Badge variant={selectedSession.status === "active" ? "secondary" : "outline"}>
-                    {tr(`peer.status_${selectedSession.status}`, readableQueueStatus(selectedSession.status, selectedSession.status))}
-                  </Badge>
-                )}
-              </CardTitle>
-              {selectedSession?.status === "active" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => endSessionMutation.mutate()}
-                  disabled={endSessionMutation.isPending}
-                  data-testid="button-peer-end-session"
-                >
-                  {t("peer.end_session")}
-                </Button>
-              )}
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {selectedSession ? (
-                <>
-                  <ScrollArea className="h-[320px] rounded-md border p-3">
-                    {messagesLoading ? (
-                      <div className="space-y-2">
-                        <Skeleton className="h-10 w-2/3" />
-                        <Skeleton className="h-10 w-1/2 ms-auto" />
-                      </div>
-                    ) : messages && messages.length > 0 ? (
-                      <div className="space-y-2">
-                        {messages.map((message) => {
-                          const mine = message.senderId === user?.id;
-                          return (
-                            <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                              <div className={`max-w-[75%] rounded-xl px-3 py-2 text-sm ${mine ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                                {message.content}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+          <motion.div
+            initial={{ opacity: 0, x: -12 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.08 }}
+            className={mobilePanel === "sessions" ? "" : "hidden md:block"}
+          >
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">{t("peer.sessions")}</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <ScrollArea className="h-[460px]">
+                  <div className="p-3 space-y-2">
+                    {sessionsLoading ? (
+                      <>
+                        <Skeleton className="h-14 w-full" />
+                        <Skeleton className="h-14 w-full" />
+                      </>
+                    ) : sessions.length === 0 ? (
+                      <p className="text-sm text-muted-foreground px-2 py-4">{t("peer.no_sessions")}</p>
                     ) : (
-                      <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-                        <MessageCircle className="h-4 w-4 me-1" />
-                        {t("peer.no_messages")}
-                      </div>
+                      sessions.map((session, index) => (
+                        <motion.button
+                          key={session.id}
+                          type="button"
+                          initial={{ opacity: 0, x: -8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.03 }}
+                          className={`w-full rounded-md border px-3 py-2 text-start transition-colors ${selectedSessionId === session.id ? "bg-muted" : "hover:bg-muted/40"}`}
+                          onClick={() => {
+                            setSelectedSessionId(session.id);
+                            setMobilePanel("chat");
+                          }}
+                        >
+                          <p className="text-sm font-medium">
+                            {session.otherUser.firstName || t("peer.anonymous")} {session.otherUser.lastName || ""}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {tr(`peer.status_${session.status}`, readableQueueStatus(session.status, session.status))} • #{session.id}
+                          </p>
+                        </motion.button>
+                      ))
                     )}
-                  </ScrollArea>
-
-                  <div className="flex gap-2">
-                    <Input
-                      value={messageText}
-                      onChange={(e) => setMessageText(e.target.value)}
-                      placeholder={t("messages.type")}
-                      disabled={selectedSession.status !== "active"}
-                    />
-                    <Button
-                      onClick={() => sendMessageMutation.mutate()}
-                      disabled={!canSend || sendMessageMutation.isPending}
-                      data-testid="button-peer-send"
-                    >
-                      <Send className="h-4 w-4" />
-                    </Button>
                   </div>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          </motion.div>
 
-                  {isClientViewingEndedSession && (
-                    <Card className={`safe-surface border-0 ${shouldHighlightClosingCard ? "ring-1 ring-primary/40" : ""}`} data-testid="peer-closing-card">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm flex items-center gap-2">
-                          <HeartHandshake className="h-4 w-4 text-primary" />
-                          {tr("peer.not_alone_title", "You are not alone")}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        <p className="text-sm text-muted-foreground">
-                          You did something brave today. If you'd like more structured support, therapists are here.
-                        </p>
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setExpectationsOpen(true)}
-                            disabled={isJoinDisabled}
-                          >
-                            {tr("peer.rejoin_queue", "Talk to someone again")}
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => { window.location.href = "/self-care"; }}>
-                            {tr("peer.open_selfcare", "Open self-care")}
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => { window.location.href = "/crisis"; }}>
-                            {tr("peer.crisis_support", "Crisis support")}
-                          </Button>
-                          <Button size="sm" className="gap-1.5" onClick={() => { window.location.href = "/therapists"; }}>
-                            <HeartHandshake className="h-3.5 w-3.5" />
-                            Talk to a therapist
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
+          <motion.div
+            initial={{ opacity: 0, x: 12 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.1 }}
+            className={mobilePanel === "chat" ? "" : "hidden md:block"}
+          >
+            <Card>
+              <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  {t("peer.conversation")}
+                  {selectedSession && (
+                    <Badge variant={selectedSession.status === "active" ? "secondary" : "outline"}>
+                      {tr(`peer.status_${selectedSession.status}`, readableQueueStatus(selectedSession.status, selectedSession.status))}
+                    </Badge>
                   )}
+                </CardTitle>
+                {selectedSession?.status === "active" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => endSessionMutation.mutate()}
+                    disabled={endSessionMutation.isPending}
+                    data-testid="button-peer-end-session"
+                  >
+                    {t("peer.end_session")}
+                  </Button>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {selectedSession ? (
+                  <>
+                    <ScrollArea className="h-[320px] rounded-md border p-3">
+                      {messagesLoading ? (
+                        <div className="space-y-2">
+                          <Skeleton className="h-10 w-2/3" />
+                          <Skeleton className="h-10 w-1/2 ms-auto" />
+                        </div>
+                      ) : messages && messages.length > 0 ? (
+                        <div className="space-y-2">
+                          <AnimatePresence initial={false}>
+                            {messages.map((message) => {
+                              const mine = message.senderId === user?.id;
+                              return (
+                                <motion.div
+                                  key={message.id}
+                                  initial={{ opacity: 0, y: 6 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  exit={{ opacity: 0, y: -6 }}
+                                  className={`flex ${mine ? "justify-end" : "justify-start"}`}
+                                >
+                                  <div className={`max-w-[75%] rounded-xl px-3 py-2 text-sm ${mine ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                                    {message.content}
+                                  </div>
+                                </motion.div>
+                              );
+                            })}
+                          </AnimatePresence>
+                          <div ref={messageListEndRef} />
+                        </div>
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                          <MessageCircle className="h-4 w-4 me-1" />
+                          {t("peer.no_messages")}
+                        </div>
+                      )}
+                    </ScrollArea>
 
-                  {selectedSession.status !== "active" && user?.id === selectedSession.clientId && (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <Card className="border-dashed">
+                    <div className="flex gap-2">
+                      <Input
+                        value={messageText}
+                        onChange={(e) => setMessageText(e.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter") return;
+                          event.preventDefault();
+                          if (!canSend || sendMessageMutation.isPending) return;
+                          sendMessageMutation.mutate();
+                        }}
+                        placeholder={tr("peer.type_message", "Type your message...")}
+                        disabled={selectedSession.status !== "active"}
+                      />
+                      <Button
+                        onClick={() => sendMessageMutation.mutate()}
+                        disabled={!canSend || sendMessageMutation.isPending}
+                        data-testid="button-peer-send"
+                      >
+                        <Send className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    {isClientViewingEndedSession && (
+                      <Card className={`safe-surface border-0 ${shouldHighlightClosingCard ? "ring-1 ring-primary/40" : ""}`} data-testid="peer-closing-card">
                         <CardHeader className="pb-2">
                           <CardTitle className="text-sm flex items-center gap-2">
-                            <Star className="h-4 w-4" />
-                            {t("peer.rate_session")}
+                            <HeartHandshake className="h-4 w-4 text-primary" />
+                            {tr("peer.not_alone_title", "You are not alone")}
                           </CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-3">
-                          <div className="flex items-center gap-1" data-testid="peer-star-rating">
-                            {[1, 2, 3, 4, 5].map((score) => (
-                              <button
-                                key={score}
-                                type="button"
-                                onClick={() => setRating(score)}
-                                className="rounded-md p-1 hover:bg-muted"
-                                aria-label={`rate-${score}`}
-                              >
-                                <Star
-                                  className={`h-5 w-5 ${score <= rating ? "text-amber-500 fill-amber-400" : "text-muted-foreground"}`}
-                                />
-                              </button>
-                            ))}
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {tr("peer.rating_selected", "Selected")}: {rating}/5
+                          <p className="text-sm text-muted-foreground">
+                            {tr("peer.ended_help", "You did something brave today. If you need more structured support, therapists are available.")}
                           </p>
-                          <Textarea
-                            value={feedbackComment}
-                            onChange={(e) => setFeedbackComment(e.target.value)}
-                            placeholder={t("peer.optional_comment")}
-                            rows={3}
-                          />
-                          <Button
-                            size="sm"
-                            onClick={() => rateSessionMutation.mutate()}
-                            disabled={rateSessionMutation.isPending}
-                            data-testid="button-peer-rate"
-                          >
-                            {t("peer.submit_feedback")}
-                          </Button>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setExpectationsOpen(true)}
+                              disabled={isJoinDisabled}
+                            >
+                              {tr("peer.rejoin_queue", "Talk to someone again")}
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => { window.location.href = "/self-care"; }}>
+                              {tr("peer.open_selfcare", "Open self-care")}
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => { window.location.href = "/crisis"; }}>
+                              {tr("peer.crisis_support", "Crisis support")}
+                            </Button>
+                            <Button size="sm" className="gap-1.5" onClick={() => { window.location.href = "/therapists"; }}>
+                              <HeartHandshake className="h-3.5 w-3.5" />
+                              {tr("peer.find_therapist", "Talk to a therapist")}
+                            </Button>
+                          </div>
                         </CardContent>
                       </Card>
+                    )}
 
-                      <Card className="border-dashed">
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm flex items-center gap-2">
-                            <AlertTriangle className="h-4 w-4" />
-                            {t("peer.report_session")}
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
-                          <Input
-                            value={reportReason}
-                            onChange={(e) => setReportReason(e.target.value)}
-                            placeholder={t("peer.reason")}
-                          />
-                          <Textarea
-                            value={reportDetails}
-                            onChange={(e) => setReportDetails(e.target.value)}
-                            placeholder={t("peer.details_optional")}
-                            rows={3}
-                          />
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => reportSessionMutation.mutate()}
-                            disabled={!reportReason.trim() || reportSessionMutation.isPending}
-                            data-testid="button-peer-report"
-                          >
-                            {t("peer.submit_report")}
-                          </Button>
-                        </CardContent>
-                      </Card>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="h-[360px] flex items-center justify-center text-sm text-muted-foreground">
-                  {t("peer.select_session")}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                    {selectedSession.status !== "active" && user?.id === selectedSession.clientId && (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <Card className="border-dashed">
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-sm flex items-center gap-2">
+                              <Star className="h-4 w-4" />
+                              {t("peer.rate_session")}
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-3">
+                            <div className="flex items-center gap-1" data-testid="peer-star-rating">
+                              {[1, 2, 3, 4, 5].map((score) => (
+                                <button
+                                  key={score}
+                                  type="button"
+                                  onClick={() => setRating(score)}
+                                  className="rounded-md p-1 hover:bg-muted"
+                                  aria-label={`rate-${score}`}
+                                >
+                                  <Star
+                                    className={`h-5 w-5 ${score <= rating ? "text-amber-500 fill-amber-400" : "text-muted-foreground"}`}
+                                  />
+                                </button>
+                              ))}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {tr("peer.rating_selected", "Selected")}: {rating}/5
+                            </p>
+                            <Textarea
+                              value={feedbackComment}
+                              onChange={(e) => setFeedbackComment(e.target.value)}
+                              placeholder={t("peer.optional_comment")}
+                              rows={3}
+                            />
+                            <Button
+                              size="sm"
+                              onClick={() => rateSessionMutation.mutate()}
+                              disabled={rateSessionMutation.isPending}
+                              data-testid="button-peer-rate"
+                            >
+                              {t("peer.submit_feedback")}
+                            </Button>
+                          </CardContent>
+                        </Card>
+
+                        <Card className="border-dashed">
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-sm flex items-center gap-2">
+                              <AlertTriangle className="h-4 w-4" />
+                              {t("peer.report_session")}
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-2">
+                            <Input
+                              value={reportReason}
+                              onChange={(e) => setReportReason(e.target.value)}
+                              placeholder={t("peer.reason")}
+                            />
+                            <Textarea
+                              value={reportDetails}
+                              onChange={(e) => setReportDetails(e.target.value)}
+                              placeholder={t("peer.details_optional")}
+                              rows={3}
+                            />
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => reportSessionMutation.mutate()}
+                              disabled={!reportReason.trim() || reportSessionMutation.isPending}
+                              data-testid="button-peer-report"
+                            >
+                              {t("peer.submit_report")}
+                            </Button>
+                          </CardContent>
+                        </Card>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="h-[360px] flex items-center justify-center text-sm text-muted-foreground">
+                    {t("peer.select_session")}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
         </div>
       </div>
     </AppLayout>

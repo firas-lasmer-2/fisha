@@ -658,6 +658,51 @@ export default function SelfCarePage() {
     return value === key ? fallback : value;
   };
 
+  const sectionLinks = [
+    {
+      id: "breathing",
+      label: t("selfcare.breathing"),
+      desc: tr("selfcare.breathing.desc", "4-7-8 breathing for instant calm."),
+      icon: Wind,
+    },
+    {
+      id: "grounding",
+      label: t("selfcare.grounding"),
+      desc: tr("selfcare.grounding.desc", "Reconnect with your surroundings."),
+      icon: Hand,
+    },
+    {
+      id: "affirmations",
+      label: t("selfcare.affirmations"),
+      desc: tr("selfcare.affirmations.desc", "Supportive thoughts for your day."),
+      icon: Sparkles,
+    },
+    {
+      id: "meditation",
+      label: t("selfcare.meditation"),
+      desc: tr("selfcare.meditation.desc", "A short guided timer."),
+      icon: Timer,
+    },
+    {
+      id: "body-scan",
+      label: tr("selfcare.body_scan", "Body scan"),
+      desc: tr("selfcare.body_scan.desc", "Release tension step by step."),
+      icon: Hand,
+    },
+    {
+      id: "sleep",
+      label: tr("selfcare.sleep_meditation", "Sleep wind-down"),
+      desc: tr("selfcare.sleep_meditation.desc", "Settle your mind before bed."),
+      icon: Moon,
+    },
+    {
+      id: "gratitude",
+      label: tr("selfcare.gratitude", "Gratitude practice"),
+      desc: tr("selfcare.gratitude.desc", "Save one small positive note."),
+      icon: Heart,
+    },
+  ];
+
   const dailySuggestions = [
     {
       title: tr("selfcare.daily_breathing", "Breathing reset"),
@@ -679,25 +724,74 @@ export default function SelfCarePage() {
 
   return (
     <AppLayout>
-      <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-8 text-center"
+          className="relative overflow-hidden rounded-2xl border gradient-feature p-5 sm:p-6"
         >
-          <h1 className="text-3xl font-bold text-gradient mb-2" data-testid="text-selfcare-title">
-            {t("selfcare.title")}
-          </h1>
-          <p className="text-muted-foreground" data-testid="text-selfcare-subtitle">
-            {t("selfcare.subtitle")}
-          </p>
+          <div className="pointer-events-none absolute -top-12 -end-16 h-40 w-40 rounded-full bg-primary/15 blur-2xl" aria-hidden />
+          <div className="pointer-events-none absolute -bottom-10 -start-10 h-36 w-36 rounded-full bg-sky-400/10 blur-2xl" aria-hidden />
+
+          <div className="relative">
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-background/60 px-3 py-1 text-xs text-muted-foreground mb-3">
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              {tr("selfcare.start_here", "Start with one small reset")}
+            </div>
+            <h1 className="text-3xl font-bold text-gradient mb-2" data-testid="text-selfcare-title">
+              {t("selfcare.title")}
+            </h1>
+            <p className="text-muted-foreground max-w-2xl" data-testid="text-selfcare-subtitle">
+              {t("selfcare.subtitle")}
+            </p>
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              <div className="rounded-xl border bg-background/70 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{tr("selfcare.modules", "Modules")}</p>
+                <p className="text-lg font-semibold">{sectionLinks.length}</p>
+              </div>
+              <div className="rounded-xl border bg-background/70 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{tr("selfcare.today_focus", "Today's focus")}</p>
+                <p className="text-sm font-medium">{todaySuggestion.title}</p>
+              </div>
+              <div className="rounded-xl border bg-background/70 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{tr("selfcare.tip", "Tip")}</p>
+                <p className="text-sm">{tr("selfcare.tip_line", "Done is better than perfect. Start with 2 minutes.")}</p>
+              </div>
+            </div>
+          </div>
         </motion.div>
 
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.05 }}
-          className="mb-6"
+          className="mt-5"
+        >
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {sectionLinks.map((section) => (
+              <Button
+                key={section.id}
+                size="sm"
+                variant="outline"
+                className="shrink-0 gap-1.5 rounded-full bg-background/70"
+                title={section.desc}
+                onClick={() => {
+                  document.getElementById(section.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              >
+                <section.icon className="h-3.5 w-3.5" />
+                {section.label}
+              </Button>
+            ))}
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.08 }}
+          className="mb-6 mt-3"
         >
           <Card className="safe-surface" data-testid="card-selfcare-daily-suggestion">
             <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center gap-3">
@@ -727,6 +821,7 @@ export default function SelfCarePage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
             id="breathing"
+            whileHover={{ y: -2 }}
           >
             <BreathingExercise t={t} />
           </motion.div>
@@ -736,6 +831,7 @@ export default function SelfCarePage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
             id="grounding"
+            whileHover={{ y: -2 }}
           >
             <GroundingExercise t={t} />
           </motion.div>
@@ -744,6 +840,8 @@ export default function SelfCarePage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
+            id="affirmations"
+            whileHover={{ y: -2 }}
           >
             <AffirmationsCard t={t} />
           </motion.div>
@@ -752,6 +850,8 @@ export default function SelfCarePage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
+            id="meditation"
+            whileHover={{ y: -2 }}
           >
             <MeditationTimer t={t} />
           </motion.div>
@@ -760,6 +860,8 @@ export default function SelfCarePage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.5 }}
+            id="body-scan"
+            whileHover={{ y: -2 }}
           >
             <BodyScanCard t={t} tr={tr} />
           </motion.div>
@@ -768,6 +870,8 @@ export default function SelfCarePage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.6 }}
+            id="sleep"
+            whileHover={{ y: -2 }}
           >
             <SleepMeditationCard tr={tr} />
           </motion.div>
@@ -777,6 +881,7 @@ export default function SelfCarePage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.7 }}
             id="gratitude"
+            whileHover={{ y: -2 }}
           >
             <GratitudePracticeCard tr={tr} />
           </motion.div>

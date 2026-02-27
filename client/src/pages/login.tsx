@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
+import { postAuthRouteForUser } from "@/lib/post-auth-route";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,7 +49,7 @@ export default function LoginPage() {
       }
 
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      window.location.href = "/dashboard";
+      window.location.href = postAuthRouteForUser(payload?.user);
     } catch {
       toast({ title: t("common.error"), variant: "destructive" });
     } finally {
@@ -108,7 +109,7 @@ export default function LoginPage() {
       }
 
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      window.location.href = "/dashboard";
+      window.location.href = postAuthRouteForUser(payload?.user);
     } catch {
       toast({ title: t("common.error"), variant: "destructive" });
     } finally {

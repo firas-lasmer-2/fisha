@@ -282,6 +282,23 @@ export async function registerRoutes(
     }
   };
 
+  const ensureTherapistProfile = async (userId: string): Promise<void> => {
+    const user = await storage.getUser(userId);
+    if (!user || user.role !== "therapist") return;
+
+    const existing = await storage.getTherapistProfile(userId);
+    if (existing) return;
+
+    try {
+      await storage.createTherapistProfile({ userId });
+    } catch (error) {
+      // Handle concurrent first-login/profile-creation races.
+      const recovered = await storage.getTherapistProfile(userId);
+      if (recovered) return;
+      throw error;
+    }
+  };
+
   app.get("/api/health", async (_req, res) => {
     try {
       const { error } = await supabaseAdmin.from("profiles").select("id", { head: true, count: "estimated" }).limit(1);
@@ -324,9 +341,11 @@ export async function registerRoutes(
       });
       if (error) return res.status(400).json({ message: error.message });
 
+      let profile: User | undefined;
+
       // Upsert profile so signup works even if DB auto-profile trigger is absent.
       if (data.user) {
-        await upsertProfileSafely({
+        const row = await upsertProfileSafely({
           id: data.user.id,
           email: data.user.email || email || null,
           firstName,
@@ -334,6 +353,7 @@ export async function registerRoutes(
           role: role || "client",
           phone,
         });
+        profile = mapProfile(row);
       }
 
       // Sign in immediately
@@ -343,10 +363,16 @@ export async function registerRoutes(
       });
       if (signInError) return res.status(400).json({ message: signInError.message });
 
-      const profile = await ensureProfile({
-        id: data.user!.id,
-        email: data.user?.email || email,
-      });
+      if (!profile && data.user) {
+        profile = await ensureProfile({
+          id: data.user.id,
+          email: data.user.email || email,
+        });
+      }
+
+      if (profile?.role === "therapist") {
+        await ensureTherapistProfile(profile.id);
+      }
 
       // Fire-and-forget welcome email
       sendWelcome(email, firstName || email.split("@")[0]);
@@ -374,6 +400,9 @@ export async function registerRoutes(
         id: data.user.id,
         email: data.user.email || email,
       });
+      if (profile?.role === "therapist") {
+        await ensureTherapistProfile(profile.id);
+      }
       res.json({
         user: profile || fallbackProfile({ id: data.user.id, email: data.user.email || email }),
         session: data.session,
@@ -407,6 +436,9 @@ export async function registerRoutes(
       const profile = data.user
         ? await ensureProfile({ id: data.user.id, email: data.user.email || undefined })
         : null;
+      if (profile?.role === "therapist") {
+        await ensureTherapistProfile(profile.id);
+      }
       res.json({
         user: profile || (data.user ? fallbackProfile({ id: data.user.id, email: data.user.email || undefined }) : null),
         session: data.session,
@@ -421,6 +453,9 @@ export async function registerRoutes(
       const authUser = await extractUser(req);
       if (!authUser) return res.status(401).json({ message: "Unauthorized" });
       const profile = await ensureProfile(authUser);
+      if (profile?.role === "therapist") {
+        await ensureTherapistProfile(profile.id);
+      }
       res.json(profile);
     } catch (error) {
       res.status(500).json({ message: "Failed to get user" });
@@ -876,6 +911,7 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Forbidden" });
       }
 
+      await ensureTherapistProfile(therapistId);
       const therapistProfile = await storage.getTherapistProfile(therapistId);
       if (!therapistProfile) return res.status(404).json({ message: "Therapist profile not found" });
 
@@ -1574,6 +1610,7 @@ export async function registerRoutes(
   app.get("/api/therapist/dashboard", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
+      await ensureTherapistProfile(userId);
       const profile = await storage.getTherapistProfile(userId);
       if (!profile) return res.status(404).json({ message: "Not a therapist" });
 
@@ -2998,6 +3035,7 @@ export async function registerRoutes(
 
   app.post("/api/therapist/slots/batch", isAuthenticated, requireRoles(["therapist"]), async (req: any, res) => {
     try {
+      await ensureTherapistProfile(req.user.id);
       const { slots } = req.body as { slots: Array<{ startsAt: string; durationMinutes: number; priceDinar: number; meetLink?: string | null }> };
       if (!Array.isArray(slots) || slots.length === 0) return res.status(400).json({ message: "slots array required" });
       if (slots.length > 50) return res.status(400).json({ message: "Max 50 slots per batch" });

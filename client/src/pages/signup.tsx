@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
+import { postAuthRouteForUser } from "@/lib/post-auth-route";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -54,7 +55,8 @@ export default function SignupPage() {
       }
 
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      window.location.href = role === "therapist" ? "/therapist-dashboard" : "/onboarding";
+      const nextPath = postAuthRouteForUser(payload?.user) || (role === "therapist" ? "/therapist-dashboard" : "/onboarding");
+      window.location.href = nextPath;
     } catch {
       toast({ title: t("common.error"), variant: "destructive" });
     } finally {
@@ -65,7 +67,7 @@ export default function SignupPage() {
   const handleOAuth = async (provider: "google" | "facebook") => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo: `${window.location.origin}/onboarding` },
+      options: { redirectTo: `${window.location.origin}/dashboard` },
     });
     if (error) toast({ title: error.message, variant: "destructive" });
   };

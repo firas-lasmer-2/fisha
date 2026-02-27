@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS public.subscription_plans (
 );
 
 -- ─────────────────────────────────────────────
--- 2. user_subscriptions
+-- 2. user_subscriptions 
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.user_subscriptions (
   id                      SERIAL PRIMARY KEY,
