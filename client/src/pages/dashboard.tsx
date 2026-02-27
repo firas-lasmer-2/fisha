@@ -9,7 +9,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { Calendar, TrendingUp } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { Calendar, TrendingUp, ArrowRight, ArrowLeft, MessageCircle, GraduationCap, Star, HeartHandshake, SmilePlus, Plus } from "lucide-react";
 import type { Appointment, MoodEntry, User } from "@shared/schema";
 
 function toTimestamp(value: string | null | undefined): number {
@@ -112,6 +113,8 @@ export default function DashboardPage() {
     day: "numeric",
   });
 
+  const Arrow = isRTL ? ArrowLeft : ArrowRight;
+
   const wellnessState =
     wellnessScore >= 80
       ? {
@@ -135,161 +138,228 @@ export default function DashboardPage() {
 
   return (
     <AppLayout>
-      <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-5">
+      <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-6">
+        {/* Top Banner: Compassionate Check-in */}
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35 }}
-          className="flex flex-col gap-1"
+          className="rounded-2xl border bg-gradient-to-br from-card to-primary/5 p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6"
         >
-          <h1 className="text-2xl font-bold" data-testid="text-today-title">
-            {t("dashboard.today_title")}, {user?.firstName || t("common.friend")}
-          </h1>
-          <p className="text-sm text-muted-foreground">{todayDate}</p>
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold" data-testid="text-today-title">
+              {t("dashboard.today_title")}, {user?.firstName || t("common.friend")}
+            </h1>
+            <p className="text-muted-foreground flex items-center gap-2 text-lg">
+              <span>{suggestion.emoji}</span>
+              {suggestion.text}
+            </p>
+          </div>
+          
+          <Link href="/mood">
+            <Button size="lg" className="shrink-0 rounded-full px-6 shadow-md hover:shadow-lg transition-all" data-testid="btn-quick-mood">
+              <Plus className="h-5 w-5 me-2" />
+              {t("nav.mood")}
+            </Button>
+          </Link>
         </motion.div>
 
+        {/* Next Up (Immediate Action) */}
         <motion.div
-          initial={{ opacity: 0, y: 8 }}
+          initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.02 }}
-          className="rounded-xl border bg-card/60 px-4 py-3 flex items-center gap-3"
-          data-testid="card-time-suggestion"
+          transition={{ duration: 0.4, delay: 0.05 }}
         >
-          <span className="text-2xl shrink-0">{suggestion.emoji}</span>
-          <p className="text-sm text-muted-foreground">{suggestion.text}</p>
+          <Card className="overflow-hidden border-0 ring-1 ring-primary/20 shadow-md">
+            <div className="bg-primary/5 px-4 py-3 border-b flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-primary" />
+              <h2 className="font-semibold">{t("dashboard.today_plan")}</h2>
+            </div>
+            <CardContent className="p-0">
+              {appointmentsLoading ? (
+                <div className="p-6">
+                  <Skeleton className="h-16 w-full" />
+                </div>
+              ) : upcomingAppointments.length > 0 ? (
+                <div className="divide-y">
+                  {upcomingAppointments.map((appointment) => (
+                    <div
+                      key={appointment.id}
+                      className="p-4 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-background"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-lg">
+                          {new Date(appointment.scheduledAt).getHours().toString().padStart(2, "0")}:00
+                        </div>
+                        <div>
+                          <p className="font-semibold text-lg">
+                            {t("appointment.session_with")} {appointment.otherUser.firstName} {appointment.otherUser.lastName}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {new Date(appointment.scheduledAt).toLocaleDateString()} • {appointment.durationMinutes} {t("common.minutes")}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 w-full sm:w-auto">
+                        <Badge variant="outline" className="text-xs">
+                          {t(`appointment.${appointment.status}`)}
+                        </Badge>
+                        <Link href={`/appointments`} className="w-full sm:w-auto">
+                          <Button className="w-full" size="sm">
+                            {t("appointment.view_details")}
+                          </Button>
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-8 text-center text-muted-foreground flex flex-col items-center justify-center gap-3">
+                  <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                    <Calendar className="h-5 w-5 opacity-50" />
+                  </div>
+                  <p>{t("dashboard.no_appointments")}</p>
+                  <Link href="/therapists">
+                    <Button variant="outline" size="sm" className="mt-2">
+                      {t("therapist.find")}
+                    </Button>
+                  </Link>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </motion.div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Progress Chart */}
           <motion.div
+            className="md:col-span-2"
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.05 }}
+            transition={{ duration: 0.45, delay: 0.1 }}
           >
-            <Card data-testid="card-wellness-insight" className="h-full">
+            <Card className="h-full">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-chart-3" />
-                  {t("dashboard.wellness_score")}
+                <CardTitle className="text-base flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <TrendingUp className="h-4 w-4 text-chart-3" />
+                    {t("dashboard.wellness_score")}
+                  </span>
+                  <Badge className={wellnessState.className}>{wellnessState.label}</Badge>
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="pt-4">
                 {moodsLoading ? (
-                  <Skeleton className="h-28 w-full rounded-xl" />
+                  <Skeleton className="h-48 w-full rounded-xl" />
                 ) : (
-                  <>
-                    <div className="flex items-center justify-between">
+                  <div className="space-y-6">
+                    {/* Key Stats Row */}
+                    <div className="grid grid-cols-3 gap-4">
                       <div>
-                        <p className="text-3xl font-bold" data-testid="text-wellness-score">{wellnessScore}</p>
-                        <p className="text-xs text-muted-foreground">/ 100</p>
+                        <p className="text-sm text-muted-foreground mb-1">{t("dashboard.consistency")}</p>
+                        <p className="text-2xl font-bold">{consistencyScore}%</p>
                       </div>
-                      <Badge className={wellnessState.className}>{wellnessState.label}</Badge>
+                      <div>
+                        <p className="text-sm text-muted-foreground mb-1">{t("dashboard.week_trend")}</p>
+                        <p className="text-2xl font-bold">{moodTrend > 0 ? "+" : ""}{moodTrend}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground mb-1">{t("dashboard.day_streak")}</p>
+                        <p className="text-2xl font-bold">{streakCount}</p>
+                      </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <div className="h-2 rounded-full bg-muted overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-chart-4 via-primary to-chart-2"
-                          style={{ width: `${wellnessScore}%`, transition: "width 400ms ease" }}
-                        />
-                      </div>
-                      <div className="flex items-center gap-1.5 justify-between">
-                        {sevenDayDots.map((filled, i) => (
-                          <div
-                            key={i}
-                            className={`flex-1 h-3 rounded-full ${filled ? "gradient-calm" : "bg-muted"}`}
-                            title={filled ? "Logged" : "No entry"}
-                          />
-                        ))}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {streakCount > 0
-                          ? streakCount === 1 && moodLoggedToday
-                            ? t("dashboard.showed_up_today")
-                            : `${streakCount}-${t("dashboard.day_streak")}`
-                          : t("dashboard.track_mood_now")}
-                      </p>
+                    {/* Chart */}
+                    <div className="h-48 w-full mt-4">
+                      {recentMoods.length >= 2 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={[...recentMoods].reverse()}>
+                            <XAxis 
+                              dataKey="createdAt" 
+                              tickFormatter={(val) => new Date(val).toLocaleDateString(undefined, { weekday: 'short' })}
+                              axisLine={false}
+                              tickLine={false}
+                              tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
+                              dy={10}
+                            />
+                            <YAxis hide domain={[0, 5]} />
+                            <Tooltip 
+                              contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                              formatter={(value: number) => [`Score: ${value}/5`, 'Mood']}
+                              labelFormatter={(label) => new Date(label).toLocaleDateString()}
+                            />
+                            <Line 
+                              type="monotone" 
+                              dataKey="moodScore" 
+                              stroke="hsl(var(--primary))" 
+                              strokeWidth={3}
+                              dot={{ r: 4, fill: "hsl(var(--primary))", strokeWidth: 2 }}
+                              activeDot={{ r: 6, fill: "hsl(var(--primary))" }}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-sm text-muted-foreground bg-muted/30 rounded-lg border border-dashed p-4">
+                          {t("dashboard.track_mood_now")}
+                        </div>
+                      )}
                     </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-lg bg-muted/60 p-2">
-                        <p className="text-muted-foreground">{t("dashboard.consistency")}</p>
-                        <p className="font-semibold">{consistencyScore}%</p>
-                      </div>
-                      <div className="rounded-lg bg-muted/60 p-2">
-                        <p className="text-muted-foreground">{t("dashboard.week_trend")}</p>
-                        <p className="font-semibold">{moodTrend > 0 ? "+" : ""}{moodTrend}</p>
-                      </div>
-                    </div>
-                  </>
+                  </div>
                 )}
               </CardContent>
             </Card>
           </motion.div>
 
+          {/* Quick Toolkit (Bento Grid) */}
           <motion.div
+            className="grid grid-cols-2 grid-rows-2 gap-3"
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, delay: 0.1 }}
+            transition={{ duration: 0.5, delay: 0.15 }}
           >
-            <Card data-testid="card-today-plan" className="h-full">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-primary" />
-                  {t("dashboard.today_plan")}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="rounded-lg bg-muted/60 p-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">{t("nav.messages")}</p>
-                    <p className="text-xs text-muted-foreground">{t("dashboard.unread_messages")}</p>
+            <Link href="/therapists" className="block w-full h-full">
+              <Card className="h-full hover:bg-muted/50 transition-colors cursor-pointer group">
+                <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full gap-2">
+                  <div className="p-3 rounded-full bg-primary/10 group-hover:scale-110 transition-transform">
+                    <HeartHandshake className="h-6 w-6 text-primary" />
                   </div>
-                  <Badge variant="secondary" data-testid="badge-unread-count">{unread?.count || 0}</Badge>
-                </div>
+                  <p className="text-sm font-medium">{t("therapist.find")}</p>
+                </CardContent>
+              </Card>
+            </Link>
 
-                {appointmentsLoading ? (
-                  <div className="space-y-2">
-                    <Skeleton className="h-14 w-full" />
-                    <Skeleton className="h-14 w-full" />
+            <Link href="/peer-support" className="block w-full h-full">
+              <Card className="h-full hover:bg-muted/50 transition-colors cursor-pointer group">
+                <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full gap-2">
+                  <div className="p-3 rounded-full bg-emerald-500/10 group-hover:scale-110 transition-transform">
+                    <MessageCircle className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
                   </div>
-                ) : upcomingAppointments.length > 0 ? (
-                  <div className="space-y-2">
-                    {upcomingAppointments.map((appointment) => (
-                      <div
-                        key={appointment.id}
-                        className="rounded-lg border p-3 flex items-center justify-between gap-2"
-                        data-testid={`appointment-item-${appointment.id}`}
-                      >
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium truncate">
-                            {appointment.otherUser.firstName} {appointment.otherUser.lastName}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {new Date(appointment.scheduledAt).toLocaleDateString()} • {appointment.durationMinutes} {t("common.minutes")}
-                          </p>
-                        </div>
-                        <Badge variant="outline" className="text-[10px]">
-                          {t(`appointment.${appointment.status}`)}
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                    {t("dashboard.no_appointments")}
-                  </div>
-                )}
+                  <p className="text-sm font-medium">{t("peer.title")}</p>
+                </CardContent>
+              </Card>
+            </Link>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <Link href="/appointments">
-                    <Button variant="outline" size="sm" className="w-full">{t("nav.appointments")}</Button>
-                  </Link>
-                  <Link href="/messages">
-                    <Button variant="outline" size="sm" className="w-full">{t("nav.messages")}</Button>
-                  </Link>
-                </div>
-              </CardContent>
-            </Card>
+            <Link href="/journal" className="block w-full h-full">
+              <Card className="h-full hover:bg-muted/50 transition-colors cursor-pointer group">
+                <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full gap-2">
+                  <div className="p-3 rounded-full bg-amber-500/10 group-hover:scale-110 transition-transform">
+                    <GraduationCap className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <p className="text-sm font-medium">{t("nav.journal")}</p>
+                </CardContent>
+              </Card>
+            </Link>
+
+            <Link href="/self-care" className="block w-full h-full">
+              <Card className="h-full hover:bg-muted/50 transition-colors cursor-pointer group">
+                <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full gap-2">
+                  <div className="p-3 rounded-full bg-violet-500/10 group-hover:scale-110 transition-transform">
+                    <SmilePlus className="h-6 w-6 text-violet-600 dark:text-violet-400" />
+                  </div>
+                  <p className="text-sm font-medium">{t("nav.self_care")}</p>
+                </CardContent>
+              </Card>
+            </Link>
           </motion.div>
         </div>
       </div>

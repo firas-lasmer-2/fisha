@@ -762,128 +762,78 @@ export default function SelfCarePage() {
           </div>
         </motion.div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
-          className="mt-5"
-        >
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {sectionLinks.map((section) => (
-              <Button
-                key={section.id}
-                size="sm"
-                variant="outline"
-                className="shrink-0 gap-1.5 rounded-full bg-background/70"
-                title={section.desc}
-                onClick={() => {
-                  document.getElementById(section.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }}
-              >
-                <section.icon className="h-3.5 w-3.5" />
-                {section.label}
-              </Button>
-            ))}
-          </div>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.08 }}
-          className="mb-6 mt-3"
-        >
-          <Card className="safe-surface" data-testid="card-selfcare-daily-suggestion">
-            <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-              <div className="w-10 h-10 rounded-lg gradient-safe flex items-center justify-center">
-                <Sparkles className="h-5 w-5 text-white" />
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold">{todaySuggestion.title}</p>
-                <p className="text-xs text-muted-foreground">{todaySuggestion.desc}</p>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  document.getElementById(todaySuggestion.target)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }}
-              >
-                {tr("selfcare.open_today", "Open today")}
-              </Button>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
+            transition={{ delay: 0.15 }}
+            whileHover={{ y: -5, transition: { duration: 0.2 } }}
             id="breathing"
-            whileHover={{ y: -2 }}
+            className="flex"
           >
-            <BreathingExercise t={t} />
+            <div className="w-full h-full"><BreathingExercise t={t} /></div>
           </motion.div>
 
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
+            whileHover={{ y: -5, transition: { duration: 0.2 } }}
             id="grounding"
-            whileHover={{ y: -2 }}
+            className="flex"
           >
-            <GroundingExercise t={t} />
+            <div className="w-full h-full"><GroundingExercise t={t} /></div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+            whileHover={{ y: -5, transition: { duration: 0.2 } }}
+            className="flex"
+          >
+            <div className="w-full h-full"><AffirmationsCard t={t} /></div>
           </motion.div>
 
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
-            id="affirmations"
-            whileHover={{ y: -2 }}
+            whileHover={{ y: -5, transition: { duration: 0.2 } }}
+            className="flex"
           >
-            <AffirmationsCard t={t} />
+            <div className="w-full h-full"><MeditationTimer t={t} /></div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35 }}
+            whileHover={{ y: -5, transition: { duration: 0.2 } }}
+            className="flex"
+          >
+            <div className="w-full h-full"><BodyScanCard t={t} tr={tr} /></div>
           </motion.div>
 
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
-            id="meditation"
-            whileHover={{ y: -2 }}
+            whileHover={{ y: -5, transition: { duration: 0.2 } }}
+            className="flex"
           >
-            <MeditationTimer t={t} />
+            <div className="w-full h-full"><SleepMeditationCard tr={tr} /></div>
           </motion.div>
 
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
-            id="body-scan"
-            whileHover={{ y: -2 }}
-          >
-            <BodyScanCard t={t} tr={tr} />
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.6 }}
-            id="sleep"
-            whileHover={{ y: -2 }}
-          >
-            <SleepMeditationCard tr={tr} />
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.7 }}
+            transition={{ delay: 0.45 }}
+            whileHover={{ y: -5, transition: { duration: 0.2 } }}
             id="gratitude"
-            whileHover={{ y: -2 }}
+            className="flex md:col-span-2 lg:col-span-3"
           >
-            <GratitudePracticeCard tr={tr} />
+            <div className="w-full h-full"><GratitudePracticeCard tr={tr} /></div>
           </motion.div>
         </div>
       </div>

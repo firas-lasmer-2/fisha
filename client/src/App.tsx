@@ -42,6 +42,7 @@ import NotFound from "@/pages/not-found";
 import TherapistLandingPage from "@/pages/therapist-landing";
 import AdminDashboardPage from "@/pages/admin-dashboard";
 import ProgressPage from "@/pages/progress";
+import SupportPage from "@/pages/support";
 
 function homeRouteForRole(role: string | null | undefined) {
   if (role === "listener") return "/listener/dashboard";
@@ -100,10 +101,10 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (user) {
-    const requiresOnboarding = user.role === "client";
-    const target = requiresOnboarding && !user.onboardingCompleted
+    const isClient = user.role === "client";
+    const target = isClient && !user.onboardingCompleted
       ? "/onboarding"
-      : shouldShowWelcome() && user.role === "client"
+      : shouldShowWelcome() && isClient
         ? "/welcome"
       : homeRouteForRole(user.role);
     navigate(target);
@@ -189,6 +190,7 @@ function Router() {
           <Route path="/admin/listeners">
             <AuthGuard><AdminListenersPage /></AuthGuard>
           </Route>
+          <Route path="/support" component={SupportPage} />
           <Route path="/therapists" component={TherapistsPage} />
           <Route path="/resources" component={ResourcesPage} />
           <Route path="/self-care" component={SelfCarePage} />

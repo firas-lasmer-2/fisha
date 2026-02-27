@@ -490,7 +490,7 @@ export default function PeerSupportPage() {
             transition={{ delay: 0.08 }}
             className={mobilePanel === "sessions" ? "" : "hidden md:block"}
           >
-            <Card>
+            <Card className="h-full">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">{t("peer.sessions")}</CardTitle>
               </CardHeader>
@@ -746,48 +746,6 @@ export default function PeerSupportPage() {
             </Card>
           </motion.div>
         </div>
-
-        {/* Confirm start session dialog */}
-        <Dialog open={!!confirmListener} onOpenChange={(open) => { if (!open) setConfirmListener(null); }}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{tr("peer.confirm_title", "Start a session?")}</DialogTitle>
-              <DialogDescription>
-                {tr("peer.confirm_desc", "You'll be connected to this listener. The conversation is private and free.")}
-              </DialogDescription>
-            </DialogHeader>
-            {confirmListener && (
-              <div className="flex items-center gap-3 py-2">
-                <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-2xl">
-                  {confirmListener.avatarEmoji}
-                </div>
-                <div>
-                  <p className="font-medium">{confirmListener.displayAlias || tr("peer.anonymous_listener", "Anonymous Listener")}</p>
-                  {confirmListener.headline && (
-                    <p className="text-sm text-muted-foreground">{confirmListener.headline}</p>
-                  )}
-                </div>
-              </div>
-            )}
-            <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/50 rounded-lg p-3">
-              <ShieldCheck className="h-4 w-4 text-primary mt-0.5 shrink-0" />
-              <p>{tr("peer.privacy_note", "Your real name is never shown. Listeners are trained volunteers verified by our team.")}</p>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setConfirmListener(null)}>
-                {t("common.cancel")}
-              </Button>
-              <Button
-                onClick={() => confirmListener && startDirectSessionMutation.mutate(confirmListener.userId)}
-                disabled={startDirectSessionMutation.isPending}
-              >
-                {startDirectSessionMutation.isPending
-                  ? tr("common.loading", "Starting...")
-                  : tr("peer.start_session", "Start session")}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
     </AppLayout>
   );

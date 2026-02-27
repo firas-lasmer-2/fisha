@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Heart, LayoutDashboard, Users, MessageCircle,
   Calendar, CalendarDays, LogOut, UserCircle, AlertCircle,
-  ShieldCheck, Settings,
+  ShieldCheck, Settings, LifeBuoy,
 } from "lucide-react";
 
 function homeHrefForRole(role: string | null | undefined): string {
@@ -42,6 +42,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   const desktopNavItems = [
+    { href: "/support", icon: LifeBuoy, label: tr("nav.support_hub", "Find Support") },
     { href: "/therapists", icon: Users, label: t("nav.therapists") },
     { href: "/appointments", icon: Calendar, label: t("nav.appointments") },
     { href: "/messages", icon: MessageCircle, label: t("nav.messages") },

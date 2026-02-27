@@ -13,8 +13,14 @@ export interface DashboardNavItem {
   badge?: number;
 }
 
-interface DashboardSidebarLayoutProps {
+export interface DashboardNavGroup {
+  label: string;
   items: DashboardNavItem[];
+}
+
+interface DashboardSidebarLayoutProps {
+  items?: DashboardNavItem[]; // for backwards compatibility
+  groups?: DashboardNavGroup[];
   activeId: string;
   onNavigate: (id: string) => void;
   title: string;
@@ -25,6 +31,7 @@ interface DashboardSidebarLayoutProps {
 
 export function DashboardSidebarLayout({
   items,
+  groups,
   activeId,
   onNavigate,
   title,
@@ -35,36 +42,49 @@ export function DashboardSidebarLayout({
   const { isRTL } = useI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  // Normalize items to groups for rendering
+  const displayGroups: DashboardNavGroup[] = groups || (items ? [{ label: "", items }] : []);
+
   const navContent = (
-    <nav className="flex flex-col gap-1 p-2">
-      {items.map((item) => {
-        const Icon = item.icon;
-        const isActive = item.id === activeId;
-        return (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => {
-              onNavigate(item.id);
-              setMobileOpen(false);
-            }}
-            className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-              "hover:bg-accent hover:text-accent-foreground",
-              isActive && "bg-accent text-accent-foreground",
-              !isActive && "text-muted-foreground",
-            )}
-          >
-            <Icon className="h-4 w-4 shrink-0" />
-            <span className="truncate">{item.label}</span>
-            {item.badge != null && item.badge > 0 && (
-              <span className="ms-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-destructive-foreground">
-                {item.badge}
-              </span>
-            )}
-          </button>
-        );
-      })}
+    <nav className="flex flex-col gap-4 p-3">
+      {displayGroups.map((group, gIdx) => (
+        <div key={gIdx} className="space-y-1">
+          {group.label && (
+            <p className="px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 mb-2">
+              {group.label}
+            </p>
+          )}
+          <div className="space-y-1">
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              const isActive = item.id === activeId;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    onNavigate(item.id);
+                    setMobileOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                    "hover:bg-accent hover:text-accent-foreground",
+                    isActive ? "bg-primary/10 text-primary" : "text-muted-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{item.label}</span>
+                  {item.badge != null && item.badge > 0 && (
+                    <span className="ms-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
+                      {item.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </nav>
   );
 

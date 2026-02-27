@@ -2,7 +2,7 @@ import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/components/app-layout";
 import { DashboardSidebarLayout } from "@/components/dashboard-sidebar-layout";
-import type { DashboardNavItem } from "@/components/dashboard-sidebar-layout";
+import type { DashboardNavGroup, DashboardNavItem } from "@/components/dashboard-sidebar-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -94,6 +95,7 @@ export default function TherapistDashboardPage() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [acceptingNewClients, setAcceptingNewClients] = useState(true);
   const [respondingTo, setRespondingTo] = useState<number | null>(null);
+  const [selectedSessionNotesId, setSelectedSessionNotesId] = useState<number | null>(null);
   const [responseText, setResponseText] = useState("");
   const [formLoaded, setFormLoaded] = useState(false);
   const [slotStartsAt, setSlotStartsAt] = useState("");
@@ -378,17 +380,37 @@ export default function TherapistDashboardPage() {
     ? `/therapist/${profile.userId}`
     : null;
 
-  const navItems: DashboardNavItem[] = useMemo(() => [
-    { id: "overview", label: t("therapist_dash.overview"), icon: LayoutDashboard },
-    { id: "profile", label: t("therapist_dash.profile_tab"), icon: ClipboardList },
-    { id: "availability", label: t("therapist_dash.availability_tab"), icon: Calendar },
-    { id: "clients", label: t("therapist_dash.clients_tab"), icon: Users },
-    { id: "sessions", label: t("therapist_dash.sessions_tab"), icon: BookOpen },
-    { id: "reviews", label: t("therapist_dash.reviews_tab"), icon: MessageCircle },
-    { id: "earnings", label: t("therapist_dash.earnings_tab"), icon: DollarSign },
-    { id: "landing", label: t("therapist_dash.landing_tab"), icon: Globe },
-    { id: "verification", label: t("therapist_dash.verification_tab"), icon: ShieldCheck },
-    { id: "settings", label: t("therapist_dash.settings_tab"), icon: Settings },
+  const navGroups: DashboardNavGroup[] = useMemo(() => [
+    {
+      label: t("therapist_dash.group_overview"),
+      items: [
+        { id: "overview", label: t("therapist_dash.overview"), icon: LayoutDashboard },
+        { id: "verification", label: t("therapist_dash.verification_tab"), icon: ShieldCheck },
+      ]
+    },
+    {
+      label: t("therapist_dash.group_clients"),
+      items: [
+        { id: "sessions", label: t("therapist_dash.sessions_tab"), icon: BookOpen },
+        { id: "clients", label: t("therapist_dash.clients_tab"), icon: Users },
+        { id: "reviews", label: t("therapist_dash.reviews_tab"), icon: MessageCircle },
+      ]
+    },
+    {
+      label: t("therapist_dash.group_availability"),
+      items: [
+        { id: "availability", label: t("therapist_dash.availability_tab"), icon: Calendar },
+        { id: "earnings", label: t("therapist_dash.earnings_tab"), icon: DollarSign },
+      ]
+    },
+    {
+      label: t("therapist_dash.group_profile"),
+      items: [
+        { id: "profile", label: t("therapist_dash.profile_tab"), icon: ClipboardList },
+        { id: "landing", label: t("therapist_dash.landing_tab"), icon: Globe },
+        { id: "settings", label: t("therapist_dash.settings_tab"), icon: Settings },
+      ]
+    }
   ], [t]);
 
   if (isLoading) {
@@ -410,7 +432,7 @@ export default function TherapistDashboardPage() {
   return (
     <AppLayout>
       <DashboardSidebarLayout
-        items={navItems}
+        groups={navGroups}
         activeId={activeSection}
         onNavigate={setActiveSection}
         title={t("therapist_dash.title")}
@@ -426,75 +448,113 @@ export default function TherapistDashboardPage() {
       >
         <div className="space-y-6">
 
-        {/* Overview section — always show stats at top when on overview */}
+        {/* Overview section — Mission Control */}
         {activeSection === "overview" && (
-          <>
-        {/* Portfolio banner — motivational framing for new graduates */}
-        {totalSessions === 0 ? (
-          <div className="safe-surface rounded-xl p-4 flex items-start gap-3">
-            <div className="h-9 w-9 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
-              <GraduationCap className="h-4 w-4 text-primary" />
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold">{t("therapist_dash.mission_control")}</h2>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-muted-foreground">{t("therapist_dash.accepting_clients")}</span>
+                <Switch 
+                  checked={acceptingNewClients} 
+                  onCheckedChange={setAcceptingNewClients} 
+                />
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-medium">{t("therapist_dash.welcome_new")}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{t("therapist_dash.welcome_new_desc")}</p>
+
+            <div className="grid md:grid-cols-3 gap-6">
+              {/* Left Column: Today's Schedule */}
+              <div className="md:col-span-2 space-y-4">
+                <Card>
+                  <CardHeader className="pb-3 border-b">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-primary" />
+                      {t("therapist_dash.today_schedule")}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    {appointments.filter(a => new Date(a.scheduledAt).toDateString() === new Date().toDateString()).length > 0 ? (
+                      <div className="divide-y">
+                        {appointments
+                          .filter(a => new Date(a.scheduledAt).toDateString() === new Date().toDateString())
+                          .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())
+                          .map((apt) => (
+                          <div key={apt.id} className="p-4 flex items-center gap-4 hover:bg-muted/50 transition-colors">
+                            <div className="w-16 text-center shrink-0">
+                              <p className="text-lg font-bold">{new Date(apt.scheduledAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                            </div>
+                            <div className="w-1.5 h-12 bg-primary/20 rounded-full" />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-semibold truncate">{apt.otherUser.firstName} {apt.otherUser.lastName}</p>
+                              <p className="text-sm text-muted-foreground">{apt.durationMinutes} {t("common.minutes")}</p>
+                            </div>
+                            <Button size="sm" variant="outline" className="shrink-0" onClick={() => setSelectedSessionNotesId(apt.id)}>
+                              {t("therapist_dash.view_notes")}
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-8 text-center text-muted-foreground">
+                        <Calendar className="h-8 w-8 mx-auto mb-2 opacity-20" />
+                        <p>{t("therapist_dash.no_appointments_today")}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Right Column: Quick Stats & Actions */}
+              <div className="space-y-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">{t("therapist_dash.action_items")}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {reviews.some(r => !r.reply) && (
+                      <div className="flex items-start gap-2 text-sm">
+                        <div className="w-2 h-2 mt-1.5 rounded-full bg-amber-500" />
+                        <span className="flex-1 cursor-pointer hover:underline" onClick={() => setActiveSection("reviews")}>
+                          {reviews.filter(r => !r.reply).length} {t("therapist_dash.pending_reviews")}
+                        </span>
+                      </div>
+                    )}
+                    {!profile?.videoIntroUrl && (
+                      <div className="flex items-start gap-2 text-sm">
+                        <div className="w-2 h-2 mt-1.5 rounded-full bg-primary" />
+                        <span className="flex-1 cursor-pointer hover:underline" onClick={() => setActiveSection("landing")}>
+                          {t("therapist_dash.missing_video")}
+                        </span>
+                      </div>
+                    )}
+                    {openSlots.length === 0 && (
+                      <div className="flex items-start gap-2 text-sm">
+                        <div className="w-2 h-2 mt-1.5 rounded-full bg-destructive" />
+                        <span className="flex-1 cursor-pointer hover:underline" onClick={() => setActiveSection("availability")}>
+                          {t("therapist_dash.no_open_slots")}
+                        </span>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <Card className="bg-primary/5 border-primary/10">
+                    <CardContent className="p-4 text-center">
+                      <p className="text-2xl font-bold text-primary">{totalSessions}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{t("therapist_dash.total_sessions")}</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="bg-chart-4/5 border-chart-4/10">
+                    <CardContent className="p-4 text-center">
+                      <p className="text-2xl font-bold text-chart-4">{profile?.rating?.toFixed(1) || "0.0"}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{t("therapist_dash.avg_rating")}</p>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
             </div>
           </div>
-        ) : (profile?.reviewCount || 0) < 5 ? (
-          <div className="safe-surface rounded-xl p-4 flex items-start gap-3">
-            <div className="h-9 w-9 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
-              <GraduationCap className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <p className="text-sm font-medium">{t("therapist_dash.keep_going").replace("{count}", String(totalSessions))}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{t("therapist_dash.keep_going_desc").replace("{count}", String(5 - (profile?.reviewCount || 0)))}</p>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="grid sm:grid-cols-3 gap-4">
-          <Card data-testid="card-stat-reviews">
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-                <Star className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold" data-testid="text-total-reviews">
-                  {profile?.reviewCount || 0}
-                </p>
-                <p className="text-xs text-muted-foreground">{t("therapist_dash.total_reviews")}</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card data-testid="card-stat-rating">
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-md bg-chart-4/10 flex items-center justify-center shrink-0">
-                <BarChart3 className="h-5 w-5 text-chart-4" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold" data-testid="text-avg-rating">
-                  {profile?.rating?.toFixed(1) || "0.0"}
-                </p>
-                <p className="text-xs text-muted-foreground">{t("therapist_dash.avg_rating")}</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card data-testid="card-stat-sessions">
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-md bg-emerald-500/10 flex items-center justify-center shrink-0">
-                <Users className="h-5 w-5 text-emerald-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold" data-testid="text-total-sessions">
-                  {totalSessions}
-                </p>
-                <p className="text-xs text-muted-foreground">{t("therapist_dash.total_sessions")}</p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-          </>
         )}
 
         {/* Profile Section */}
@@ -1458,12 +1518,37 @@ export default function TherapistDashboardPage() {
 
         {/* Sessions Section */}
         {activeSection === "sessions" && (
-          <div className="space-y-4">
-            <SessionsTab appointments={appointments} userId={user?.id ?? ""} t={t} toast={toast} />
-          </div>
+          <SessionsTab appointments={appointments} userId={user?.id || ""} t={t} toast={toast} onOpenNotes={setSelectedSessionNotesId} />
         )}
 
         </div>
+        {/* Session Notes Drawer */}
+        <Sheet open={selectedSessionNotesId !== null} onOpenChange={(open) => !open && setSelectedSessionNotesId(null)}>
+          <SheetContent className="w-full sm:max-w-xl overflow-y-auto sm:border-l border-border p-0">
+            <div className="p-6 h-full flex flex-col">
+              <SheetHeader className="pb-4 border-b mb-4">
+                <SheetTitle>{t("therapist_dash.session_notes")}</SheetTitle>
+                <SheetDescription>
+                  {t("therapist_dash.session_notes_desc")}
+                </SheetDescription>
+              </SheetHeader>
+              <div className="flex-1 space-y-6">
+                {selectedSessionNotesId && (
+                  <>
+                    <SessionNotesPanel 
+                      appointmentId={selectedSessionNotesId} 
+                      therapistId={user?.id || ""} 
+                      clientId={appointments.find(a => a.id === selectedSessionNotesId)?.clientId || ""} 
+                      toast={toast} 
+                      t={t} 
+                    />
+                    <PrepViewPanel appointmentId={selectedSessionNotesId} t={t} />
+                  </>
+                )}
+              </div>
+            </div>
+          </SheetContent>
+        </Sheet>
       </DashboardSidebarLayout>
     </AppLayout>
   );
@@ -1475,17 +1560,17 @@ function SessionsTab({
   userId,
   t,
   toast,
+  onOpenNotes,
 }: {
   appointments: (Appointment & { otherUser: User })[];
   userId: string;
   t: (k: string) => string;
   toast: any;
+  onOpenNotes?: (id: number) => void;
 }) {
   const therapistAppointments = appointments
     .filter((a) => a.therapistId === userId)
     .sort((a, b) => (b.scheduledAt > a.scheduledAt ? 1 : -1));
-
-  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   if (therapistAppointments.length === 0) {
     return (
@@ -1509,11 +1594,7 @@ function SessionsTab({
       <CardContent className="space-y-2">
         {therapistAppointments.map((apt) => (
           <div key={apt.id} className="rounded-lg border overflow-hidden">
-            <button
-              type="button"
-              className="w-full flex items-center justify-between p-3 text-left hover:bg-muted/40 transition-colors"
-              onClick={() => setExpandedId(expandedId === apt.id ? null : apt.id)}
-            >
+            <div className="w-full flex items-center justify-between p-3 text-left hover:bg-muted/40 transition-colors">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 text-sm font-bold text-primary">
                   {(apt.otherUser.firstName?.[0] || "?").toUpperCase()}
@@ -1527,15 +1608,12 @@ function SessionsTab({
                   </p>
                 </div>
               </div>
-              {expandedId === apt.id ? <ChevronUp className="h-4 w-4 shrink-0" /> : <ChevronDown className="h-4 w-4 shrink-0" />}
-            </button>
-
-            {expandedId === apt.id && (
-              <div className="border-t p-3 space-y-4 bg-muted/20">
-                <SessionNotesPanel appointmentId={apt.id} therapistId={userId} clientId={apt.clientId} toast={toast} t={t} />
-                <PrepViewPanel appointmentId={apt.id} t={t} />
-              </div>
-            )}
+              {onOpenNotes && (
+                <Button size="sm" variant="outline" onClick={() => onOpenNotes(apt.id)}>
+                  {t("therapist_dash.view_notes")}
+                </Button>
+              )}
+            </div>
           </div>
         ))}
       </CardContent>
