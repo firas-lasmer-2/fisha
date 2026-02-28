@@ -1,6 +1,8 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AppLayout } from "@/components/app-layout";
+import { EmptyState } from "@/components/empty-state";
+import { PageError } from "@/components/page-error";
 import { DashboardSidebarLayout } from "@/components/dashboard-sidebar-layout";
 import type { DashboardNavItem } from "@/components/dashboard-sidebar-layout";
 import { useI18n } from "@/lib/i18n";
@@ -91,7 +93,7 @@ export default function AdminDashboardPage() {
     );
   }
 
-  const { data: analytics, isLoading: analyticsLoading } = useQuery<AdminAnalytics>({
+  const { data: analytics, isLoading: analyticsLoading, isError, error, refetch } = useQuery<AdminAnalytics>({
     queryKey: ["/api/admin/analytics"],
   });
 
@@ -292,6 +294,8 @@ export default function AdminDashboardPage() {
     );
     return items;
   }, [t, pendingVerifications.length, tierUpgradeRequests, contentFlags, user?.role]);
+
+  if (isError) return <AppLayout><div className="max-w-6xl mx-auto p-4 sm:p-6"><PageError error={error as Error} resetFn={refetch} /></div></AppLayout>;
 
   return (
     <AppLayout>
@@ -548,7 +552,11 @@ export default function AdminDashboardPage() {
                   {revenueLoading ? (
                     <Skeleton className="h-48 w-full" />
                   ) : revenueData.length === 0 ? (
-                    <p className="text-muted-foreground text-center py-8">{t("admin.no_revenue_data")}</p>
+                    <EmptyState
+                      icon={DollarSign}
+                      title={t("admin.no_revenue_data")}
+                      description="Revenue data will appear here once payments are processed."
+                    />
                   ) : (
                     <ResponsiveContainer width="100%" height={220}>
                       <LineChart data={revenueData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>

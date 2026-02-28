@@ -23,6 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { motion, AnimatePresence } from "framer-motion";
+import { fadeUp } from "@/lib/motion";
 import type { TherapistSlot } from "@shared/schema";
 
 // 07:00 – 20:00 (visible hours in day planner)
@@ -490,8 +491,16 @@ export function SlotCalendar({
                         key={hour}
                         type="button"
                         disabled={disabled}
+                        aria-label={`${formatHour(hour)}${occupied ? " — occupied" : isPast ? " — past" : selected ? " — selected" : " — available"}`}
+                        aria-pressed={selected}
                         onPointerDown={() => handleHourPointerDown(hour, disabled)}
                         onPointerEnter={() => handleHourPointerEnter(hour, disabled)}
+                        onKeyDown={(e) => {
+                          if ((e.key === "Enter" || e.key === " ") && !disabled) {
+                            e.preventDefault();
+                            handleHourPointerDown(hour, disabled);
+                          }
+                        }}
                         className={`
                           rounded-lg border py-2.5 text-xs font-medium transition-all touch-none
                           ${disabled

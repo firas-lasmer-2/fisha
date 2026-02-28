@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Heart, HeartHandshake, Sparkles, Users, Wind } from "lucide-react";
 import { motion } from "framer-motion";
+import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import type { OnboardingResponse, TherapistProfile, User } from "@shared/schema";
 
 function homeRouteForRole(role: string | null | undefined) {
@@ -22,6 +23,8 @@ export default function WelcomePage() {
   const { user } = useAuth();
   const { t } = useI18n();
   const [, navigate] = useLocation();
+  const rm = usePrefersReducedMotion();
+  const safeFadeUp = safeVariants(fadeUp, rm);
   const role = user?.role;
 
   const tr = (key: string, fallback: string) => {
@@ -80,9 +83,7 @@ export default function WelcomePage() {
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-b from-background to-muted/30">
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
+        custom={0} initial="hidden" animate="visible" variants={safeFadeUp}
         className="w-full max-w-2xl space-y-4"
       >
         <Card>

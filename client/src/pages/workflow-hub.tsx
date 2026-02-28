@@ -2,7 +2,11 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
+import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import { AppLayout } from "@/components/app-layout";
+import { PageHeader } from "@/components/page-header";
+import { PageError } from "@/components/page-error";
+import { PageSkeleton } from "@/components/page-skeleton";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -68,8 +72,10 @@ const roleText: Record<string, string> = {
 export default function WorkflowHubPage() {
   const { user } = useAuth();
   const fallbackRole = user?.role || "client";
+  const rm = usePrefersReducedMotion();
+  const safeFadeUp = safeVariants(fadeUp, rm);
 
-  const { data, isLoading } = useQuery<WorkflowOverviewPayload>({
+  const { data, isLoading, isError, error, refetch } = useQuery<WorkflowOverviewPayload>({
     queryKey: ["/api/workflow/overview"],
   });
 
@@ -153,15 +159,13 @@ export default function WorkflowHubPage() {
     ];
   }, [activeRole]);
 
-  const fadeUp = {
-    hidden: { opacity: 0, y: 16 },
-    visible: (i = 0) => ({ opacity: 1, y: 0, transition: { delay: i * 0.07, duration: 0.35, ease: "easeOut" } }),
-  };
+  if (isError) return <AppLayout><div className="max-w-6xl mx-auto p-4 sm:p-6"><PageError error={error as Error} resetFn={refetch} /></div></AppLayout>;
 
   return (
     <AppLayout>
       <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-5">
-        <motion.div custom={0} initial="hidden" animate="visible" variants={fadeUp}>
+        <PageHeader title={t("nav.home")} />
+        <motion.div custom={0} initial="hidden" animate="visible" variants={safeFadeUp}>
           <Card className="border-primary/30 bg-gradient-to-br from-primary/10 via-background to-background">
             <CardContent className="p-5 sm:p-6 space-y-3">
               <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -189,7 +193,7 @@ export default function WorkflowHubPage() {
             { label: "Active peer sessions", value: counts.activePeerSessions, icon: HeartHandshake },
             { label: "Completed peer sessions", value: counts.completedPeerSessions, icon: CheckCircle2 },
           ].map((item, idx) => (
-            <motion.div key={item.label} custom={idx + 1} initial="hidden" animate="visible" variants={fadeUp}>
+            <motion.div key={item.label} custom={idx + 1} initial="hidden" animate="visible" variants={safeFadeUp}>
               <Card className="h-full">
                 <CardContent className="p-4">
                   <p className="text-xs text-muted-foreground">{item.label}</p>
@@ -204,7 +208,7 @@ export default function WorkflowHubPage() {
         </div>
 
         {firstSteps && (
-          <motion.div custom={5} initial="hidden" animate="visible" variants={fadeUp}>
+          <motion.div custom={5} initial="hidden" animate="visible" variants={safeFadeUp}>
           <Card className="border-primary/40">
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
@@ -237,7 +241,7 @@ export default function WorkflowHubPage() {
           </motion.div>
         )}
 
-        <motion.div custom={6} initial="hidden" animate="visible" variants={fadeUp}>
+        <motion.div custom={6} initial="hidden" animate="visible" variants={safeFadeUp}>
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
             <CardHeader className="pb-2">
@@ -248,10 +252,7 @@ export default function WorkflowHubPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               {isLoading ? (
-                <div className="space-y-2">
-                  <Skeleton className="h-14 w-full" />
-                  <Skeleton className="h-14 w-full" />
-                </div>
+                <PageSkeleton variant="list" count={2} />
               ) : (data?.recommendations || []).length === 0 ? (
                 <p className="text-sm text-muted-foreground">No urgent actions. You are up to date.</p>
               ) : (
@@ -310,7 +311,7 @@ export default function WorkflowHubPage() {
         </div>
         </motion.div>
 
-        <motion.div custom={7} initial="hidden" animate="visible" variants={fadeUp}>
+        <motion.div custom={7} initial="hidden" animate="visible" variants={safeFadeUp}>
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">

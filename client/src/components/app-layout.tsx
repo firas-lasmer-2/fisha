@@ -7,6 +7,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { FeatureHint } from "@/components/feature-hint";
 import {
   Heart, HeartHandshake, LayoutDashboard, Users, MessageCircle,
   Calendar, CalendarDays, LogOut, UserCircle, AlertCircle,
@@ -99,6 +100,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Skip-to-content link — visible only on focus (keyboard users / screen readers) */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-[60] focus:bg-primary focus:text-primary-foreground focus:px-4 focus:py-2 focus:rounded-md focus:text-sm focus:font-medium"
+      >
+        {tr("a11y.skip_to_content", "Skip to main content")}
+      </a>
+
       <header className="fixed top-0 left-0 right-0 z-50 glass-effect border-b h-14" data-testid="app-header">
         <div className="max-w-7xl mx-auto px-4 h-full flex items-center justify-between">
           <Link href={user ? homeHrefForRole(currentRole) : "/"} className="flex items-center gap-2" data-testid="link-app-home">
@@ -108,7 +117,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <span className="font-bold text-gradient">{t("app.name")}</span>
           </Link>
 
-          <nav className="hidden lg:flex items-center gap-1" data-testid="nav-desktop">
+          <nav className="hidden lg:flex items-center gap-1" aria-label={tr("a11y.main_nav", "Main navigation")} data-testid="nav-desktop">
             {desktopNavItems.map((item) => (
               <Link key={item.href} href={item.href}>
                 <Button
@@ -137,7 +146,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                   className="gap-1.5 text-xs hidden lg:flex"
                 >
                   <Settings className="h-3.5 w-3.5" />
-                  {t("nav.settings") !== "nav.settings" ? t("nav.settings") : "Settings"}
+                  {t("nav.settings")}
                 </Button>
               </Link>
             )}
@@ -158,13 +167,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className="pt-14 min-h-screen pb-20 md:pb-0">
+      <main id="main-content" className="pt-14 min-h-screen pb-20 md:pb-0">
         {children}
       </main>
 
       <nav
         className="fixed bottom-0 inset-x-0 z-40 border-t bg-background/95 backdrop-blur md:hidden"
         style={{ paddingBottom: "max(env(safe-area-inset-bottom), 0.25rem)" }}
+        aria-label={tr("a11y.main_nav", "Main navigation")}
         data-testid="bottom-nav"
       >
         <div className="grid grid-cols-5 gap-1 px-2 py-1">
@@ -175,7 +185,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 onClick={() => {
                   triggerHaptic("selection");
                 }}
-                className={`w-full rounded-lg py-2 flex flex-col items-center justify-center gap-1 text-[11px] ${
+                aria-label={item.label}
+                aria-current={item.active ? "page" : undefined}
+                className={`w-full rounded-lg py-2.5 flex flex-col items-center justify-center gap-1 text-[11px] ${
                   item.active ? "text-primary bg-primary/20 font-medium" : "text-muted-foreground"
                 }`}
                 data-testid={`bottom-nav-${item.key}`}
@@ -194,19 +206,22 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       </nav>
 
       {user && (
-        <Link href="/crisis">
-          <Button
-            variant="outline"
-            onClick={() => {
-              triggerHaptic("medium");
-            }}
-            className="fixed bottom-24 md:bottom-6 end-4 md:end-6 z-50 rounded-full h-11 px-4 border-destructive/30 text-destructive bg-background/95 backdrop-blur shadow-lg hover:bg-destructive hover:text-destructive-foreground active:bg-destructive active:text-destructive-foreground"
-            data-testid="button-sos"
-          >
-            <AlertCircle className="h-4 w-4 me-2" />
-            SOS
-          </Button>
-        </Link>
+        <FeatureHint id="sos-button" content={t("hint.sos_button")} side="top">
+          <Link href="/crisis">
+            <Button
+              variant="outline"
+              onClick={() => {
+                triggerHaptic("medium");
+              }}
+              aria-label={tr("a11y.sos_crisis", "SOS — Crisis support")}
+              className="fixed bottom-24 md:bottom-6 end-4 md:end-6 z-50 rounded-full h-11 px-4 border-destructive/30 text-destructive bg-background/95 backdrop-blur shadow-lg hover:bg-destructive hover:text-destructive-foreground active:bg-destructive active:text-destructive-foreground"
+              data-testid="button-sos"
+            >
+              <AlertCircle className="h-4 w-4 me-2" />
+              SOS
+            </Button>
+          </Link>
+        </FeatureHint>
       )}
     </div>
   );

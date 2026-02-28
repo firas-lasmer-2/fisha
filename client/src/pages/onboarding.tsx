@@ -15,6 +15,7 @@ import { Heart, ArrowRight, ArrowLeft, Check, Loader2, AtSign, X } from "lucide-
 import { useMutation } from "@tanstack/react-query";
 import { getAccessToken } from "@/lib/supabase";
 import { motion } from "framer-motion";
+import { usePrefersReducedMotion } from "@/lib/motion";
 
 const CONCERNS = [
   "anxiety",
@@ -51,6 +52,7 @@ export default function OnboardingPage() {
   const { toast } = useToast();
   const { user } = useAuth();
   const [, navigate] = useLocation();
+  const rm = usePrefersReducedMotion();
 
   const role = user?.role ?? "client";
 
@@ -276,7 +278,7 @@ export default function OnboardingPage() {
               <motion.div
                 className="h-full bg-primary"
                 animate={{ width: `${progressRatio * 100}%` }}
-                transition={{ type: "spring", stiffness: 140, damping: 18 }}
+                transition={rm ? { duration: 0 } : { type: "spring", stiffness: 140, damping: 18 }}
               />
             </div>
             <p className="text-xs text-muted-foreground">
@@ -285,7 +287,7 @@ export default function OnboardingPage() {
           </div>
         </CardHeader>
 
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-6" aria-live="polite">
           {/* ── CLIENT FLOW ── */}
           {role === "client" && step === 0 && (
             <div className="space-y-4">
@@ -298,8 +300,9 @@ export default function OnboardingPage() {
                     <motion.button
                       key={concern}
                       type="button"
-                      whileTap={{ scale: 0.96 }}
-                      animate={selected ? { scale: [1, 1.03, 1] } : { scale: 1 }}
+                      aria-pressed={selected}
+                      whileTap={rm ? {} : { scale: 0.96 }}
+                      animate={rm ? {} : selected ? { scale: [1, 1.03, 1] } : { scale: 1 }}
                       transition={{ duration: 0.2 }}
                       onClick={() => toggleConcern(concern)}
                     >

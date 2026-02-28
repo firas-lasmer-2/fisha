@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
 import { AnimatePresence, motion } from "framer-motion";
+import { usePrefersReducedMotion } from "@/lib/motion";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { OfflineIndicator } from "@/components/offline-indicator";
 import LandingPage from "@/pages/landing";
@@ -141,14 +142,15 @@ function DashboardRoute() {
 
 function Router() {
   const [location] = useLocation();
+  const reducedMotion = usePrefersReducedMotion();
 
   return (
     <AnimatePresence mode="wait" initial={false}>
       <motion.div
         key={location}
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -8 }}
+        initial={reducedMotion ? false : { opacity: 0, y: 10 }}
+        animate={reducedMotion ? {} : { opacity: 1, y: 0 }}
+        exit={reducedMotion ? {} : { opacity: 0, y: -8 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
       >
         <Switch location={location}>

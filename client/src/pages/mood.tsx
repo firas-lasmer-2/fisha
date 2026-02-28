@@ -9,8 +9,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Smile, TrendingUp, Loader2, Sparkles } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
+import { EmptyState } from "@/components/empty-state";
+import { PageError } from "@/components/page-error";
+import { PageSkeleton } from "@/components/page-skeleton";
 import type { MoodEntry } from "@shared/schema";
 
 const moodOptions = [
@@ -21,19 +26,16 @@ const moodOptions = [
   { score: 5, emoji: "😊", label: "Great", color: "bg-emerald-100 dark:bg-emerald-900/30 border-emerald-300 dark:border-emerald-700" },
 ];
 
-const fadeUp = {
-  hidden: { opacity: 0, y: 14 },
-  visible: (i = 0) => ({ opacity: 1, y: 0, transition: { delay: i * 0.08, duration: 0.3, ease: "easeOut" } }),
-};
-
 export default function MoodPage() {
   const { t, isRTL } = useI18n();
   const { user } = useAuth();
   const [selectedMood, setSelectedMood] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [selectedEmotions, setSelectedEmotions] = useState<string[]>([]);
+  const reducedMotion = usePrefersReducedMotion();
+  const safeFadeUp = safeVariants(fadeUp, reducedMotion);
 
-  const { data: entries, isLoading } = useQuery<MoodEntry[]>({
+  const { data: entries, isLoading, isError, error, refetch } = useQuery<MoodEntry[]>({
     queryKey: ["/api/mood"],
   });
 
@@ -85,12 +87,15 @@ export default function MoodPage() {
     (e) => e.createdAt && new Date(e.createdAt).toDateString() === new Date().toDateString(),
   );
 
+  if (isError) return <AppLayout><div className="max-w-4xl mx-auto p-4 sm:p-6"><PageError error={error as Error} resetFn={refetch} /></div></AppLayout>;
+
   return (
     <AppLayout>
       <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
 
         {/* Page hero */}
-        <motion.div custom={0} initial="hidden" animate="visible" variants={fadeUp}>
+        <PageHeader title={t("nav.mood")} />
+        <motion.div custom={0} initial="hidden" animate="visible" variants={safeFadeUp}>
           <div className="rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border p-5 sm:p-6 flex items-start gap-4">
             <div className="h-12 w-12 rounded-xl gradient-calm flex items-center justify-center shrink-0">
               <Smile className="h-6 w-6 text-white" />
@@ -130,7 +135,7 @@ export default function MoodPage() {
         </motion.div>
 
         {/* Mood check-in card */}
-        <motion.div custom={1} initial="hidden" animate="visible" variants={fadeUp}>
+        <motion.div custom={1} initial="hidden" animate="visible" variants={safeFadeUp}>
           <Card data-testid="card-mood-checkin">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -148,7 +153,7 @@ export default function MoodPage() {
                     whileTap={{ scale: 0.94 }}
                     animate={selectedMood === opt.score ? { scale: 1.12, y: -4 } : { scale: 1, y: 0 }}
                     transition={{ type: "spring", stiffness: 350, damping: 20 }}
-                    className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-colors ${
+                    className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-colors min-h-[44px] min-w-[44px] ${
                       selectedMood === opt.score
                         ? opt.color
                         : "border-transparent hover:border-border/60"
@@ -214,7 +219,7 @@ export default function MoodPage() {
         </motion.div>
 
         {/* History */}
-        <motion.div custom={2} initial="hidden" animate="visible" variants={fadeUp}>
+        <motion.div custom={2} initial="hidden" animate="visible" variants={safeFadeUp}>
           <Card data-testid="card-mood-history">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -224,9 +229,7 @@ export default function MoodPage() {
             </CardHeader>
             <CardContent>
               {isLoading ? (
-                <div className="space-y-3">
-                  {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
-                </div>
+                <PageSkeleton variant="list" count={3} />
               ) : entries && entries.length > 0 ? (
                 <div className="space-y-2">
                   <AnimatePresence initial={false}>
@@ -260,11 +263,11 @@ export default function MoodPage() {
                   </AnimatePresence>
                 </div>
               ) : (
-                <div className="text-center py-12 text-muted-foreground">
-                  <Smile className="h-12 w-12 mx-auto mb-3 opacity-20" />
-                  <p className="text-sm font-medium">No entries yet</p>
-                  <p className="text-xs mt-1">{t("mood.no_entries")}</p>
-                </div>
+                <EmptyState
+                  icon={Smile}
+                  title="No entries yet"
+                  description={t("mood.no_entries")}
+                />
               )}
             </CardContent>
           </Card>

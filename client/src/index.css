@@ -419,4 +419,64 @@
     transform: scale(0.98);
     opacity: 0.92;
   }
+
+  /* ---------------------------------------------------------------------- */
+  /* Reduced motion: disable ALL decorative animations for users who prefer  */
+  /* reduced motion (WCAG 2.3.3 / prefers-reduced-motion)                   */
+  /* ---------------------------------------------------------------------- */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    /* Floating decorative blobs */
+    .animate-float,
+    .animate-float-delayed,
+    .animate-float-slow {
+      animation: none !important;
+    }
+
+    /* Pulsing decorative elements */
+    .animate-pulse-soft {
+      animation: none !important;
+      opacity: 0.6;
+    }
+
+    /* Breathing circle - show static shape, no scale animation */
+    .breathing-circle.inhale,
+    .breathing-circle.hold,
+    .breathing-circle.exhale {
+      animation: none !important;
+      transform: scale(1);
+      opacity: 0.8;
+    }
+
+    /* Progress bar - jump straight to final state */
+    .progress-animated {
+      animation: none !important;
+      width: var(--progress-width, 0%);
+    }
+
+    /* Page transition */
+    .page-transition-enter {
+      animation: none !important;
+    }
+
+    /* Card hover lift */
+    .card-premium:hover {
+      transform: none;
+    }
+
+    /* Mood emoji buttons */
+    .mood-btn:hover,
+    .mood-btn.selected {
+      transform: none;
+    }
+
+    /* Mobile tap feedback */
+    .tap-feedback:active {
+      transform: none;
+      opacity: 1;
+    }
+  }
 }

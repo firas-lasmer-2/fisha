@@ -2,7 +2,6 @@ import { useI18n } from "@/lib/i18n";
 import { AppLayout } from "@/components/app-layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useQuery } from "@tanstack/react-query";
@@ -10,6 +9,9 @@ import { Library, Clock, BookOpen, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
 import type { Resource } from "@shared/schema";
+import { PageSkeleton } from "@/components/page-skeleton";
+import { EmptyState } from "@/components/empty-state";
+import { PageHeader } from "@/components/page-header";
 
 export default function ResourcesPage() {
   const { t, isRTL, language } = useI18n();
@@ -44,7 +46,7 @@ export default function ResourcesPage() {
   return (
     <AppLayout>
       <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
-        <h1 className="text-2xl font-bold" data-testid="text-resources-title">{t("nav.resources")}</h1>
+        <PageHeader title={t("nav.resources")} testId="text-resources-title" />
 
         <div className="relative">
           <Search className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -80,9 +82,7 @@ export default function ResourcesPage() {
         </div>
 
         {isLoading ? (
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-32 w-full" />)}
-          </div>
+          <PageSkeleton variant="grid" count={6} />
         ) : resourceList && resourceList.length > 0 ? (
           <div className="grid sm:grid-cols-2 gap-4">
             {resourceList.filter((resource) => {
@@ -115,10 +115,11 @@ export default function ResourcesPage() {
             ))}
           </div>
         ) : (
-          <div className="text-center py-16 text-muted-foreground">
-            <Library className="h-12 w-12 mx-auto mb-3 opacity-30" />
-            <p className="text-sm">{t("resources.no_resources")}</p>
-          </div>
+          <EmptyState
+            icon={Library}
+            title={t("resources.no_resources")}
+            description={t("resources.no_resources_desc") !== "resources.no_resources_desc" ? t("resources.no_resources_desc") : undefined}
+          />
         )}
       </div>
 

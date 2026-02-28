@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
 import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
+import { scrollReveal, staggerContainer, fadeUp, usePrefersReducedMotion, safeVariants, safeScrollReveal } from "@/lib/motion";
 import {
   Heart, MessageCircle, Brain, Shield, Sparkles, BookOpen,
   Users, Star, Phone, ArrowRight, ArrowLeft, Smile,
@@ -15,27 +16,14 @@ import {
   GraduationCap, HeartHandshake,
 } from "lucide-react";
 
-const fadeIn = {
-  initial: { opacity: 0, y: 20 },
-  animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.5 },
-};
-
-const stagger = {
-  animate: { transition: { staggerChildren: 0.1 } },
-};
-
-const scrollReveal = {
-  initial: { opacity: 0, y: 30 },
-  whileInView: { opacity: 1, y: 0 },
-  viewport: { once: true },
-  transition: { duration: 0.6 },
-};
-
 export default function LandingPage() {
   const { t, isRTL } = useI18n();
   const { user, isLoading } = useAuth();
   const [, navigate] = useLocation();
+  const rm = usePrefersReducedMotion();
+  const safeFadeUp = safeVariants(fadeUp, rm);
+  const safeStagger = safeVariants(staggerContainer, rm);
+  const safeReveal = safeScrollReveal(rm);
   const Arrow = isRTL ? ArrowLeft : ArrowRight;
   const currentYear = new Date().getFullYear();
 
@@ -107,11 +95,11 @@ export default function LandingPage() {
 
         <motion.div
           className="max-w-4xl mx-auto text-center relative z-10"
-          initial="initial"
-          animate="animate"
-          variants={stagger}
+          initial="hidden"
+          animate="visible"
+          variants={safeStagger}
         >
-          <motion.div variants={fadeIn}>
+          <motion.div variants={safeFadeUp}>
             <Badge variant="secondary" className="mb-6 px-4 py-1.5 text-sm">
               <Sparkles className="h-3.5 w-3.5 me-1.5" />
               {t("landing.badge_first_platform")}
@@ -119,20 +107,20 @@ export default function LandingPage() {
           </motion.div>
 
           <motion.h1
-            variants={fadeIn}
+            variants={safeFadeUp}
             className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight mb-6"
           >
             <span className="text-gradient">{t("landing.hero.title")}</span>
           </motion.h1>
 
           <motion.p
-            variants={fadeIn}
+            variants={safeFadeUp}
             className="text-lg sm:text-xl text-muted-foreground max-w-2xl mx-auto mb-10 leading-relaxed"
           >
             {t("landing.hero.subtitle")}
           </motion.p>
 
-          <motion.div variants={fadeIn} className="flex flex-col sm:flex-row gap-4 justify-center">
+          <motion.div variants={safeFadeUp} className="flex flex-col sm:flex-row gap-4 justify-center">
             <a href={user ? "/dashboard" : "/login"}>
               <Button size="lg" className="text-base gap-2 w-full sm:w-auto" data-testid="button-hero-cta">
                 {t("landing.hero.cta")}
@@ -147,7 +135,7 @@ export default function LandingPage() {
           </motion.div>
 
           <motion.div
-            variants={fadeIn}
+            variants={safeFadeUp}
             className="mt-14 max-w-3xl mx-auto"
           >
             <p className="text-sm text-muted-foreground mb-5 font-medium">{t("onboarding.what_brings")}</p>
@@ -193,7 +181,7 @@ export default function LandingPage() {
               <motion.div
                 key={i}
                 className="flex items-center gap-3"
-                {...scrollReveal}
+                {...safeReveal}
                 transition={{ delay: i * 0.1, duration: 0.5 }}
               >
                 <div className="trust-icon bg-primary/10 shrink-0">
@@ -210,7 +198,7 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto">
           <motion.h2
             className="text-3xl sm:text-4xl font-bold text-center mb-16"
-            {...scrollReveal}
+            {...safeReveal}
           >
             {t("landing.how.title")}
           </motion.h2>
@@ -228,7 +216,7 @@ export default function LandingPage() {
                 <motion.div
                   key={i}
                   className="text-center relative"
-                  {...scrollReveal}
+                  {...safeReveal}
                   transition={{ delay: i * 0.15, duration: 0.5 }}
                 >
                   <div className="w-14 h-14 rounded-full gradient-calm flex items-center justify-center mx-auto mb-4 relative z-10">
@@ -248,7 +236,7 @@ export default function LandingPage() {
 
       <section className="py-20 px-4 bg-card/50 pattern-dots" data-testid="section-features">
         <div className="max-w-6xl mx-auto">
-          <motion.div className="text-center mb-16" {...scrollReveal}>
+          <motion.div className="text-center mb-16" {...safeReveal}>
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">{t("landing.features.title")}</h2>
             <p className="text-muted-foreground text-lg max-w-xl mx-auto">
               {t("landing.features.subtitle")}
@@ -266,7 +254,7 @@ export default function LandingPage() {
             ].map((feature, i) => (
               <motion.div
                 key={i}
-                {...scrollReveal}
+                {...safeReveal}
                 transition={{ delay: i * 0.08, duration: 0.5 }}
               >
                 <Card className="h-full hover-elevate transition-all duration-200">
@@ -286,7 +274,7 @@ export default function LandingPage() {
 
       <section className="py-20 px-4" data-testid="section-selfcare-preview">
         <div className="max-w-5xl mx-auto">
-          <motion.div className="text-center mb-12" {...scrollReveal}>
+          <motion.div className="text-center mb-12" {...safeReveal}>
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">{t("landing.selfcare_preview.title")}</h2>
             <p className="text-muted-foreground text-lg max-w-xl mx-auto">
               {t("landing.selfcare_preview.desc")}
@@ -294,7 +282,7 @@ export default function LandingPage() {
           </motion.div>
 
           <div className="grid md:grid-cols-2 gap-6">
-            <motion.div {...scrollReveal} transition={{ delay: 0.1, duration: 0.5 }}>
+            <motion.div {...safeReveal} transition={rm ? { duration: 0 } : { delay: 0.1, duration: 0.5 }}>
               <Card className="h-full">
                 <CardContent className="p-8 flex flex-col items-center text-center">
                   <div className="breathing-circle mb-6">
@@ -317,7 +305,7 @@ export default function LandingPage() {
               </Card>
             </motion.div>
 
-            <motion.div {...scrollReveal} transition={{ delay: 0.2, duration: 0.5 }}>
+            <motion.div {...safeReveal} transition={rm ? { duration: 0 } : { delay: 0.2, duration: 0.5 }}>
               <Card className="h-full">
                 <CardContent className="p-8 flex flex-col items-center text-center">
                   <div className="w-20 h-20 rounded-full bg-chart-3/10 flex items-center justify-center mb-6">
@@ -337,7 +325,7 @@ export default function LandingPage() {
 
           <motion.div
             className="flex justify-center mt-8"
-            {...scrollReveal}
+            {...safeReveal}
             transition={{ delay: 0.3, duration: 0.5 }}
           >
             <Link href="/self-care">
@@ -354,7 +342,7 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto">
           <motion.h2
             className="text-3xl sm:text-4xl font-bold text-center mb-12"
-            {...scrollReveal}
+            {...safeReveal}
           >
             {t("landing.testimonials.title")}
           </motion.h2>
@@ -382,7 +370,7 @@ export default function LandingPage() {
             ].map((testimonial, i) => (
               <motion.div
                 key={i}
-                {...scrollReveal}
+                {...safeReveal}
                 transition={{ delay: i * 0.1, duration: 0.5 }}
               >
                 <Card className="h-full" data-testid={`card-testimonial-${i}`}>
@@ -409,7 +397,7 @@ export default function LandingPage() {
         <div className="max-w-3xl mx-auto">
           <motion.div
             className="gradient-calm rounded-md p-10 sm:p-14 text-center text-white relative overflow-hidden"
-            {...scrollReveal}
+            {...safeReveal}
           >
             <div className="absolute inset-0 opacity-10 pointer-events-none">
               <div className="absolute top-0 end-0 w-48 h-48 bg-white rounded-full blur-3xl" />

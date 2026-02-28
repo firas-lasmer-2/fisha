@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/app-layout";
+import { PageHeader } from "@/components/page-header";
 import { useAuth } from "@/hooks/use-auth";
 import { useI18n } from "@/lib/i18n";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -12,6 +13,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { PageSkeleton } from "@/components/page-skeleton";
+import { EmptyState } from "@/components/empty-state";
+import { PageError } from "@/components/page-error";
 import {
   Dialog,
   DialogContent,
@@ -33,8 +37,10 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
+import { fadeUp, cardStagger, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import type { BrowsableListener, ListenerCooldown, PeerMessage, PeerSession, User } from "@shared/schema";
 import { Link } from "wouter";
+import { FeatureHint } from "@/components/feature-hint";
 
 interface PeerSessionsResponse {
   sessions: (PeerSession & { otherUser: User })[];
@@ -64,6 +70,9 @@ export default function PeerSupportPage() {
   const { t } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
+  const rm = usePrefersReducedMotion();
+  const safeFadeUp = safeVariants(fadeUp, rm);
+  const safeCardStagger = safeVariants(cardStagger, rm);
 
   const tr = (key: string, fallback: string) => {
     const value = t(key);
@@ -108,7 +117,7 @@ export default function PeerSupportPage() {
     enabled: user?.role === "listener",
   });
 
-  const { data: listeners = [], isLoading: listenersLoading } = useQuery<BrowsableListener[]>({
+  const { data: listeners = [], isLoading: listenersLoading, isError: listenersError, error: listenersErrorObj, refetch: refetchListeners } = useQuery<BrowsableListener[]>({
     queryKey: ["/api/listeners/browse", filterLanguage, filterTopic, filterAvailable],
     queryFn: async () => {
       const params = new URLSearchParams();
@@ -351,7 +360,11 @@ export default function PeerSupportPage() {
             <HeartHandshake className="h-6 w-6 text-primary" />
           </div>
           <div>
-            <h1 className="text-xl font-bold leading-tight">{tr("peer.directory_title", "Peer Listeners")}</h1>
+            <h1 className="text-xl font-bold leading-tight">
+              <FeatureHint id="peer-support" content={t("hint.peer_support")} side="bottom" delayMs={1500}>
+                <span>{tr("peer.directory_title", "Peer Listeners")}</span>
+              </FeatureHint>
+            </h1>
             <p className="text-sm text-muted-foreground">
               {tr("peer.directory_subtitle", "Free, private conversations with trained volunteers")}
             </p>
@@ -465,22 +478,13 @@ export default function PeerSupportPage() {
 
       {/* Listener grid */}
       {listenersLoading ? (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {[1, 2, 3, 4, 5, 6].map((i) => (
-            <Skeleton key={i} className="h-44 rounded-xl" />
-          ))}
-        </div>
+        <PageSkeleton variant="grid" count={6} />
       ) : filteredListeners.length === 0 ? (
-        <div className="py-16 text-center space-y-3 text-muted-foreground">
-          <Users className="h-10 w-10 mx-auto opacity-30" />
-          <p className="text-sm">No listeners match your filters right now.</p>
-          <button
-            onClick={() => { setFilterLanguage(""); setFilterTopic(""); setFilterAvailable(false); setSearchQuery(""); }}
-            className="text-xs underline underline-offset-2 hover:text-foreground transition-colors"
-          >
-            Clear all filters
-          </button>
-        </div>
+        <EmptyState
+          icon={Users}
+          title="No listeners match your filters right now."
+          action={{ label: "Clear all filters", onClick: () => { setFilterLanguage(""); setFilterTopic(""); setFilterAvailable(false); setSearchQuery(""); } }}
+        />
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <AnimatePresence initial={false}>
@@ -797,6 +801,7 @@ export default function PeerSupportPage() {
                 onClick={() => sendMessageMutation.mutate()}
                 disabled={!canSend || sendMessageMutation.isPending}
                 size="icon"
+                aria-label={t("peer.send_message") === "peer.send_message" ? "Send message" : t("peer.send_message")}
                 data-testid="button-peer-send"
               >
                 <Send className="h-4 w-4" />
@@ -822,9 +827,12 @@ export default function PeerSupportPage() {
     </div>
   );
 
+  if (listenersError) return <AppLayout><div className="max-w-4xl mx-auto p-4 sm:p-6"><PageError error={listenersErrorObj as Error} resetFn={refetchListeners} /></div></AppLayout>;
+
   return (
     <AppLayout>
       <div className="max-w-4xl mx-auto p-4 sm:p-6">
+        <PageHeader title="Peer Support" />
         {/* Mobile tab strip */}
         <div className="sm:hidden flex gap-1 mb-4 bg-muted/50 p-1 rounded-lg">
           <button

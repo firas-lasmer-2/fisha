@@ -4,13 +4,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { BookOpen, Plus, Trash2, Pencil, Calendar, Loader2, Sparkles } from "lucide-react";
 import { useState } from "react";
 import type { JournalEntry } from "@shared/schema";
+import { PageSkeleton } from "@/components/page-skeleton";
+import { EmptyState } from "@/components/empty-state";
+import { PageHeader } from "@/components/page-header";
+import { FeatureHint } from "@/components/feature-hint";
 
 export default function JournalPage() {
   const { t } = useI18n();
@@ -82,9 +85,11 @@ export default function JournalPage() {
   return (
     <AppLayout>
       <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold" data-testid="text-journal-title">{t("nav.journal")}</h1>
-          <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setEditingEntry(null); setTitle(""); setContent(""); } }}>
+        <PageHeader
+          title={t("nav.journal")}
+          testId="text-journal-title"
+          action={
+            <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setEditingEntry(null); setTitle(""); setContent(""); } }}>
             <DialogTrigger asChild>
               <Button className="gap-2" data-testid="button-new-journal">
                 <Plus className="h-4 w-4" />
@@ -137,27 +142,28 @@ export default function JournalPage() {
               </div>
             </DialogContent>
           </Dialog>
-        </div>
+          }
+        />
 
         {/* Today's prompt — inline, visible without clicking */}
-        <button
-          type="button"
-          className="w-full text-start safe-surface rounded-xl p-4 space-y-1 hover:opacity-90 transition-opacity"
-          onClick={() => { setTitle(todayPrompt); setDialogOpen(true); }}
-          data-testid="card-daily-prompt"
-        >
-          <p className="text-xs font-semibold flex items-center gap-1.5 text-primary">
-            <Sparkles className="h-3.5 w-3.5" />
-            Today's prompt
-          </p>
-          <p className="text-sm text-muted-foreground leading-relaxed">{todayPrompt}</p>
-          <p className="text-xs text-primary/70 mt-1">Tap to start writing →</p>
-        </button>
+        <FeatureHint id="journal-prompt" content={t("hint.journal_prompt")} side="bottom" delayMs={1500}>
+          <button
+            type="button"
+            className="w-full text-start safe-surface rounded-xl p-4 space-y-1 hover:opacity-90 transition-opacity"
+            onClick={() => { setTitle(todayPrompt); setDialogOpen(true); }}
+            data-testid="card-daily-prompt"
+          >
+            <p className="text-xs font-semibold flex items-center gap-1.5 text-primary">
+              <Sparkles className="h-3.5 w-3.5" />
+              Today's prompt
+            </p>
+            <p className="text-sm text-muted-foreground leading-relaxed">{todayPrompt}</p>
+            <p className="text-xs text-primary/70 mt-1">Tap to start writing →</p>
+          </button>
+        </FeatureHint>
 
         {isLoading ? (
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-24 w-full" />)}
-          </div>
+          <PageSkeleton variant="list" count={3} />
         ) : entries && entries.length > 0 ? (
           <div className="space-y-4">
             {entries.map((entry) => (
@@ -207,11 +213,11 @@ export default function JournalPage() {
             ))}
           </div>
         ) : (
-          <div className="text-center py-16 text-muted-foreground">
-            <BookOpen className="h-12 w-12 mx-auto mb-3 opacity-30" />
-            <p className="text-sm">{t("journal.no_entries")}</p>
-            <p className="text-xs mt-1">{t("journal.start_writing")}</p>
-          </div>
+          <EmptyState
+            icon={BookOpen}
+            title={t("journal.no_entries")}
+            description={t("journal.start_writing")}
+          />
         )}
       </div>
     </AppLayout>

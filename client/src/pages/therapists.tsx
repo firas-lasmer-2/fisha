@@ -1,6 +1,7 @@
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/components/app-layout";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -22,30 +23,19 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useOnlineTherapists } from "@/hooks/use-online-therapists";
 import { motion } from "framer-motion";
+import { chipEnter, cardStagger, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import type { TherapistProfile, User } from "@shared/schema";
-
-const filterChipVariants = {
-  hidden: { opacity: 0, y: 10 },
-  visible: (i: number) => ({
-    opacity: 1,
-    y: 0,
-    transition: { delay: i * 0.05, duration: 0.3 },
-  }),
-};
-
-const cardVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: (i: number) => ({
-    opacity: 1,
-    y: 0,
-    transition: { delay: i * 0.08, duration: 0.4 },
-  }),
-};
+import { FeatureHint } from "@/components/feature-hint";
+import { EmptyState } from "@/components/empty-state";
+import { PageError } from "@/components/page-error";
 
 export default function TherapistsPage() {
   const { t, isRTL } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
+  const rm = usePrefersReducedMotion();
+  const safeChipEnter = safeVariants(chipEnter, rm);
+  const safeCardStagger = safeVariants(cardStagger, rm);
   const [, navigate] = useLocation();
   const tr = (key: string, fallback: string) => {
     const value = t(key);
@@ -93,7 +83,7 @@ export default function TherapistsPage() {
     ? `/api/therapists?${queryStrString}`
     : "/api/therapists";
 
-  const { data: therapists, isLoading } = useQuery<
+  const { data: therapists, isLoading, isError, error, refetch } = useQuery<
     (TherapistProfile & { user: User })[]
   >({
     queryKey: [therapistsUrl],
@@ -185,11 +175,14 @@ export default function TherapistsPage() {
   const hasActiveFilters = !!(specialization || language || gender || tier || onlineOnly || budget);
   const totalResults = filteredTherapists?.length ?? 0;
 
+  if (isError) return <AppLayout><div className="max-w-5xl mx-auto p-4 sm:p-6"><PageError error={error as Error} resetFn={refetch} /></div></AppLayout>;
+
   return (
     <AppLayout>
       <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-5">
 
         {/* ── Hero ── */}
+        <PageHeader title={t("nav.therapists")} />
         <div className="space-y-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold" data-testid="text-therapists-title">
@@ -199,17 +192,19 @@ export default function TherapistsPage() {
           </div>
 
           {/* Search */}
-          <div className="relative">
-            <Search className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder={t("therapist.search_placeholder")}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="ps-10 h-11 text-base"
-              data-testid="input-search-therapists"
-            />
-          </div>
+          <FeatureHint id="ai-match" content={t("hint.ai_match")} side="bottom" delayMs={1500}>
+            <div className="relative">
+              <Search className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="search"
+                placeholder={t("therapist.search_placeholder")}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="ps-10 h-11 text-base"
+                data-testid="input-search-therapists"
+              />
+            </div>
+          </FeatureHint>
         </div>
 
         {/* ── Filters ── */}
@@ -220,7 +215,7 @@ export default function TherapistsPage() {
             <button
               onClick={() => setOnlineOnly(!onlineOnly)}
               data-testid="filter-online-now"
-              className={`shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition-all font-medium ${
+              className={`shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition-all font-medium min-h-[44px] ${
                 onlineOnly
                   ? "bg-emerald-600 text-white border-emerald-600"
                   : "bg-muted/40 border-transparent hover:border-border text-muted-foreground"
@@ -242,7 +237,7 @@ export default function TherapistsPage() {
                 key={l.value}
                 onClick={() => toggleFilter("language", l.value)}
                 data-testid={`filter-lang-${l.value}`}
-                className={`shrink-0 whitespace-nowrap text-xs px-3 py-1.5 rounded-full border transition-all font-medium ${
+                className={`shrink-0 whitespace-nowrap text-xs px-3 py-1.5 rounded-full border transition-all font-medium min-h-[44px] ${
                   language === l.value
                     ? "bg-primary text-primary-foreground border-primary shadow-sm"
                     : "bg-muted/40 border-transparent hover:border-border text-muted-foreground"
@@ -258,7 +253,7 @@ export default function TherapistsPage() {
                 key={g.value}
                 onClick={() => toggleFilter("gender", g.value)}
                 data-testid={`filter-gender-${g.value}`}
-                className={`shrink-0 whitespace-nowrap text-xs px-3 py-1.5 rounded-full border transition-all font-medium ${
+                className={`shrink-0 whitespace-nowrap text-xs px-3 py-1.5 rounded-full border transition-all font-medium min-h-[44px] ${
                   gender === g.value
                     ? "bg-primary text-primary-foreground border-primary shadow-sm"
                     : "bg-muted/40 border-transparent hover:border-border text-muted-foreground"
@@ -276,12 +271,12 @@ export default function TherapistsPage() {
               <motion.button
                 key={s.value}
                 custom={i}
-                variants={filterChipVariants}
+                variants={safeChipEnter}
                 initial="hidden"
                 animate="visible"
                 onClick={() => toggleFilter("specialization", s.value)}
                 data-testid={`filter-spec-${s.value}`}
-                className={`shrink-0 whitespace-nowrap text-xs px-3 py-1.5 rounded-full border transition-all font-medium ${
+                className={`shrink-0 whitespace-nowrap text-xs px-3 py-1.5 rounded-full border transition-all font-medium min-h-[44px] ${
                   specialization === s.value
                     ? "bg-primary text-primary-foreground border-primary shadow-sm"
                     : "bg-muted/40 border-transparent hover:border-border text-muted-foreground"
@@ -298,7 +293,7 @@ export default function TherapistsPage() {
                 key={b.value}
                 onClick={() => setBudget(budget === b.value ? "" : b.value)}
                 data-testid={`filter-budget-${b.value}`}
-                className={`shrink-0 whitespace-nowrap text-xs px-3 py-1.5 rounded-full border transition-all font-medium ${
+                className={`shrink-0 whitespace-nowrap text-xs px-3 py-1.5 rounded-full border transition-all font-medium min-h-[44px] ${
                   budget === b.value
                     ? "bg-primary text-primary-foreground border-primary shadow-sm"
                     : "bg-muted/40 border-transparent hover:border-border text-muted-foreground"
@@ -364,7 +359,7 @@ export default function TherapistsPage() {
               <motion.div
                 key={tp.id}
                 custom={index}
-                variants={cardVariants}
+                variants={safeCardStagger}
                 initial="hidden"
                 animate="visible"
               >
@@ -502,18 +497,16 @@ export default function TherapistsPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.4 }}
-            className="text-center py-20 text-muted-foreground space-y-3"
           >
-            <Search className="h-12 w-12 mx-auto opacity-20" />
-            <p data-testid="text-no-therapists">{t("therapist.no_therapists")}</p>
-            {hasActiveFilters && (
-              <button
-                onClick={() => { setSpecialization(""); setLanguage(""); setGender(""); setTier(""); setBudget(""); setOnlineOnly(false); }}
-                className="text-sm underline underline-offset-2 hover:text-foreground transition-colors"
-              >
-                {t("therapist.clear_all")}
-              </button>
-            )}
+            <EmptyState
+              icon={Search}
+              title={t("therapist.no_therapists")}
+              description={hasActiveFilters ? "Try adjusting or clearing your filters." : undefined}
+              action={hasActiveFilters ? {
+                label: t("therapist.clear_all"),
+                onClick: () => { setSpecialization(""); setLanguage(""); setGender(""); setTier(""); setBudget(""); setOnlineOnly(false); },
+              } : undefined}
+            />
           </motion.div>
         )}
       </div>

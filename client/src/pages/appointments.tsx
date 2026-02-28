@@ -1,5 +1,9 @@
 import { useI18n } from "@/lib/i18n";
 import { AppLayout } from "@/components/app-layout";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
+import { PageError } from "@/components/page-error";
+import { PageSkeleton } from "@/components/page-skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -260,7 +264,7 @@ export default function AppointmentsPage() {
     return () => clearInterval(id);
   }, []);
 
-  const { data: appointments, isLoading } = useQuery<(Appointment & { otherUser: User })[]>({
+  const { data: appointments, isLoading, isError, error, refetch } = useQuery<(Appointment & { otherUser: User })[]>({
     queryKey: ["/api/appointments"],
   });
 
@@ -386,15 +390,15 @@ export default function AppointmentsPage() {
     cancelled: { icon: XCircle, color: "bg-muted text-muted-foreground", label: t("appointment.cancel") },
   };
 
+  if (isError) return <AppLayout><div className="max-w-4xl mx-auto p-4 sm:p-6"><PageError error={error as Error} resetFn={refetch} /></div></AppLayout>;
+
   return (
     <AppLayout>
       <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
-        <h1 className="text-2xl font-bold" data-testid="text-appointments-title">{t("nav.appointments")}</h1>
+        <PageHeader title={t("nav.appointments")} />
 
         {isLoading ? (
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-24 w-full" />)}
-          </div>
+          <PageSkeleton variant="list" />
         ) : appointments && appointments.length > 0 ? (
           <div className="space-y-4">
             {appointments.map((apt) => {
@@ -534,10 +538,11 @@ export default function AppointmentsPage() {
             })}
           </div>
         ) : (
-          <div className="text-center py-16 text-muted-foreground">
-            <Calendar className="h-12 w-12 mx-auto mb-3 opacity-30" />
-            <p className="text-sm">{t("appointments.no_appointments")}</p>
-          </div>
+          <EmptyState
+            icon={Calendar}
+            title={t("appointments.no_appointments")}
+            description="Your upcoming appointments will appear here."
+          />
         )}
       </div>
 
@@ -601,7 +606,11 @@ export default function AppointmentsPage() {
               </button>
             ))}
             {availableSlots.filter((s) => s.status === "open" && new Date(s.startsAt) > new Date()).length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-4">No available slots found.</p>
+              <EmptyState
+                icon={Calendar}
+                title="No available slots"
+                description="This therapist has no open slots to reschedule to."
+              />
             )}
           </div>
           <DialogFooter>

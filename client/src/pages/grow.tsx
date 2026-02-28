@@ -8,6 +8,8 @@ import { useQuery } from "@tanstack/react-query";
 import type { MoodEntry, OnboardingResponse, JournalEntry } from "@shared/schema";
 import { Brain, HandHeart, Sparkles, Wind } from "lucide-react";
 import { Link } from "wouter";
+import { PageSkeleton } from "@/components/page-skeleton";
+import { PageHeader } from "@/components/page-header";
 
 const paths = [
   { key: "anxiety", titleKey: "growth.anxiety_path", icon: Brain, steps: 7, href: "/self-care" },
@@ -31,19 +33,29 @@ export default function GrowPage() {
     queryKey: ["/api/journal"],
   });
 
-  const { data: onboarding } = useQuery<OnboardingResponse | null>({
+  const { data: onboarding, isLoading } = useQuery<OnboardingResponse | null>({
     queryKey: ["/api/onboarding"],
   });
+
+  if (isLoading) {
+    return (
+      <AppLayout>
+        <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-4">
+          <PageSkeleton variant="grid" count={4} />
+        </div>
+      </AppLayout>
+    );
+  }
 
   const primaryConcerns = onboarding?.primaryConcerns || [];
 
   return (
     <AppLayout>
       <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold">{tr("grow.page_title", "Growth Paths")}</h1>
-          <p className="text-sm text-muted-foreground">{t("growth.subtitle")}</p>
-        </div>
+        <PageHeader
+          title={tr("grow.page_title", "Growth Paths")}
+          subtitle={t("growth.subtitle")}
+        />
 
         <div className="grid gap-4 sm:grid-cols-2">
           {paths.map((path) => {

@@ -9,9 +9,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
+import { fadeUp, headerSlideDown, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { Calendar, TrendingUp, ArrowRight, ArrowLeft, MessageCircle, GraduationCap, Star, HeartHandshake, SmilePlus, Plus } from "lucide-react";
 import type { Appointment, MoodEntry, User } from "@shared/schema";
+import { FeatureHint } from "@/components/feature-hint";
+import { PageSkeleton } from "@/components/page-skeleton";
+import { PageError } from "@/components/page-error";
 
 function toTimestamp(value: string | null | undefined): number {
   if (!value) return 0;
@@ -33,10 +37,13 @@ const timeOfDaySuggestion = (): { emoji: string; text: string } => {
 export default function DashboardPage() {
   const { t, isRTL } = useI18n();
   const { user } = useAuth();
+  const rm = usePrefersReducedMotion();
+  const safeFadeUp = safeVariants(fadeUp, rm);
+  const safeHeader = safeVariants(headerSlideDown, rm);
 
   const suggestion = timeOfDaySuggestion();
 
-  const { data: appointments, isLoading: appointmentsLoading } = useQuery<(Appointment & { otherUser: User })[]>({
+  const { data: appointments, isLoading: appointmentsLoading, isError: aptsError, error: aptsErrorObj, refetch: refetchApts } = useQuery<(Appointment & { otherUser: User })[]>({
     queryKey: ["/api/appointments"],
   });
 
@@ -136,14 +143,18 @@ export default function DashboardPage() {
               className: "bg-destructive/10 text-destructive",
             };
 
+  if (aptsError) return <AppLayout><div className="max-w-4xl mx-auto p-4 sm:p-6"><PageError error={aptsErrorObj as Error} resetFn={refetchApts} /></div></AppLayout>;
+
   return (
     <AppLayout>
       <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-6">
+        {appointmentsLoading && moodsLoading ? (
+          <PageSkeleton variant="dashboard" />
+        ) : (
+          <>
         {/* Top Banner: Compassionate Check-in */}
         <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
+          custom={0} initial="hidden" animate="visible" variants={safeHeader}
           className="rounded-2xl border bg-gradient-to-br from-card to-primary/5 p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6"
         >
           <div className="space-y-2">
@@ -156,19 +167,19 @@ export default function DashboardPage() {
             </p>
           </div>
           
-          <Link href="/mood">
-            <Button size="lg" className="shrink-0 rounded-full px-6 shadow-md hover:shadow-lg transition-all" data-testid="btn-quick-mood">
-              <Plus className="h-5 w-5 me-2" />
-              {t("nav.mood")}
-            </Button>
-          </Link>
+          <FeatureHint id="mood-tracker" content={t("hint.mood_tracker")} side="bottom">
+            <Link href="/mood">
+              <Button size="lg" className="shrink-0 rounded-full px-6 shadow-md hover:shadow-lg transition-all" data-testid="btn-quick-mood">
+                <Plus className="h-5 w-5 me-2" />
+                {t("nav.mood")}
+              </Button>
+            </Link>
+          </FeatureHint>
         </motion.div>
 
         {/* Next Up (Immediate Action) */}
         <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.05 }}
+          custom={1} initial="hidden" animate="visible" variants={safeFadeUp}
         >
           <Card className="overflow-hidden border-0 ring-1 ring-primary/20 shadow-md">
             <div className="bg-primary/5 px-4 py-3 border-b flex items-center gap-2">
@@ -234,9 +245,7 @@ export default function DashboardPage() {
           {/* Progress Chart */}
           <motion.div
             className="md:col-span-2"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, delay: 0.1 }}
+            custom={2} initial="hidden" animate="visible" variants={safeFadeUp}
           >
             <Card className="h-full">
               <CardHeader className="pb-2">
@@ -313,9 +322,7 @@ export default function DashboardPage() {
           {/* Quick Toolkit (Bento Grid) */}
           <motion.div
             className="grid grid-cols-2 grid-rows-2 gap-3"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.15 }}
+            custom={3} initial="hidden" animate="visible" variants={safeFadeUp}
           >
             <Link href="/therapists" className="block w-full h-full">
               <Card className="h-full hover:bg-muted/50 transition-colors cursor-pointer group">
@@ -362,6 +369,8 @@ export default function DashboardPage() {
             </Link>
           </motion.div>
         </div>
+          </>
+        )}
       </div>
     </AppLayout>
   );

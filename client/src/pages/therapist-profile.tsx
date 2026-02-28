@@ -26,6 +26,7 @@ import {
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { Link } from "wouter";
+import { PageSkeleton } from "@/components/page-skeleton";
 import {
   Star,
   MapPin,
@@ -54,17 +55,8 @@ import { PaymentDialog } from "@/components/payment-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useOnlineTherapists } from "@/hooks/use-online-therapists";
 import { motion } from "framer-motion";
+import { scrollRevealVariants, staggerContainer, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import type { Appointment, TherapistProfile, TherapistSlot, User, TherapistReview, UserSubscription } from "@shared/schema";
-
-const sectionVariants = {
-  hidden: { opacity: 0, y: 30 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
-};
-
-const staggerContainer = {
-  hidden: {},
-  visible: { transition: { staggerChildren: 0.1 } },
-};
 
 const DAYS_MAP: Record<string, { ar: string; fr: string }> = {
   monday: { ar: "الإثنين", fr: "Lundi" },
@@ -118,6 +110,9 @@ export default function TherapistProfilePage() {
   const { t, isRTL, language } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
+  const rm = usePrefersReducedMotion();
+  const safeRevealVariants = safeVariants(scrollRevealVariants, rm);
+  const safeStagger = safeVariants(staggerContainer, rm);
   const tr = (key: string, fallback: string) => {
     const value = t(key);
     return value === key ? fallback : value;
@@ -324,17 +319,7 @@ export default function TherapistProfilePage() {
     return (
       <AppLayout>
         <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
-          <div className="flex items-start gap-4">
-            <Skeleton className="w-20 h-20 rounded-xl" />
-            <div className="flex-1 space-y-3">
-              <Skeleton className="h-6 w-48" />
-              <Skeleton className="h-4 w-64" />
-              <Skeleton className="h-4 w-32" />
-            </div>
-          </div>
-          <Skeleton className="h-32 w-full" />
-          <Skeleton className="h-24 w-full" />
-          <Skeleton className="h-48 w-full" />
+          <PageSkeleton variant="detail" />
         </div>
       </AppLayout>
     );
@@ -359,7 +344,7 @@ export default function TherapistProfilePage() {
     <AppLayout>
       <div className="max-w-4xl mx-auto p-4 sm:p-6 pb-28 sm:pb-6 space-y-8">
         <motion.div
-          variants={sectionVariants}
+          variants={safeRevealVariants}
           initial="hidden"
           animate="visible"
           className="relative"
@@ -537,7 +522,7 @@ export default function TherapistProfilePage() {
 
         {(profile.aboutMe || profile.approach || profile.education) && (
           <motion.div
-            variants={sectionVariants}
+            variants={safeRevealVariants}
             initial="hidden"
             whileInView="visible"
             viewport={{ once: true, margin: "-50px" }}
@@ -594,7 +579,7 @@ export default function TherapistProfilePage() {
 
         {profile.specializations && profile.specializations.length > 0 && (
           <motion.div
-            variants={sectionVariants}
+            variants={safeRevealVariants}
             initial="hidden"
             whileInView="visible"
             viewport={{ once: true, margin: "-50px" }}
@@ -608,7 +593,7 @@ export default function TherapistProfilePage() {
               </CardHeader>
               <CardContent>
                 <motion.div
-                  variants={staggerContainer}
+                  variants={safeStagger}
                   initial="hidden"
                   whileInView="visible"
                   viewport={{ once: true }}
@@ -644,7 +629,7 @@ export default function TherapistProfilePage() {
 
         {/* How it works — ecosystem strip */}
         <motion.div
-          variants={sectionVariants}
+          variants={safeRevealVariants}
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true, margin: "-50px" }}
@@ -679,7 +664,7 @@ export default function TherapistProfilePage() {
 
         {profile.availableDays && profile.availableDays.length > 0 && (
           <motion.div
-            variants={sectionVariants}
+            variants={safeRevealVariants}
             initial="hidden"
             whileInView="visible"
             viewport={{ once: true, margin: "-50px" }}
@@ -744,7 +729,7 @@ export default function TherapistProfilePage() {
 
         <motion.div
           id="slots"
-          variants={sectionVariants}
+          variants={safeRevealVariants}
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true, margin: "-50px" }}
@@ -993,7 +978,7 @@ export default function TherapistProfilePage() {
 
         {profile.officePhotos && profile.officePhotos.length > 0 && (
           <motion.div
-            variants={sectionVariants}
+            variants={safeRevealVariants}
             initial="hidden"
             whileInView="visible"
             viewport={{ once: true, margin: "-50px" }}
@@ -1028,7 +1013,7 @@ export default function TherapistProfilePage() {
 
         {profile.videoIntroUrl && (
           <motion.div
-            variants={sectionVariants}
+            variants={safeRevealVariants}
             initial="hidden"
             whileInView="visible"
             viewport={{ once: true, margin: "-50px" }}
@@ -1057,7 +1042,7 @@ export default function TherapistProfilePage() {
 
         {faqItems.length > 0 && (
           <motion.div
-            variants={sectionVariants}
+            variants={safeRevealVariants}
             initial="hidden"
             whileInView="visible"
             viewport={{ once: true, margin: "-50px" }}
@@ -1091,7 +1076,7 @@ export default function TherapistProfilePage() {
         )}
 
         <motion.div
-          variants={sectionVariants}
+          variants={safeRevealVariants}
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true, margin: "-50px" }}

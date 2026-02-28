@@ -72,17 +72,27 @@ export function NotificationBell() {
         className="relative"
         onClick={() => setOpen((v) => !v)}
         aria-label="Notifications"
+        aria-expanded={open}
+        aria-haspopup="true"
       >
         <Bell className="h-4 w-4" />
         {unreadCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 rounded-full bg-destructive text-[10px] text-destructive-foreground font-bold flex items-center justify-center px-0.5 leading-none">
+          <span
+            className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 rounded-full bg-destructive text-[10px] text-destructive-foreground font-bold flex items-center justify-center px-0.5 leading-none"
+            aria-live="polite"
+            aria-atomic="true"
+          >
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
       </Button>
 
       {open && (
-        <div className="absolute end-0 top-full mt-1 w-80 rounded-lg border bg-popover shadow-lg z-50 overflow-hidden">
+        <div
+          className="absolute end-0 top-full mt-1 w-80 rounded-lg border bg-popover shadow-lg z-50 overflow-hidden"
+          role="region"
+          aria-label="Notifications"
+        >
           <div className="flex items-center justify-between px-3 py-2 border-b">
             <p className="text-sm font-semibold">Notifications</p>
             {unreadCount > 0 && (
@@ -98,7 +108,7 @@ export function NotificationBell() {
               </button>
             )}
           </div>
-          <div className="max-h-80 overflow-y-auto divide-y">
+          <div className="max-h-80 overflow-y-auto divide-y" aria-live="polite" aria-relevant="additions">
             {notifications.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">No notifications yet</p>
             ) : (

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
+import { fadeUp, scrollReveal, usePrefersReducedMotion, safeVariants, safeScrollReveal } from "@/lib/motion";
 import {
   Star,
   MapPin,
@@ -27,6 +28,7 @@ import {
 } from "@/components/ui/accordion";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PageSkeleton } from "@/components/page-skeleton";
 import { Separator } from "@/components/ui/separator";
 import type { LandingSection, TherapistProfile, TherapistReview, TherapistSlot, User } from "@shared/schema";
 import { DEFAULT_LANDING_SECTIONS } from "@shared/schema";
@@ -80,6 +82,9 @@ function toEmbedUrl(raw: string): string | null {
 export default function TherapistLandingPage() {
   const { slug } = useParams<{ slug: string }>();
   const isEmbed = new URLSearchParams(window.location.search).get("embed") === "true";
+  const rm = usePrefersReducedMotion();
+  const safeFadeUp = safeVariants(fadeUp, rm);
+  const safeReveal = safeScrollReveal(rm);
 
   const { data, isLoading, isError } = useQuery<LandingPageData>({
     queryKey: [`/api/therapist/page/${slug}`],
@@ -93,9 +98,7 @@ export default function TherapistLandingPage() {
   if (isLoading) {
     return (
       <div className="max-w-3xl mx-auto p-6 space-y-6">
-        <Skeleton className="h-40 w-full rounded-2xl" />
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-48 w-full" />
+        <PageSkeleton variant="detail" />
       </div>
     );
   }
@@ -116,6 +119,13 @@ export default function TherapistLandingPage() {
 
   const { profile, user, reviews, openSlots } = data;
   const accentColor = profile.profileThemeColor || "#6366f1";
+  const accentTextColor = (() => {
+    const c = accentColor.replace("#", "");
+    const r = parseInt(c.substring(0, 2), 16);
+    const g = parseInt(c.substring(2, 4), 16);
+    const b = parseInt(c.substring(4, 6), 16);
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5 ? "#000" : "#fff";
+  })();
   const customFont = (profile.customCss as any)?.font || "Inter";
   const therapistName = formatTherapistName(user);
   const inAppUrl = `/therapist/${profile.userId}`;
@@ -140,8 +150,7 @@ export default function TherapistLandingPage() {
       >
         <div className="max-w-3xl mx-auto">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
+            custom={0} initial="hidden" animate="visible" variants={safeFadeUp}
             className="flex flex-col sm:flex-row items-center sm:items-start gap-6"
           >
             <Avatar className="h-24 w-24 sm:h-32 sm:w-32 shrink-0 ring-4 ring-white shadow-lg">
@@ -210,7 +219,7 @@ export default function TherapistLandingPage() {
 
           <div className="mt-6 flex justify-center sm:justify-start">
             <Link href={ctaUrl}>
-              <Button size="lg" style={{ background: accentColor, color: "#fff" }} className="shadow-md hover:opacity-90">
+              <Button size="lg" style={{ background: accentColor, color: accentTextColor }} className="shadow-md hover:opacity-90">
                 <Calendar className="h-4 w-4 me-2" />
                 {ctaText}
               </Button>
@@ -340,7 +349,7 @@ export default function TherapistLandingPage() {
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold">{formatRateDinar(slot.priceDinar)}</span>
                 <Link href={`${inAppUrl}#slots`}>
-                  <Button size="sm" style={{ background: accentColor, color: "#fff" }}>Book</Button>
+                  <Button size="sm" style={{ background: accentColor, color: accentTextColor }}>Book</Button>
                 </Link>
               </div>
             </div>
@@ -491,7 +500,7 @@ export default function TherapistLandingPage() {
           Have questions before booking? Send a message through the platform.
         </p>
         <Link href={inAppUrl}>
-          <Button style={{ background: accentColor, color: "#fff" }} className="mt-2">
+          <Button style={{ background: accentColor, color: accentTextColor }} className="mt-2">
             <MessageCircle className="h-4 w-4 me-2" />
             Send a Message
           </Button>
@@ -513,6 +522,7 @@ export default function TherapistLandingPage() {
       case "testimonials":    return renderTestimonials((section as any).maxCount ?? 3);
       case "video":           return renderVideo(section as LandingSection & { type: "video" });
       case "office_photos":   return renderGallery();
+      case "gallery":         return renderGallery();
       case "faq":             return renderFaq();
       case "social_links":    return renderSocialLinks();
       case "banner":          return renderBanner(section as LandingSection & { type: "banner" });
@@ -537,9 +547,7 @@ export default function TherapistLandingPage() {
           return el ? (
             <motion.div
               key={`${section.type}-${i}`}
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
+              {...safeReveal}
               transition={{ duration: 0.4, delay: i * 0.05 }}
             >
               {el}
@@ -554,7 +562,7 @@ export default function TherapistLandingPage() {
           <p className="text-lg font-semibold">Ready to start your journey?</p>
           <p className="text-muted-foreground text-sm">Book a session with {therapistName} today.</p>
           <Link href={ctaUrl}>
-            <Button size="lg" style={{ background: accentColor, color: "#fff" }} className="shadow-md hover:opacity-90">
+            <Button size="lg" style={{ background: accentColor, color: accentTextColor }} className="shadow-md hover:opacity-90">
               <Calendar className="h-4 w-4 me-2" />
               {ctaText}
             </Button>

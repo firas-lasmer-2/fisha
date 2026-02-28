@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
+import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import { AppLayout } from "@/components/app-layout";
+import { PageHeader } from "@/components/page-header";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
@@ -83,6 +85,8 @@ export default function ListenerDashboardPage() {
   const { t } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
+  const rm = usePrefersReducedMotion();
+  const safeFadeUp = safeVariants(fadeUp, rm);
   const [isAvailable, setIsAvailable] = useState(false);
   const [headlineInput, setHeadlineInput] = useState("");
   const [aboutMeInput, setAboutMeInput] = useState("");
@@ -332,17 +336,14 @@ export default function ListenerDashboardPage() {
     }
   };
 
-  const fadeUp = {
-    hidden: { opacity: 0, y: 14 },
-    visible: (i = 0) => ({ opacity: 1, y: 0, transition: { delay: i * 0.08, duration: 0.3, ease: "easeOut" } }),
-  };
-
   return (
     <AppLayout>
       <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-4">
 
+        <PageHeader title={t("listener.dashboard_title")} />
+
         {/* Hero header */}
-        <motion.div custom={0} initial="hidden" animate="visible" variants={fadeUp}>
+        <motion.div custom={0} initial="hidden" animate="visible" variants={safeFadeUp}>
           <div className="rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border p-5 sm:p-6 flex items-start gap-4">
             <div className="h-12 w-12 rounded-xl gradient-calm flex items-center justify-center shrink-0">
               <span className="text-2xl">🎧</span>
@@ -373,7 +374,7 @@ export default function ListenerDashboardPage() {
           </div>
         </motion.div>
 
-        <motion.div custom={1} initial="hidden" animate="visible" variants={fadeUp}>
+        <motion.div custom={1} initial="hidden" animate="visible" variants={safeFadeUp}>
         <Card>
           <CardHeader className="pb-3">
             <CardTitle>{t("listener.dashboard_title")}</CardTitle>
@@ -598,7 +599,7 @@ export default function ListenerDashboardPage() {
         </Card>
         </motion.div>
 
-        <motion.div custom={2} initial="hidden" animate="visible" variants={fadeUp}>
+        <motion.div custom={2} initial="hidden" animate="visible" variants={safeFadeUp}>
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">How to earn points</CardTitle>
@@ -630,7 +631,7 @@ export default function ListenerDashboardPage() {
         </Card>
         </motion.div>
 
-        <motion.div custom={3} initial="hidden" animate="visible" variants={fadeUp}>
+        <motion.div custom={3} initial="hidden" animate="visible" variants={safeFadeUp}>
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Recognition</CardTitle>
@@ -673,7 +674,7 @@ export default function ListenerDashboardPage() {
         </Card>
         </motion.div>
 
-        <motion.div custom={4} initial="hidden" animate="visible" variants={fadeUp}>
+        <motion.div custom={4} initial="hidden" animate="visible" variants={safeFadeUp}>
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Wellbeing Check-in</CardTitle>
@@ -1030,6 +1031,7 @@ export default function ListenerDashboardPage() {
             </Link>
           </CardContent>
         </Card>
+        </motion.div>
       </div>
     </AppLayout>
   );

@@ -15,6 +15,8 @@ import { getAccessToken } from "@/lib/supabase";
 import { Calendar, CreditCard, Receipt, UserCircle, Wallet, AtSign, Check, X, Loader2, KeyRound, ShieldCheck, Download } from "lucide-react";
 import type { PaymentTransaction } from "@shared/schema";
 import { wrapPrivateKeyWithPassword, unwrapPrivateKeyWithPassword } from "@/lib/e2e";
+import { PageHeader } from "@/components/page-header";
+import { PageSkeleton } from "@/components/page-skeleton";
 
 function formatStatus(value: string): string {
   return value
@@ -175,12 +177,10 @@ export default function SettingsPage() {
   return (
     <AppLayout>
       <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold">{tr("settings.title", "Profile & settings")}</h1>
-          <p className="text-sm text-muted-foreground">
-            {tr("settings.subtitle", "Manage your account and billing details in one place.")}
-          </p>
-        </div>
+        <PageHeader
+          title={tr("settings.title", "Profile & settings")}
+          subtitle={tr("settings.subtitle", "Manage your account and billing details in one place.")}
+        />
 
         <div className="grid gap-4 lg:grid-cols-3">
           <Card data-testid="card-settings-account">
@@ -348,11 +348,7 @@ export default function SettingsPage() {
                   </div>
 
                   {paymentsLoading ? (
-                    <div className="space-y-2">
-                      <Skeleton className="h-12 w-full" />
-                      <Skeleton className="h-12 w-full" />
-                      <Skeleton className="h-12 w-full" />
-                    </div>
+                    <PageSkeleton variant="list" count={3} />
                   ) : sortedPayments.length > 0 ? (
                     <div className="space-y-2">
                       {sortedPayments.slice(0, 12).map((payment) => (

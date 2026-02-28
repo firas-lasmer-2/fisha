@@ -1,6 +1,8 @@
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/components/app-layout";
+import { EmptyState } from "@/components/empty-state";
+import { PageError } from "@/components/page-error";
 import { DashboardSidebarLayout } from "@/components/dashboard-sidebar-layout";
 import type { DashboardNavGroup, DashboardNavItem } from "@/components/dashboard-sidebar-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -110,7 +112,7 @@ export default function TherapistDashboardPage() {
   const [verificationDocUrl, setVerificationDocUrl] = useState("");
   const [verificationDocType, setVerificationDocType] = useState<"license" | "diploma" | "id_card" | "cv">("license");
 
-  const { data: dashboardData, isLoading } = useQuery<DashboardData>({
+  const { data: dashboardData, isLoading, isError, error, refetch } = useQuery<DashboardData>({
     queryKey: ["/api/therapist/dashboard"],
   });
 
@@ -376,6 +378,8 @@ export default function TherapistDashboardPage() {
     }
   ], [t]);
 
+  if (isError) return <AppLayout><div className="max-w-4xl mx-auto p-4 sm:p-6"><PageError error={error as Error} resetFn={refetch} /></div></AppLayout>;
+
   if (isLoading) {
     return (
       <AppLayout>
@@ -458,10 +462,10 @@ export default function TherapistDashboardPage() {
                         ))}
                       </div>
                     ) : (
-                      <div className="p-8 text-center text-muted-foreground">
-                        <Calendar className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                        <p>{t("therapist_dash.no_appointments_today")}</p>
-                      </div>
+                      <EmptyState
+                        icon={Calendar}
+                        title={t("therapist_dash.no_appointments_today")}
+                      />
                     )}
                   </CardContent>
                 </Card>
@@ -858,9 +862,11 @@ export default function TherapistDashboardPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 {reviews.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-8" data-testid="text-no-reviews">
-                    {t("review.no_reviews")}
-                  </p>
+                  <EmptyState
+                    icon={Star}
+                    title={t("review.no_reviews")}
+                    description="Your client reviews will appear here after completed sessions."
+                  />
                 ) : (
                   reviews.map((review) => (
                     <div key={review.id} className="space-y-3 pb-4 border-b last:border-0 last:pb-0">
@@ -1139,6 +1145,23 @@ export default function TherapistDashboardPage() {
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium">
+                    Before Your Session
+                  </label>
+                  <Textarea
+                    value={consultationIntro}
+                    onChange={(e) => setConsultationIntro(e.target.value)}
+                    placeholder="What should clients know or prepare before their first session with you?"
+                    rows={4}
+                    maxLength={1000}
+                    data-testid="textarea-consultation-intro"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Shown on your public page when the "Before Your Session" section is enabled.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
                     {t("therapist_dash.page_sections")}
                   </label>
                   <p className="text-xs text-muted-foreground">
@@ -1147,6 +1170,14 @@ export default function TherapistDashboardPage() {
                   <LandingPageBuilder
                     sections={landingSections}
                     onChange={setLandingSections}
+                    profileData={{
+                      hasAbout: !!(dashboardData?.profile?.aboutMe),
+                      hasFaq: Array.isArray(dashboardData?.profile?.faqItems) && (dashboardData.profile.faqItems as unknown[]).length > 0,
+                      hasGallery: Array.isArray(dashboardData?.profile?.galleryImages) && (dashboardData.profile.galleryImages as unknown[]).length > 0,
+                      hasSocialLinks: !!dashboardData?.profile?.socialLinks && Object.values(dashboardData.profile.socialLinks as Record<string, string>).some(Boolean),
+                      hasCertifications: Array.isArray(dashboardData?.profile?.certifications) && (dashboardData.profile.certifications as unknown[]).length > 0,
+                      hasConsultationIntro: !!consultationIntro.trim(),
+                    }}
                   />
                 </div>
               </CardContent>
@@ -1289,9 +1320,11 @@ export default function TherapistDashboardPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 {clientSummaries.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-8">
-                    {t("therapist_dash.no_clients")}
-                  </p>
+                  <EmptyState
+                    icon={Users}
+                    title={t("therapist_dash.no_clients")}
+                    description="Clients who book sessions with you will appear here."
+                  />
                 ) : (
                   clientSummaries.map((summary) => {
                     const completedCount = summary.statuses.filter((s) => s === "completed").length;
@@ -1358,10 +1391,11 @@ export default function TherapistDashboardPage() {
               </CardHeader>
               <CardContent>
                 {payouts.length === 0 ? (
-                  <div className="text-center py-10 text-muted-foreground">
-                    <DollarSign className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                    <p className="text-sm">{t("therapist_dash.no_payouts")}</p>
-                  </div>
+                  <EmptyState
+                    icon={DollarSign}
+                    title={t("therapist_dash.no_payouts")}
+                    description="Your payout history will appear here."
+                  />
                 ) : (
                   <div className="space-y-3">
                     {payouts.map((payout) => (
@@ -1466,12 +1500,11 @@ function SessionsTab({
 
   if (therapistAppointments.length === 0) {
     return (
-      <Card>
-        <CardContent className="py-12 text-center text-muted-foreground">
-          <BookOpen className="h-10 w-10 mx-auto mb-3 opacity-30" />
-          <p className="text-sm">{t("therapist_dash.no_sessions")}</p>
-        </CardContent>
-      </Card>
+      <EmptyState
+        icon={BookOpen}
+        title={t("therapist_dash.no_sessions")}
+        description="Completed sessions will appear here for note-taking."
+      />
     );
   }
 

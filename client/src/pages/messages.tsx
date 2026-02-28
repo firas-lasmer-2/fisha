@@ -3,13 +3,15 @@ import { useAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/components/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { MessageCircle, Send, ArrowLeft, ArrowRight, ShieldAlert, Lock, Users } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { PageSkeleton } from "@/components/page-skeleton";
+import { EmptyState } from "@/components/empty-state";
+import { PageError } from "@/components/page-error";
 import {
   decryptMessageContent,
   encryptMessageContent,
@@ -53,7 +55,7 @@ export default function MessagesPage() {
     if (convParam) setSelectedConv(parseInt(convParam, 10));
   }, [convParam]);
 
-  const { data: conversations, isLoading: convsLoading } = useQuery<
+  const { data: conversations, isLoading: convsLoading, isError: convsError, error: convsErrorObj, refetch: refetchConvs } = useQuery<
     (TherapyConversation & { otherUser: User })[]
   >({
     queryKey: ["/api/conversations"],
@@ -247,6 +249,8 @@ export default function MessagesPage() {
     sendMutation.mutate(messageText.trim());
   };
 
+  if (convsError) return <AppLayout><div className="max-w-4xl mx-auto p-4 sm:p-6"><PageError error={convsErrorObj as Error} resetFn={refetchConvs} /></div></AppLayout>;
+
   return (
     <AppLayout>
       <div className="max-w-6xl mx-auto h-[calc(100vh-3.5rem)] flex">
@@ -256,8 +260,8 @@ export default function MessagesPage() {
           </div>
           <ScrollArea className="flex-1">
             {convsLoading ? (
-              <div className="space-y-2 p-3">
-                {[1, 2, 3].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
+              <div className="p-3">
+                <PageSkeleton variant="list" count={3} />
               </div>
             ) : conversations && conversations.length > 0 ? (
               <div className="space-y-0.5 p-1">
@@ -285,23 +289,13 @@ export default function MessagesPage() {
                 ))}
               </div>
             ) : (
-              <div className="text-center py-10 px-4 space-y-3">
-                <div className="mx-auto h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Lock className="h-5 w-5 text-primary" />
-                </div>
-                <p className="text-sm font-medium">Your messages are private</p>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Every conversation is end-to-end encrypted — only you and your therapist can read them.
-                </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5 mt-1"
-                  onClick={() => { window.location.href = "/therapists"; }}
-                >
-                  <Users className="h-3.5 w-3.5" />
-                  Find a therapist to message
-                </Button>
+              <div className="p-3">
+                <EmptyState
+                  icon={Lock}
+                  title="Your messages are private"
+                  description="Every conversation is end-to-end encrypted — only you and your therapist can read them."
+                  action={{ label: "Find a therapist", href: "/therapists" }}
+                />
               </div>
             )}
           </ScrollArea>
@@ -331,9 +325,7 @@ export default function MessagesPage() {
 
               <ScrollArea className="flex-1 p-4">
                 {msgsLoading ? (
-                  <div className="space-y-3">
-                    {[1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-48" />)}
-                  </div>
+                  <PageSkeleton variant="list" count={3} />
                 ) : (
                   <div className="space-y-3">
                     {messages?.map((msg) => {

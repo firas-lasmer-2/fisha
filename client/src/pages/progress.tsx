@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { AppLayout } from "@/components/app-layout";
+import { EmptyState } from "@/components/empty-state";
+import { PageError } from "@/components/page-error";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,6 +40,7 @@ import {
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { MoodEntry, JournalEntry, Appointment } from "@shared/schema";
+import { PageHeader } from "@/components/page-header";
 
 interface SessionHomework {
   id: number;
@@ -206,7 +209,7 @@ export default function ProgressPage() {
     queryKey: ["/api/homework"],
   });
 
-  const { data: analyticsData, isLoading: analyticsLoading } = useQuery<MoodAnalytics>({
+  const { data: analyticsData, isLoading: analyticsLoading, isError, error, refetch } = useQuery<MoodAnalytics>({
     queryKey: ["/api/progress/analytics", analyticsDays],
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/progress/analytics?days=${analyticsDays}`);
@@ -284,15 +287,15 @@ export default function ProgressPage() {
   const activeGoals = goals.filter((g) => g.status === "active");
   const completedGoals = goals.filter((g) => g.status === "completed");
 
+  if (isError) return <AppLayout><div className="max-w-4xl mx-auto p-4 sm:p-6"><PageError error={error as Error} resetFn={refetch} /></div></AppLayout>;
+
   return (
     <AppLayout>
       <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">{tr("progress.title", "Your Progress")}</h1>
-          <p className="text-sm text-muted-foreground">
-            {tr("progress.subtitle", "Track your mental wellness journey over time.")}
-          </p>
-        </div>
+        <PageHeader
+          title={tr("progress.title", "Your Progress")}
+          subtitle={tr("progress.subtitle", "Track your mental wellness journey over time.")}
+        />
 
         {isLoading ? (
           <div className="grid sm:grid-cols-2 gap-4">
@@ -400,6 +403,7 @@ export default function ProgressPage() {
                 <p className="text-sm text-muted-foreground">Log moods to see your trend chart.</p>
               </div>
             ) : (
+              <div role="img" aria-label="Mood trend chart">
               <ResponsiveContainer width="100%" height={160}>
                 <LineChart data={analyticsData.moodTrend} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
@@ -422,6 +426,7 @@ export default function ProgressPage() {
                   />
                 </LineChart>
               </ResponsiveContainer>
+              </div>
             )}
             <div className="mt-2">
               <Link href="/mood">
@@ -506,9 +511,11 @@ export default function ProgressPage() {
             {goalsLoading ? (
               <Skeleton className="h-20 w-full" />
             ) : goals.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                No goals yet. Add one to track your progress.
-              </p>
+              <EmptyState
+                icon={ClipboardList}
+                title="No goals yet"
+                description="Add a treatment goal to track your progress."
+              />
             ) : (
               <div className="space-y-3">
                 {activeGoals.map((goal) => (

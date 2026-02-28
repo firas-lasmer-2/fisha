@@ -8,6 +8,8 @@ import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { Wind, Hand, Sparkles, Timer, Play, Pause, RotateCcw, Check, ChevronRight, Moon, Heart } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
+import { PageHeader } from "@/components/page-header";
 
 const affirmationKeys = [
   "selfcare.affirmation_1",
@@ -653,6 +655,7 @@ function GratitudePracticeCard({
 
 export default function SelfCarePage() {
   const { t } = useI18n();
+  const reducedMotion = usePrefersReducedMotion();
   const tr = (key: string, fallback: string) => {
     const value = t(key);
     return value === key ? fallback : value;
@@ -725,9 +728,10 @@ export default function SelfCarePage() {
   return (
     <AppLayout>
       <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
+        <PageHeader title={t("nav.self_care")} />
         <motion.div
           initial={{ opacity: 0, y: 18 }}
-          animate={{ opacity: 1, y: 0 }}
+          animate={reducedMotion ? { opacity: 1, y: 0, transition: { duration: 0 } } : { opacity: 1, y: 0 }}
           className="relative overflow-hidden rounded-2xl border gradient-feature p-5 sm:p-6"
         >
           <div className="pointer-events-none absolute -top-12 -end-16 h-40 w-40 rounded-full bg-primary/15 blur-2xl" aria-hidden />
@@ -764,10 +768,10 @@ export default function SelfCarePage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: reducedMotion ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15 }}
-            whileHover={{ y: -5, transition: { duration: 0.2 } }}
+            transition={reducedMotion ? { duration: 0 } : { delay: 0.15 }}
+            whileHover={reducedMotion ? {} : { y: -5, transition: { duration: 0.2 } }}
             id="breathing"
             className="flex"
           >
@@ -775,10 +779,10 @@ export default function SelfCarePage() {
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: reducedMotion ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            whileHover={{ y: -5, transition: { duration: 0.2 } }}
+            transition={reducedMotion ? { duration: 0 } : { delay: 0.2 }}
+            whileHover={reducedMotion ? {} : { y: -5, transition: { duration: 0.2 } }}
             id="grounding"
             className="flex"
           >
@@ -786,50 +790,50 @@ export default function SelfCarePage() {
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: reducedMotion ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.25 }}
-            whileHover={{ y: -5, transition: { duration: 0.2 } }}
+            transition={reducedMotion ? { duration: 0 } : { delay: 0.25 }}
+            whileHover={reducedMotion ? {} : { y: -5, transition: { duration: 0.2 } }}
             className="flex"
           >
             <div className="w-full h-full"><AffirmationsCard t={t} /></div>
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: reducedMotion ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            whileHover={{ y: -5, transition: { duration: 0.2 } }}
+            transition={reducedMotion ? { duration: 0 } : { delay: 0.3 }}
+            whileHover={reducedMotion ? {} : { y: -5, transition: { duration: 0.2 } }}
             className="flex"
           >
             <div className="w-full h-full"><MeditationTimer t={t} /></div>
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: reducedMotion ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.35 }}
-            whileHover={{ y: -5, transition: { duration: 0.2 } }}
+            transition={reducedMotion ? { duration: 0 } : { delay: 0.35 }}
+            whileHover={reducedMotion ? {} : { y: -5, transition: { duration: 0.2 } }}
             className="flex"
           >
             <div className="w-full h-full"><BodyScanCard t={t} tr={tr} /></div>
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: reducedMotion ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-            whileHover={{ y: -5, transition: { duration: 0.2 } }}
+            transition={reducedMotion ? { duration: 0 } : { delay: 0.4 }}
+            whileHover={reducedMotion ? {} : { y: -5, transition: { duration: 0.2 } }}
             className="flex"
           >
             <div className="w-full h-full"><SleepMeditationCard tr={tr} /></div>
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: reducedMotion ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.45 }}
-            whileHover={{ y: -5, transition: { duration: 0.2 } }}
+            transition={reducedMotion ? { duration: 0 } : { delay: 0.45 }}
+            whileHover={reducedMotion ? {} : { y: -5, transition: { duration: 0.2 } }}
             id="gratitude"
             className="flex md:col-span-2 lg:col-span-3"
           >

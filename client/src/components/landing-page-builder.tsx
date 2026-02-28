@@ -5,15 +5,24 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   ChevronUp,
   ChevronDown,
   Plus,
   Trash2,
-  Eye,
-  EyeOff,
   Layers,
+  AlertTriangle,
 } from "lucide-react";
-import type { LandingSection, DEFAULT_LANDING_SECTIONS } from "@shared/schema";
+import type { LandingSection } from "@shared/schema";
 
 const SECTION_LABELS: Record<string, string> = {
   hero: "Hero / Header",
@@ -52,6 +61,19 @@ const SECTION_ICONS: Record<string, string> = {
   contact_form: "✉️",
   consultation_intro: "💬",
 };
+
+// Sections that should only appear once (structural/singleton)
+const SINGLETON_TYPES = new Set([
+  "hero", "about", "specializations", "faq", "slots",
+  "office_photos", "gallery", "social_links", "certifications",
+  "pricing", "contact_form", "consultation_intro",
+]);
+
+// Sections whose content comes from profile fields — warn if data may be missing
+const PROFILE_DATA_TYPES = new Set([
+  "faq", "gallery", "office_photos", "social_links",
+  "certifications", "consultation_intro",
+]);
 
 // Section types that can be added (not always present by default)
 const ADDABLE_SECTIONS: { type: string; label: string }[] = [
@@ -103,10 +125,20 @@ const TEMPLATES: { name: string; sections: LandingSection[] }[] = [
 interface LandingPageBuilderProps {
   sections: LandingSection[];
   onChange: (sections: LandingSection[]) => void;
+  /** Optional: profile data presence flags to show empty-data warnings */
+  profileData?: {
+    hasAbout?: boolean;
+    hasFaq?: boolean;
+    hasGallery?: boolean;
+    hasSocialLinks?: boolean;
+    hasCertifications?: boolean;
+    hasConsultationIntro?: boolean;
+  };
 }
 
-export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderProps) {
+export function LandingPageBuilder({ sections, onChange, profileData }: LandingPageBuilderProps) {
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  const [templateConfirm, setTemplateConfirm] = useState<{ name: string; sections: LandingSection[] } | null>(null);
 
   const moveSection = (index: number, direction: "up" | "down") => {
     const next = [...sections];
@@ -136,21 +168,49 @@ export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderPro
   };
 
   const addSection = (type: string) => {
+    // Prevent adding duplicate singleton sections
+    if (SINGLETON_TYPES.has(type) && sections.some((s) => s.type === type)) {
+      return; // already exists — button will be disabled in the UI
+    }
     let newSection: LandingSection;
     if (type === "custom_text") {
       newSection = { type: "custom_text", enabled: true, title: "Custom Section", content: "" };
     } else if (type === "banner") {
       newSection = { type: "banner", enabled: true, imageUrl: "", altText: "" };
     } else {
-      newSection = { type: type as any, enabled: true };
+      newSection = { type: type as LandingSection["type"], enabled: true };
     }
     onChange([...sections, newSection]);
     setExpandedIndex(sections.length);
   };
 
-  const applyTemplate = (template: { name: string; sections: LandingSection[] }) => {
-    onChange(template.sections);
+  const confirmApplyTemplate = (template: { name: string; sections: LandingSection[] }) => {
+    setTemplateConfirm(template);
+  };
+
+  const applyTemplate = () => {
+    if (!templateConfirm) return;
+    onChange(templateConfirm.sections);
     setExpandedIndex(null);
+    setTemplateConfirm(null);
+  };
+
+  // Compute empty-data warning for a section
+  const getEmptyWarning = (type: string): string | null => {
+    if (!profileData) return null;
+    if (type === "about" && profileData.hasAbout === false)
+      return "Add an 'About Me' text in your Profile to populate this section.";
+    if ((type === "faq") && profileData.hasFaq === false)
+      return "Add FAQ items in your Profile to populate this section.";
+    if ((type === "gallery" || type === "office_photos") && profileData.hasGallery === false)
+      return "Upload gallery images in your Profile to populate this section.";
+    if (type === "social_links" && profileData.hasSocialLinks === false)
+      return "Add social links in your Profile to populate this section.";
+    if (type === "certifications" && profileData.hasCertifications === false)
+      return "Add certifications in your Profile to populate this section.";
+    if (type === "consultation_intro" && profileData.hasConsultationIntro === false)
+      return "Add a 'Before Your Session' intro in your Profile to populate this section.";
+    return null;
   };
 
   return (
@@ -161,13 +221,14 @@ export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderPro
           <Layers className="h-4 w-4" />
           Template Presets
         </p>
+        <p className="text-xs text-muted-foreground">Applying a template will replace your current section layout.</p>
         <div className="flex gap-2 flex-wrap">
           {TEMPLATES.map((tpl) => (
             <Button
               key={tpl.name}
               size="sm"
               variant="outline"
-              onClick={() => applyTemplate(tpl)}
+              onClick={() => confirmApplyTemplate(tpl)}
             >
               {tpl.name}
             </Button>
@@ -180,6 +241,8 @@ export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderPro
           const isExpanded = expandedIndex === index;
           const isFirst = index === 0;
           const isLast = index === sections.length - 1;
+          const isDeletable = ["custom_text", "banner", "gallery", "certifications", "pricing", "contact_form", "consultation_intro"].includes(section.type);
+          const emptyWarning = section.enabled ? getEmptyWarning(section.type) : null;
 
           return (
             <div key={`${section.type}-${index}`} className={`p-3 ${!section.enabled ? "opacity-50" : ""}`}>
@@ -218,6 +281,10 @@ export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderPro
                   )}
                 </div>
 
+                {emptyWarning && (
+                  <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" title={emptyWarning} />
+                )}
+
                 <Badge variant={section.enabled ? "default" : "outline"} className="text-xs">
                   {section.enabled ? "On" : "Off"}
                 </Badge>
@@ -230,7 +297,7 @@ export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderPro
                 />
 
                 {/* Delete non-core sections */}
-                {["custom_text", "banner", "gallery", "certifications", "pricing", "contact_form", "consultation_intro"].includes(section.type) && (
+                {isDeletable && (
                   <Button
                     size="sm"
                     variant="ghost"
@@ -241,6 +308,14 @@ export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderPro
                   </Button>
                 )}
               </div>
+
+              {/* Empty data warning inline */}
+              {emptyWarning && isExpanded && (
+                <div className="mt-2 flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded-md px-3 py-2">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  {emptyWarning}
+                </div>
+              )}
 
               {/* Expanded settings */}
               {isExpanded && (
@@ -324,7 +399,7 @@ export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderPro
                     </div>
                   )}
 
-                  {["gallery", "certifications", "pricing", "consultation_intro"].includes(section.type) && (
+                  {PROFILE_DATA_TYPES.has(section.type) && (
                     <p className="text-xs text-muted-foreground">
                       Content is pulled from your profile data. Toggle to show/hide on your page.
                     </p>
@@ -336,7 +411,8 @@ export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderPro
                     </p>
                   )}
 
-                  {!["custom_text", "testimonials", "banner", "gallery", "certifications", "pricing", "contact_form", "consultation_intro", "video"].includes(section.type) && (
+                  {!["custom_text", "testimonials", "banner", "gallery", "certifications", "pricing", "contact_form", "consultation_intro", "video"].includes(section.type)
+                    && !PROFILE_DATA_TYPES.has(section.type) && (
                     <p className="text-xs text-muted-foreground">
                       This section has no configurable settings. Toggle it on/off above.
                     </p>
@@ -351,24 +427,46 @@ export function LandingPageBuilder({ sections, onChange }: LandingPageBuilderPro
       <div className="space-y-1">
         <p className="text-xs font-medium text-muted-foreground">Add Section</p>
         <div className="flex flex-wrap gap-2">
-          {ADDABLE_SECTIONS.map((s) => (
-            <Button
-              key={s.type}
-              variant="outline"
-              size="sm"
-              className="gap-1 text-xs"
-              onClick={() => addSection(s.type)}
-            >
-              <Plus className="h-3 w-3" />
-              {s.label}
-            </Button>
-          ))}
+          {ADDABLE_SECTIONS.map((s) => {
+            const alreadyExists = SINGLETON_TYPES.has(s.type) && sections.some((sec) => sec.type === s.type);
+            return (
+              <Button
+                key={s.type}
+                variant="outline"
+                size="sm"
+                className="gap-1 text-xs"
+                onClick={() => addSection(s.type)}
+                disabled={alreadyExists}
+                title={alreadyExists ? "This section is already in your layout" : undefined}
+              >
+                <Plus className="h-3 w-3" />
+                {s.label}
+              </Button>
+            );
+          })}
         </div>
       </div>
 
       <p className="text-xs text-muted-foreground">
         Reorder sections with the arrows. Toggle to show/hide on your public page.
       </p>
+
+      {/* Template apply confirmation */}
+      <AlertDialog open={!!templateConfirm} onOpenChange={(open) => { if (!open) setTemplateConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apply "{templateConfirm?.name}" template?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will replace your current section layout with the {templateConfirm?.name} template.
+              Any custom text sections or unsaved changes will be lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep my layout</AlertDialogCancel>
+            <AlertDialogAction onClick={applyTemplate}>Apply template</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

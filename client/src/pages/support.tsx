@@ -3,10 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
+import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import { useMemo, useState } from "react";
 import { Check, ArrowLeft, ArrowRight, AlertTriangle, Compass } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useI18n } from "@/lib/i18n";
+import { PageHeader } from "@/components/page-header";
 
 type SupportPath = {
   id: string;
@@ -126,6 +128,8 @@ export default function SupportPage() {
   const { user } = useAuth();
   const { isRTL } = useI18n();
   const Arrow = isRTL ? ArrowLeft : ArrowRight;
+  const rm = usePrefersReducedMotion();
+  const safeFadeUp = safeVariants(fadeUp, rm);
 
   const [urgency, setUrgency] = useState<TriageUrgency>(null);
   const [preference, setPreference] = useState<TriagePreference>(null);
@@ -200,25 +204,13 @@ export default function SupportPage() {
       <div className="max-w-5xl mx-auto px-4 py-6 sm:py-10 space-y-10">
 
         {/* ── Header ── */}
-        <motion.div
-          initial={{ opacity: 0, y: -12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
-          className="text-center space-y-2"
-        >
-          <h1 className="text-2xl sm:text-3xl font-bold" data-testid="text-support-title">
-            How can we help you today?
-          </h1>
-          <p className="text-muted-foreground text-sm sm:text-base max-w-md mx-auto">
-            Choose the level of support that fits where you are right now.
-            There is no wrong answer.
-          </p>
-        </motion.div>
+        <PageHeader
+          title="How can we help you today?"
+          subtitle="Choose the level of support that fits where you are right now. There is no wrong answer."
+        />
 
         <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.1 }}
+          custom={1} initial="hidden" animate="visible" variants={safeFadeUp}
           className="rounded-2xl border bg-card/70 p-5 space-y-5"
           data-testid="card-support-triage"
         >
@@ -256,7 +248,7 @@ export default function SupportPage() {
                 <button
                   key={item.value}
                   onClick={() => setUrgency(item.value as TriageUrgency)}
-                  className={`px-3 py-1.5 rounded-full border text-xs ${
+                  className={`px-4 py-2.5 rounded-full border text-sm min-h-[44px] ${
                     urgency === item.value ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"
                   }`}
                 >
@@ -278,7 +270,7 @@ export default function SupportPage() {
                 <button
                   key={item.value}
                   onClick={() => setPreference(item.value as TriagePreference)}
-                  className={`px-3 py-1.5 rounded-full border text-xs ${
+                  className={`px-4 py-2.5 rounded-full border text-sm min-h-[44px] ${
                     preference === item.value ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"
                   }`}
                 >
@@ -299,7 +291,7 @@ export default function SupportPage() {
                 <button
                   key={item.value}
                   onClick={() => setPriority(item.value as TriagePriority)}
-                  className={`px-3 py-1.5 rounded-full border text-xs ${
+                  className={`px-4 py-2.5 rounded-full border text-sm min-h-[44px] ${
                     priority === item.value ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"
                   }`}
                 >
@@ -348,9 +340,7 @@ export default function SupportPage() {
           {paths.map((path, i) => (
             <motion.div
               key={path.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: i * 0.09 }}
+              custom={i + 2} initial="hidden" animate="visible" variants={safeFadeUp}
               data-testid={`card-support-${path.id}`}
               className={`flex flex-col rounded-2xl border-2 p-5 space-y-4 ${path.cardClass}`}
             >
@@ -413,9 +403,7 @@ export default function SupportPage() {
 
         {/* ── FAQ row ── */}
         <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.35 }}
+          custom={5} initial="hidden" animate="visible" variants={safeFadeUp}
           className="rounded-2xl border bg-card/60 p-5 grid sm:grid-cols-3 gap-5"
         >
           {faqs.map((faq) => (
@@ -428,9 +416,7 @@ export default function SupportPage() {
 
         {/* ── Crisis footer ── */}
         <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5 }}
+          custom={6} initial="hidden" animate="visible" variants={safeFadeUp}
           className="text-center text-xs text-muted-foreground"
         >
           In immediate danger or crisis?{" "}
