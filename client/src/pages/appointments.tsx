@@ -70,14 +70,28 @@ function ConsultationPrepPanel({ appointmentId }: { appointmentId: number }) {
   });
 
   if (!open) {
-    return (
+    return existing ? (
+      // Already filled — show green badge
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors mt-2"
+        className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-md px-2.5 py-1.5 mt-2 hover:bg-emerald-100 dark:hover:bg-emerald-950/50 transition-colors"
       >
-        <ClipboardList className="h-3.5 w-3.5" />
-        {existing ? "Update session prep" : "Fill in session prep"}
+        <ClipboardList className="h-3.5 w-3.5 shrink-0" />
+        Session prep submitted — tap to update
+      </button>
+    ) : (
+      // Not filled — prominent amber nudge card
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="w-full mt-3 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 flex items-start gap-2 hover:bg-amber-100 dark:hover:bg-amber-950/50 transition-colors text-start"
+      >
+        <ClipboardList className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-medium text-amber-900 dark:text-amber-200">Fill in your session prep</p>
+          <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">Help your therapist prepare by sharing what's on your mind.</p>
+        </div>
       </button>
     );
   }
@@ -269,6 +283,7 @@ export default function AppointmentsPage() {
 
   const { data: appointments, isLoading, isError, error, refetch } = useQuery<(Appointment & { otherUser: User })[]>({
     queryKey: ["/api/appointments"],
+    staleTime: 60_000, // appointments update moderately — revalidate after 1 min
   });
 
   const { data: payments = [] } = useQuery<PaymentTransaction[]>({

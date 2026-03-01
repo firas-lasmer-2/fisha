@@ -11,6 +11,7 @@ import { mapProfile, type User,
   paymentInitiateRequestSchema, queueJoinRequestSchema, peerMessageRequestSchema,
   purchaseSubscriptionSchema, matchingPreferencesSchema,
   updateFeatureInventoryItemSchema, localizationAuditRunSchema, updateLocalizationAuditSchema,
+  createAnnouncementSchema,
 } from "@shared/schema";
 import { authLimiter, webhookLimiter, paymentLimiter, bookingLimiter, displayNameLimiter } from "./middleware/rate-limit";
 import { QUALIFICATION_QUESTIONS, scoreAnswers } from "@shared/qualification-questions";
@@ -139,6 +140,23 @@ function buildListenerCertificatePdf(input: {
 
 // ---- Auth middleware ----
 
+// In-memory profile cache: avoids a DB round-trip on every role-protected request.
+// Entries expire after 60 seconds. Invalidated explicitly after role changes.
+const profileCache = new Map<string, { profile: User; ts: number }>();
+const PROFILE_CACHE_TTL_MS = 60_000;
+
+function invalidateProfileCache(userId: string) {
+  profileCache.delete(userId);
+}
+
+async function getCachedProfile(userId: string): Promise<User | undefined> {
+  const cached = profileCache.get(userId);
+  if (cached && Date.now() - cached.ts < PROFILE_CACHE_TTL_MS) return cached.profile;
+  const profile = await storage.getUser(userId);
+  if (profile) profileCache.set(userId, { profile, ts: Date.now() });
+  return profile ?? undefined;
+}
+
 /** Generate a Jitsi Meet link for a session. No auth required. */
 function generateJitsiLink(): string {
   return `https://meet.jit.si/shifa-${crypto.randomUUID()}`;
@@ -170,7 +188,7 @@ function requireRoles(roles: string[]) {
     const authUser = (req as any).user as { id: string } | undefined;
     if (!authUser?.id) return res.status(401).json({ message: "Unauthorized" });
 
-    const profile = await storage.getUser(authUser.id);
+    const profile = await getCachedProfile(authUser.id);
     if (!profile) return res.status(403).json({ message: "Forbidden" });
 
     const userRole = normalizePlatformRole(profile.role);
@@ -444,6 +462,12 @@ export async function registerRoutes(
     try {
       const { email, password, role, firstName, lastName, phone } = req.body;
       const requestedRole = normalizeRole(role || "client");
+
+      const SIGNUP_ALLOWED_ROLES: PlatformRole[] = ["client", "therapist", "listener"];
+      if (!SIGNUP_ALLOWED_ROLES.includes(requestedRole)) {
+        return res.status(400).json({ message: "Invalid role for signup" });
+      }
+
       const { data, error } = await supabaseAdmin.auth.admin.createUser({
         email,
         password,
@@ -1376,6 +1400,18 @@ export async function registerRoutes(
               meetLink: apt.meetLink,
             });
           }
+        }
+
+        // Phase 4: Remind client to rate their mood 30 minutes after session completes
+        if (apt.status === "completed") {
+          setTimeout(() => {
+            notifyUser(
+              apt.clientId,
+              "How are you feeling?",
+              "Your session has ended. Take a moment to log how you feel now.",
+              { type: "mood_reminder", appointmentId: String(apt.id) },
+            ).catch(() => undefined);
+          }, 30 * 60 * 1000);
         }
       }
       res.json(apt);
@@ -2649,6 +2685,16 @@ export async function registerRoutes(
   app.post("/api/listener/apply", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
+
+      // Only clients may apply — prevent therapists/admins/moderators from demoting themselves
+      const callerProfile = await storage.getUser(userId);
+      if (callerProfile && !["client"].includes(normalizePlatformRole(callerProfile.role))) {
+        return res.status(403).json({
+          message: "Only clients can apply to become listeners",
+          code: "INVALID_ROLE_FOR_APPLICATION",
+        });
+      }
+
       // Must pass the qualification test first
       const testResult = await storage.getListenerQualificationTest(userId);
       if (!testResult || !testResult.passed) {
@@ -3848,6 +3894,7 @@ export async function registerRoutes(
       const updated = await storage.updateUser(id, { role: normalizedRole });
       if (!updated) return res.status(404).json({ message: "User not found" });
 
+      invalidateProfileCache(id);
       logAudit(req.user.id, "admin.user_role_change", "user", id, { newRole: normalizedRole }, req);
       res.json(updated);
     } catch (error) {
@@ -3875,6 +3922,7 @@ export async function registerRoutes(
         await ensureTherapistProfile(userId);
       }
 
+      invalidateProfileCache(userId);
       logAudit(actorId, "admin.role_grant", "user", userId, { role }, req);
       res.status(201).json({ user: updated, role, status: "active" });
     } catch {
@@ -3890,6 +3938,7 @@ export async function registerRoutes(
 
       const updated = await storage.updateUser(userId, { role: "client" });
 
+      invalidateProfileCache(userId);
       logAudit(actorId, "admin.role_revoke", "user", userId, { newRole: "client" }, req);
       res.json({ user: updated, revokedRole: req.body?.role, role: "client" });
     } catch {
@@ -4536,6 +4585,52 @@ export async function registerRoutes(
       res.status(500).json({ message: "Export failed" });
     }
   });
+
+  // ---- Phase 4: Announcements ----
+
+  app.get("/api/announcements", isAuthenticated, async (req: any, res) => {
+    try {
+      const role = req.user?.role as string | undefined;
+      const announcements = await storage.getActiveAnnouncements(role);
+      res.json(announcements);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch announcements" });
+    }
+  });
+
+  app.post("/api/admin/announcements", isAuthenticated, requireRoles(["admin", "moderator"]), async (req: any, res) => {
+    try {
+      const parsed = createAnnouncementSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid data", errors: parsed.error.issues });
+      const announcement = await storage.createAnnouncement(req.user.id, {
+        title: parsed.data.title,
+        body: parsed.data.body,
+        targetRoles: parsed.data.targetRoles,
+        priority: parsed.data.priority,
+        startsAt: parsed.data.startsAt,
+        expiresAt: parsed.data.expiresAt,
+      });
+      res.status(201).json(announcement);
+    } catch {
+      res.status(500).json({ message: "Failed to create announcement" });
+    }
+  });
+
+  // ---- Phase 4: Listener wellbeing moderator view ----
+
+  app.get("/api/admin/listeners/wellbeing", isAuthenticated, requireRoles(["admin", "moderator"]), async (_req, res) => {
+    try {
+      const aggregates = await storage.getListenerWellbeingAggregates();
+      res.json(aggregates);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch listener wellbeing data" });
+    }
+  });
+
+  // ---- Phase 4: Mood rating reminder on appointment completion ----
+  // NOTE: This logic is embedded in the appointment status update handler (PATCH /api/appointments/:id/status).
+  // When status transitions to "completed", a delayed notifyUser call fires after 30 minutes.
+  // The handler above already has this; see inline comment there.
 
   return httpServer;
 }

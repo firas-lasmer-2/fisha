@@ -9,6 +9,7 @@ import {
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "@/components/notification-bell";
+import { AnnouncementBanner } from "@/components/announcement-banner";
 import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -242,6 +243,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       </header>
 
       <main id="main-content" className="pt-14 min-h-screen pb-20 md:pb-0">
+        {user && <AnnouncementBanner />}
         {children}
       </main>
 

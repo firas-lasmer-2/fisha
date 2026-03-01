@@ -375,22 +375,9 @@ export default function TherapistDashboardPage() {
       label: t("therapist_dash.group_overview"),
       items: [
         { id: "overview", label: t("therapist_dash.overview"), icon: LayoutDashboard },
-        { id: "verification", label: t("therapist_dash.verification_tab"), icon: ShieldCheck },
-      ]
-    },
-    {
-      label: t("therapist_dash.group_clients"),
-      items: [
+        { id: "availability", label: t("therapist_dash.availability_tab"), icon: Calendar },
         { id: "sessions", label: t("therapist_dash.sessions_tab"), icon: BookOpen },
         { id: "clients", label: t("therapist_dash.clients_tab"), icon: Users },
-        { id: "reviews", label: t("therapist_dash.reviews_tab"), icon: MessageCircle },
-      ]
-    },
-    {
-      label: t("therapist_dash.group_availability"),
-      items: [
-        { id: "availability", label: t("therapist_dash.availability_tab"), icon: Calendar },
-        { id: "earnings", label: t("therapist_dash.earnings_tab"), icon: DollarSign },
       ]
     },
     {
@@ -398,9 +385,17 @@ export default function TherapistDashboardPage() {
       items: [
         { id: "profile", label: t("therapist_dash.profile_tab"), icon: ClipboardList },
         { id: "landing", label: t("therapist_dash.landing_tab"), icon: Globe },
+        { id: "verification", label: t("therapist_dash.verification_tab"), icon: ShieldCheck },
+      ]
+    },
+    {
+      label: t("therapist_dash.group_availability"),
+      items: [
+        { id: "earnings", label: t("therapist_dash.earnings_tab"), icon: DollarSign },
+        { id: "reviews", label: t("therapist_dash.reviews_tab"), icon: MessageCircle },
         { id: "settings", label: t("therapist_dash.settings_tab"), icon: Settings },
       ]
-    }
+    },
   ], [t]);
 
   if (isError) return <AppLayout><div className="max-w-4xl mx-auto p-4 sm:p-6"><PageError error={error as Error} resetFn={refetch} /></div></AppLayout>;

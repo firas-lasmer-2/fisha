@@ -5,7 +5,7 @@ type AppRole = JourneyRole | (string & {});
 
 const CANONICAL_HOME_BY_ROLE: Record<string, string> = {
   visitor: "/support",
-  client: "/workflow",
+  client: "/dashboard",
   therapist: "/therapist-dashboard",
   listener: "/listener/dashboard",
   moderator: "/admin/listeners",

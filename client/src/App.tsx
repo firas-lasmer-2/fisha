@@ -15,6 +15,7 @@ import { useRouteFocus } from "@/hooks/use-route-focus";
 import { KeyboardHelpModal } from "@/components/keyboard-help-modal";
 import { useQuery } from "@tanstack/react-query";
 import { fetchNavigationResolution, postAuthRouteForUser } from "@/lib/navigation";
+import { RoleGuard } from "@/components/role-guard";
 const LandingPage = lazy(() => import("@/pages/landing"));
 const AboutPage = lazy(() => import("@/pages/about"));
 const PrivacyPage = lazy(() => import("@/pages/privacy"));
@@ -193,11 +194,11 @@ function Router() {
             <AuthGuard allowIncompleteOnboarding><ListenerApplyPage /></AuthGuard>
           </Route>
           <Route path="/listener/dashboard">
-            <AuthGuard><ListenerDashboardPage /></AuthGuard>
+            <AuthGuard><RoleGuard roles={["listener"]}><ListenerDashboardPage /></RoleGuard></AuthGuard>
           </Route>
           <Route path="/hall-of-fame" component={ListenerHallOfFamePage} />
           <Route path="/admin/listeners">
-            <AuthGuard><AdminListenersPage /></AuthGuard>
+            <AuthGuard><RoleGuard roles={["admin", "moderator"]}><AdminListenersPage /></RoleGuard></AuthGuard>
           </Route>
           <Route path="/support" component={SupportPage} />
           <Route path="/workflow">
@@ -214,11 +215,11 @@ function Router() {
           </Route>
           <Route path="/therapist/:userId" component={TherapistProfilePage} />
           <Route path="/therapist-dashboard">
-            <AuthGuard><TherapistDashboardPage /></AuthGuard>
+            <AuthGuard><RoleGuard roles={["therapist"]}><TherapistDashboardPage /></RoleGuard></AuthGuard>
           </Route>
           <Route path="/p/:slug" component={TherapistLandingPage} />
           <Route path="/admin/dashboard">
-            <AuthGuard><AdminDashboardPage /></AuthGuard>
+            <AuthGuard><RoleGuard roles={["admin", "moderator"]}><AdminDashboardPage /></RoleGuard></AuthGuard>
           </Route>
           <Route path="/progress">
             <AuthGuard><ProgressPage /></AuthGuard>

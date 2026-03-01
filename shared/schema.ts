@@ -2066,3 +2066,40 @@ export const matchingPreferencesSchema = z.object({
   maxBudgetDinar: z.number().positive().optional(),
   sessionTypePreference: z.enum(["online", "in_person", "any"]).optional(),
 });
+
+// ---- Announcements ----
+
+export interface Announcement {
+  id: number;
+  authorId: string;
+  title: string;
+  body: string;
+  targetRoles: string[];
+  priority: "info" | "warning" | "urgent";
+  startsAt: string;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export function mapAnnouncement(row: any): Announcement {
+  return {
+    id: row.id,
+    authorId: row.author_id,
+    title: row.title,
+    body: row.body,
+    targetRoles: row.target_roles ?? [],
+    priority: row.priority ?? "info",
+    startsAt: row.starts_at,
+    expiresAt: row.expires_at ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+export const createAnnouncementSchema = z.object({
+  title: z.string().min(1).max(200),
+  body: z.string().min(1).max(2000),
+  targetRoles: z.array(z.string()).default([]),
+  priority: z.enum(["info", "warning", "urgent"]).default("info"),
+  startsAt: z.string().datetime().optional(),
+  expiresAt: z.string().datetime().nullable().optional(),
+});

@@ -5,6 +5,8 @@ import { motion } from "framer-motion";
 import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import { AppLayout } from "@/components/app-layout";
 import { PageHeader } from "@/components/page-header";
+import { DashboardSidebarLayout } from "@/components/dashboard-sidebar-layout";
+import type { DashboardNavGroup } from "@/components/dashboard-sidebar-layout";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
@@ -29,6 +31,14 @@ import type {
   PeerSession,
   User,
 } from "@shared/schema";
+import {
+  LayoutDashboard,
+  TrendingUp,
+  Heart,
+  UserCircle,
+  Trophy,
+  MessageCircle,
+} from "lucide-react";
 
 interface ListenerApplicationPayload {
   application: ListenerApplication | null;
@@ -87,6 +97,7 @@ export default function ListenerDashboardPage() {
   const { toast } = useToast();
   const rm = usePrefersReducedMotion();
   const safeFadeUp = safeVariants(fadeUp, rm);
+  const [activeSection, setActiveSection] = useState("status");
   const [isAvailable, setIsAvailable] = useState(false);
   const [headlineInput, setHeadlineInput] = useState("");
   const [aboutMeInput, setAboutMeInput] = useState("");
@@ -336,46 +347,63 @@ export default function ListenerDashboardPage() {
     }
   };
 
+  const navGroups: DashboardNavGroup[] = useMemo(() => [
+    {
+      label: "Overview",
+      items: [
+        { id: "status", label: "Status", icon: LayoutDashboard },
+        { id: "sessions", label: "Sessions", icon: MessageCircle, badge: activeSessions.length || undefined },
+      ],
+    },
+    {
+      label: "Growth",
+      items: [
+        { id: "progress", label: "Progress", icon: TrendingUp },
+        { id: "leaderboard", label: "Leaderboard", icon: Trophy },
+      ],
+    },
+    {
+      label: "My Account",
+      items: [
+        { id: "wellbeing", label: "Wellbeing", icon: Heart },
+        { id: "profile", label: "Profile", icon: UserCircle },
+      ],
+    },
+  ], [activeSessions.length]);
+
   return (
     <AppLayout>
-      <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-4">
+      <DashboardSidebarLayout
+        groups={navGroups}
+        activeId={activeSection}
+        onNavigate={setActiveSection}
+        title={t("listener.dashboard_title")}
+        subtitle={
+          profile?.verificationStatus === "approved"
+            ? isAvailable
+              ? "You're online — clients can find you right now."
+              : "You're paused — toggle available to start accepting sessions."
+            : "Complete your application to start supporting others."
+        }
+        headerAction={
+          profile?.verificationStatus === "approved" && activeSessions.length === 0 ? (
+            <Button
+              size="sm"
+              variant={isAvailable ? "outline" : "default"}
+              disabled={pauseMutation.isPending || inCooldown}
+              onClick={() => pauseMutation.mutate(isAvailable)}
+            >
+              {isAvailable ? "Pause" : "Go online"}
+            </Button>
+          ) : undefined
+        }
+      >
+        <div className="space-y-4">
 
-        <PageHeader title={t("listener.dashboard_title")} />
-
-        {/* Hero header */}
-        <motion.div custom={0} initial="hidden" animate="visible" variants={safeFadeUp}>
-          <div className="rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border p-5 sm:p-6 flex items-start gap-4">
-            <div className="h-12 w-12 rounded-xl gradient-calm flex items-center justify-center shrink-0">
-              <span className="text-2xl">🎧</span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <h1 className="text-xl font-bold">{t("listener.dashboard_title")}</h1>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                {profile?.verificationStatus === "approved"
-                  ? isAvailable
-                    ? "You're online — clients can find you right now."
-                    : "You're paused — toggle available to start accepting sessions."
-                  : "Complete your application to start supporting others."}
-              </p>
-            </div>
-            {profile?.verificationStatus === "approved" && activeSessions.length === 0 && (
-              <motion.div whileTap={{ scale: 0.96 }}>
-                <Button
-                  size="sm"
-                  variant={isAvailable ? "outline" : "default"}
-                  disabled={pauseMutation.isPending || inCooldown}
-                  onClick={() => pauseMutation.mutate(isAvailable)}
-                  className="shrink-0"
-                >
-                  {isAvailable ? "Pause" : "Go online"}
-                </Button>
-              </motion.div>
-            )}
-          </div>
-        </motion.div>
-
-        <motion.div custom={1} initial="hidden" animate="visible" variants={safeFadeUp}>
-        <Card>
+        {/* ---- STATUS tab ---- */}
+        {activeSection === "status" && (
+          <motion.div custom={1} initial="hidden" animate="visible" variants={safeFadeUp}>
+          <Card>
           <CardHeader className="pb-3">
             <CardTitle>{t("listener.dashboard_title")}</CardTitle>
           </CardHeader>
@@ -598,7 +626,11 @@ export default function ListenerDashboardPage() {
           </CardContent>
         </Card>
         </motion.div>
+        )} {/* end status section */}
 
+        {/* ---- PROGRESS tab ---- */}
+        {activeSection === "progress" && (
+        <div className="space-y-4">
         <motion.div custom={2} initial="hidden" animate="visible" variants={safeFadeUp}>
         <Card>
           <CardHeader className="pb-3">
@@ -673,7 +705,11 @@ export default function ListenerDashboardPage() {
           </CardContent>
         </Card>
         </motion.div>
+        </div>
+        )} {/* end progress section */}
 
+        {/* ---- WELLBEING tab ---- */}
+        {activeSection === "wellbeing" && (
         <motion.div custom={4} initial="hidden" animate="visible" variants={safeFadeUp}>
         <Card>
           <CardHeader className="pb-3">
@@ -744,7 +780,12 @@ export default function ListenerDashboardPage() {
             </Button>
           </CardContent>
         </Card>
+        </motion.div>
+        )} {/* end wellbeing section */}
 
+        {/* ---- PROFILE tab ---- */}
+        {activeSection === "profile" && (
+        <>
         {/* Public Profile Card */}
         <Card>
           <CardHeader className="pb-3">
@@ -797,7 +838,11 @@ export default function ListenerDashboardPage() {
             </Button>
           </CardContent>
         </Card>
+        </>
+        )} {/* end profile section */}
 
+        {/* ---- LEADERBOARD tab ---- */}
+        {activeSection === "leaderboard" && (
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">{t("listener.leaderboard_title")}</CardTitle>
@@ -954,7 +999,11 @@ export default function ListenerDashboardPage() {
             )}
           </CardContent>
         </Card>
+        )} {/* end leaderboard section */}
 
+        {/* ---- SESSIONS tab ---- */}
+        {activeSection === "sessions" && (
+        <>
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
@@ -1031,8 +1080,11 @@ export default function ListenerDashboardPage() {
             </Link>
           </CardContent>
         </Card>
-        </motion.div>
-      </div>
+        </>
+        )} {/* end sessions section */}
+
+        </div>
+      </DashboardSidebarLayout>
     </AppLayout>
   );
 }

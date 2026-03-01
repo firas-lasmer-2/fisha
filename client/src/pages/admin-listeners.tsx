@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ClipboardCheck, ShieldAlert, UserRoundCog, ArrowUpCircle } from "lucide-react";
+import { ClipboardCheck, ShieldAlert, UserRoundCog, ArrowUpCircle, Heart } from "lucide-react";
 import type { ListenerApplication, ListenerQualificationTest, PeerReport, TherapistProfile, TierUpgradeRequest, User } from "@shared/schema";
 
 interface AdminListenersPayload {
@@ -109,6 +109,24 @@ export default function AdminListenersPage() {
     },
   });
 
+  type WellbeingAggregate = {
+    listenerId: string;
+    displayName: string | null;
+    checkInCount: number;
+    avgStress: number | null;
+    avgEmotionalLoad: number | null;
+    latestCheckIn: string | null;
+    suggestCooldown: boolean;
+  };
+
+  const { data: wellbeingData = [] } = useQuery<WellbeingAggregate[]>({
+    queryKey: ["/api/admin/listeners/wellbeing"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/admin/listeners/wellbeing");
+      return res.json();
+    },
+  });
+
   const tierUpgradeReviewMutation = useMutation({
     mutationFn: async ({ id, status }: { id: number; status: "approved" | "rejected" }) => {
       await apiRequest("PATCH", `/api/admin/tier-upgrades/${id}`, { status });
@@ -181,7 +199,7 @@ export default function AdminListenersPage() {
         </div>
 
         <Tabs defaultValue="applications" className="space-y-4">
-          <TabsList className="grid grid-cols-4">
+          <TabsList className="grid grid-cols-5">
             <TabsTrigger value="applications">{t("admin.listeners_title")}</TabsTrigger>
             <TabsTrigger value="reports">{t("admin.open_reports")}</TabsTrigger>
             <TabsTrigger value="tiers">{t("admin.therapist_tiers")}</TabsTrigger>
@@ -191,6 +209,15 @@ export default function AdminListenersPage() {
               {tierUpgradeRequests.filter((r) => r.status === "pending").length > 0 && (
                 <Badge className="ms-1.5" variant="destructive">
                   {tierUpgradeRequests.filter((r) => r.status === "pending").length}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="wellbeing">
+              <Heart className="h-3.5 w-3.5 me-1" />
+              Wellbeing
+              {wellbeingData.filter((w) => w.suggestCooldown).length > 0 && (
+                <Badge className="ms-1.5" variant="destructive">
+                  {wellbeingData.filter((w) => w.suggestCooldown).length}
                 </Badge>
               )}
             </TabsTrigger>
@@ -509,6 +536,59 @@ export default function AdminListenersPage() {
                       )}
                     </div>
                   ))
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Wellbeing Tab — Phase 4 */}
+          <TabsContent value="wellbeing">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Heart className="h-4 w-4 text-rose-500" />
+                  Listener Wellbeing Overview
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {wellbeingData.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No wellbeing check-ins recorded yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {wellbeingData
+                      .sort((a, b) => (b.suggestCooldown ? 1 : 0) - (a.suggestCooldown ? 1 : 0))
+                      .map((w) => (
+                        <div
+                          key={w.listenerId}
+                          className={`rounded-lg border p-3 text-sm ${w.suggestCooldown ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30" : ""}`}
+                        >
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="font-medium">{w.displayName || w.listenerId.slice(0, 8)}</span>
+                            <div className="flex items-center gap-2">
+                              {w.suggestCooldown && (
+                                <Badge variant="outline" className="text-amber-700 border-amber-400 text-xs">
+                                  Suggest cooldown
+                                </Badge>
+                              )}
+                              <span className="text-xs text-muted-foreground">
+                                {w.checkInCount} check-in{w.checkInCount !== 1 ? "s" : ""}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex gap-4 mt-1.5 text-xs text-muted-foreground">
+                            {w.avgStress !== null && (
+                              <span>Avg stress: <span className="font-medium text-foreground">{w.avgStress.toFixed(1)}/5</span></span>
+                            )}
+                            {w.avgEmotionalLoad !== null && (
+                              <span>Emotional load: <span className="font-medium text-foreground">{w.avgEmotionalLoad.toFixed(1)}/5</span></span>
+                            )}
+                            {w.latestCheckIn && (
+                              <span>Last check-in: <span className="font-medium text-foreground">{new Date(w.latestCheckIn).toLocaleDateString()}</span></span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
                 )}
               </CardContent>
             </Card>

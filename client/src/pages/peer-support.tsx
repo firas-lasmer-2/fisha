@@ -92,10 +92,30 @@ export default function PeerSupportPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const messageListEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Filters
-  const [filterLanguage, setFilterLanguage] = useState("");
-  const [filterTopic, setFilterTopic] = useState("");
-  const [filterAvailable, setFilterAvailable] = useState(false);
+  // Filters — synced with URL params for persistence and shareability
+  const [filterLanguage, setFilterLanguage] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("language") ?? "";
+  });
+  const [filterTopic, setFilterTopic] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("topic") ?? "";
+  });
+  const [filterAvailable, setFilterAvailable] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("available") === "1";
+  });
+
+  // Keep URL params in sync with filter state
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (filterLanguage) params.set("language", filterLanguage); else params.delete("language");
+    if (filterTopic) params.set("topic", filterTopic); else params.delete("topic");
+    if (filterAvailable) params.set("available", "1"); else params.delete("available");
+    const newSearch = params.toString();
+    const newUrl = newSearch ? `${window.location.pathname}?${newSearch}` : window.location.pathname;
+    window.history.replaceState(null, "", newUrl);
+  }, [filterLanguage, filterTopic, filterAvailable]);
 
   // Confirm dialog
   const [confirmListener, setConfirmListener] = useState<BrowsableListener | null>(null);

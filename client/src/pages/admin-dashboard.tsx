@@ -49,7 +49,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { TherapistVerification, AuditLog, DoctorPayout, TierUpgradeRequest, UserSubscription } from "@shared/schema";
-import { PackageCheck, Clock, AlertTriangle, LayoutDashboard } from "lucide-react";
+import { PackageCheck, Clock, AlertTriangle, LayoutDashboard, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface AdminAnalytics {
   totalUsers: number;
@@ -87,6 +87,9 @@ export default function AdminDashboardPage() {
   const [reviewNotes, setReviewNotes] = useState<Record<number, string>>({});
   const [userSearch, setUserSearch] = useState("");
   const [userPage, setUserPage] = useState(1);
+  const [auditPage, setAuditPage] = useState(1);
+  const [flagsPage, setFlagsPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
 
   const [activeSection, setActiveSection] = useState("overview");
 
@@ -111,17 +114,19 @@ export default function AdminDashboardPage() {
   });
 
   const { data: auditLogs = [], isLoading: auditLoading } = useQuery<AuditLog[]>({
-    queryKey: ["/api/admin/audit-log"],
+    queryKey: ["/api/admin/audit-log", auditPage],
     queryFn: async () => {
-      const res = await apiRequest("GET", "/api/admin/audit-log?limit=50");
+      const offset = (auditPage - 1) * ITEMS_PER_PAGE;
+      const res = await apiRequest("GET", `/api/admin/audit-log?limit=${ITEMS_PER_PAGE}&offset=${offset}`);
       return res.json();
     },
   });
 
   const { data: contentFlags = [], isLoading: flagsLoading } = useQuery<ContentFlag[]>({
-    queryKey: ["/api/admin/content-flags"],
+    queryKey: ["/api/admin/content-flags", flagsPage],
     queryFn: async () => {
-      const res = await apiRequest("GET", "/api/admin/content-flags?status=pending&limit=50");
+      const offset = (flagsPage - 1) * ITEMS_PER_PAGE;
+      const res = await apiRequest("GET", `/api/admin/content-flags?status=pending&limit=${ITEMS_PER_PAGE}&offset=${offset}`);
       return res.json();
     },
   });
@@ -805,7 +810,8 @@ export default function AdminDashboardPage() {
                 {t("admin.no_pending_flags")}
               </div>
             ) : (
-              contentFlags
+              <>
+              {contentFlags
                 .filter((f) => f.status === "pending")
                 .map((flag) => (
                   <Card key={flag.id}>
@@ -848,7 +854,19 @@ export default function AdminDashboardPage() {
                       </div>
                     </CardContent>
                   </Card>
-                ))
+                ))}
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-xs text-muted-foreground">Page {flagsPage}</span>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" disabled={flagsPage === 1} onClick={() => setFlagsPage((p) => p - 1)}>
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={contentFlags.length < ITEMS_PER_PAGE} onClick={() => setFlagsPage((p) => p + 1)}>
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         )}
@@ -863,10 +881,11 @@ export default function AdminDashboardPage() {
                 {t("admin.no_audit_logs")}
               </div>
             ) : (
-              <div className="rounded-lg border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr>
+              <div className="space-y-3">
+                <div className="rounded-lg border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
                       <th className="text-left p-3 font-medium">{t("admin.table_action")}</th>
                       <th className="text-left p-3 font-medium">{t("admin.table_resource")}</th>
                       <th className="text-left p-3 font-medium">{t("admin.table_actor")}</th>
@@ -891,6 +910,20 @@ export default function AdminDashboardPage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-xs text-muted-foreground">
+                    Page {auditPage}
+                  </span>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" disabled={auditPage === 1} onClick={() => setAuditPage((p) => p - 1)}>
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={auditLogs.length < ITEMS_PER_PAGE} onClick={() => setAuditPage((p) => p + 1)}>
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
               </div>
             )}
           </div>

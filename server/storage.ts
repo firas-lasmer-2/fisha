@@ -57,6 +57,7 @@ import {
   mapSubscriptionPlan,
   mapUserSubscription,
   mapMatchingPreferences,
+  type Announcement, mapAnnouncement,
   SubscriptionPlan,
   UserSubscription,
   MatchingPreferences,
@@ -78,164 +79,33 @@ import {
   mapLocalizationAudit,
   toSnakeCase,
 } from "@shared/schema";
+import {
+  LISTENER_LEVEL_THRESHOLDS,
+  RATING_BONUS_BY_SCORE,
+  STREAK_BONUS_BY_MILESTONE,
+  BASE_SESSION_POINTS,
+  LOW_RATING_PENALTY,
+  DETAILED_FEEDBACK_BONUS,
+  REPORT_SEVERITY_PENALTY,
+  DIFFICULT_SESSION_COOLDOWN_MINUTES,
+  LISTENER_BADGE_DEFS,
+  trophyTierForRank,
+  listenerSeasonKeyForDate,
+  isValidListenerSeasonKey,
+  listenerSeasonRangeFromKey,
+  listenerLevelForPoints,
+  listenerNextLevelInfo,
+  type ListenerProgressSummary,
+  type ListenerLeaderboardEntry,
+  type ListenerRiskSnapshot,
+} from "./storage/listener-constants";
+export type {
+  ListenerProgressSummary,
+  ListenerLeaderboardEntry,
+  ListenerRiskSnapshot,
+} from "./storage/listener-constants";
 
 const supabase = supabaseAdmin;
-
-const LISTENER_LEVEL_THRESHOLDS = [0, 50, 150, 300, 500, 800, 1200, 1700, 2300, 3000];
-const RATING_BONUS_BY_SCORE: Record<number, number> = {
-  1: -10,
-  2: 0,
-  3: 8,
-  4: 16,
-  5: 24,
-};
-const STREAK_BONUS_BY_MILESTONE: Record<number, number> = {
-  3: 15,
-  7: 30,
-};
-const BASE_SESSION_POINTS = 8;
-const LOW_RATING_PENALTY = -20;
-const DETAILED_FEEDBACK_BONUS = 4;
-const REPORT_SEVERITY_PENALTY: Record<string, number> = {
-  low: -20,
-  medium: -40,
-  high: -80,
-  critical: -120,
-};
-const DIFFICULT_SESSION_COOLDOWN_MINUTES = 20;
-
-const LISTENER_BADGE_DEFS: Record<string, { title: string; description: string }> = {
-  first_session: {
-    title: "First Light",
-    description: "Completed the first rated peer-support session.",
-  },
-  streak_3: {
-    title: "Steady Presence",
-    description: "Maintained a positive streak for 3 sessions.",
-  },
-  streak_7: {
-    title: "Anchor Heart",
-    description: "Maintained a positive streak for 7 sessions.",
-  },
-  level_5: {
-    title: "Community Guide",
-    description: "Reached listener level 5.",
-  },
-  empathy_star: {
-    title: "Empathy Star",
-    description: "Sustained exceptional ratings over multiple sessions.",
-  },
-  endorsed_voice: {
-    title: "Endorsed Voice",
-    description: "Received at least 3 anonymous endorsements.",
-  },
-};
-
-function trophyTierForRank(rank: number): "gold" | "silver" | "bronze" | null {
-  if (rank === 1) return "gold";
-  if (rank === 2) return "silver";
-  if (rank === 3) return "bronze";
-  return null;
-}
-
-function listenerSeasonKeyForDate(date: Date): string {
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
-}
-
-function isValidListenerSeasonKey(value: string): boolean {
-  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
-}
-
-function listenerSeasonRangeFromKey(seasonKey: string): { startIso: string; endIso: string } {
-  const [yearText, monthText] = seasonKey.split("-");
-  const year = Number(yearText);
-  const monthIndex = Number(monthText) - 1;
-  const start = new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0, 0));
-  const end = new Date(Date.UTC(year, monthIndex + 1, 1, 0, 0, 0, 0));
-  return {
-    startIso: start.toISOString(),
-    endIso: end.toISOString(),
-  };
-}
-
-function listenerLevelForPoints(points: number): number {
-  const safePoints = Math.max(0, points);
-  let level = 1;
-  for (let i = 0; i < LISTENER_LEVEL_THRESHOLDS.length; i += 1) {
-    if (safePoints >= LISTENER_LEVEL_THRESHOLDS[i]) {
-      level = i + 1;
-    }
-  }
-  return level;
-}
-
-function listenerNextLevelInfo(points: number): {
-  nextLevel: number | null;
-  nextLevelThreshold: number | null;
-  pointsToNextLevel: number;
-} {
-  const safePoints = Math.max(0, points);
-  const currentLevel = listenerLevelForPoints(safePoints);
-  const nextLevelThreshold = LISTENER_LEVEL_THRESHOLDS[currentLevel];
-  if (nextLevelThreshold === undefined) {
-    return { nextLevel: null, nextLevelThreshold: null, pointsToNextLevel: 0 };
-  }
-  return {
-    nextLevel: currentLevel + 1,
-    nextLevelThreshold,
-    pointsToNextLevel: Math.max(0, nextLevelThreshold - safePoints),
-  };
-}
-
-export interface ListenerProgressSummary {
-  progress: ListenerProgress;
-  nextLevel: number | null;
-  nextLevelThreshold: number | null;
-  pointsToNextLevel: number;
-  averageRating: number;
-  ratingCount: number;
-  positiveStreak: number;
-  longestStreak: number;
-  endorsementsCount: number;
-  recentLedger: ListenerPointsLedger[];
-  badges: ListenerBadge[];
-  endorsements: ListenerEndorsement[];
-  wellbeing: {
-    latestCheckIn: ListenerWellbeingCheckIn | null;
-    checkInCount: number;
-    averageStressLevel: number | null;
-    averageEmotionalLoad: number | null;
-    suggestedCooldown: boolean;
-  };
-  cooldown: ListenerCooldown | null;
-}
-
-export interface ListenerLeaderboardEntry {
-  listenerId: string;
-  rank: number;
-  displayName: string;
-  level: number;
-  points: number;
-  averageRating: number;
-  ratingCount: number;
-  positiveStreak: number;
-  trophyTier: "gold" | "silver" | "bronze" | null;
-  certificationTitle: string | null;
-}
-
-export interface ListenerRiskSnapshot {
-  listenerId: string;
-  riskScore: number;
-  riskLevel: "low" | "medium" | "high";
-  openReports: number;
-  severeOpenReports: number;
-  recentLowRatings: number;
-  averageRating: number;
-  ratingCount: number;
-  penaltyPoints: number;
-}
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -563,6 +433,28 @@ export interface IStorage {
   // Phase B: Matching preferences
   getMatchingPreferences(userId: string): Promise<MatchingPreferences | undefined>;
   upsertMatchingPreferences(userId: string, data: Partial<Omit<MatchingPreferences, "userId" | "updatedAt">>): Promise<MatchingPreferences>;
+
+  // Phase 4: Announcements
+  getActiveAnnouncements(role?: string): Promise<Announcement[]>;
+  createAnnouncement(authorId: string, data: {
+    title: string;
+    body: string;
+    targetRoles?: string[];
+    priority?: string;
+    startsAt?: string;
+    expiresAt?: string | null;
+  }): Promise<Announcement>;
+
+  // Phase 4: Listener wellbeing aggregates (for moderator view)
+  getListenerWellbeingAggregates(): Promise<{
+    listenerId: string;
+    displayName: string | null;
+    checkInCount: number;
+    avgStress: number | null;
+    avgEmotionalLoad: number | null;
+    latestCheckIn: string | null;
+    suggestCooldown: boolean;
+  }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -770,15 +662,19 @@ export class DatabaseStorage implements IStorage {
       .order("last_message_at", { ascending: false });
     if (error || !convs) return [];
 
-    const result: (TherapyConversation & { otherUser: User })[] = [];
-    for (const conv of convs) {
-      const otherId = conv.client_id === userId ? conv.therapist_id : conv.client_id;
-      const otherUser = await this.getUser(otherId);
-      if (otherUser) {
-        result.push({ ...mapConversation(conv), otherUser });
-      }
-    }
-    return result;
+    // Batch-fetch all related user profiles in one query instead of N sequential calls
+    const otherIds = Array.from(new Set(convs.map((c) => c.client_id === userId ? c.therapist_id : c.client_id)));
+    const { data: profileRows } = await supabase.from("profiles").select("*").in("id", otherIds);
+    const usersMap = new Map<string, User>();
+    for (const row of profileRows ?? []) usersMap.set(row.id, mapProfile(row));
+
+    return convs
+      .map((conv) => {
+        const otherId = conv.client_id === userId ? conv.therapist_id : conv.client_id;
+        const otherUser = usersMap.get(otherId);
+        return otherUser ? { ...mapConversation(conv), otherUser } : null;
+      })
+      .filter((c): c is TherapyConversation & { otherUser: User } => c !== null);
   }
 
   async createConversation(conv: InsertTherapyConversation): Promise<TherapyConversation> {
@@ -896,15 +792,19 @@ export class DatabaseStorage implements IStorage {
       .order("scheduled_at", { ascending: false });
     if (error || !apts) return [];
 
-    const result: (Appointment & { otherUser: User })[] = [];
-    for (const apt of apts) {
-      const otherId = apt.client_id === userId ? apt.therapist_id : apt.client_id;
-      const otherUser = await this.getUser(otherId);
-      if (otherUser) {
-        result.push({ ...mapAppointment(apt), otherUser });
-      }
-    }
-    return result;
+    // Batch-fetch all related user profiles in one query instead of N sequential calls
+    const otherIds = Array.from(new Set(apts.map((a) => a.client_id === userId ? a.therapist_id : a.client_id)));
+    const { data: profileRows } = await supabase.from("profiles").select("*").in("id", otherIds);
+    const usersMap = new Map<string, User>();
+    for (const row of profileRows ?? []) usersMap.set(row.id, mapProfile(row));
+
+    return apts
+      .map((apt) => {
+        const otherId = apt.client_id === userId ? apt.therapist_id : apt.client_id;
+        const otherUser = usersMap.get(otherId);
+        return otherUser ? { ...mapAppointment(apt), otherUser } : null;
+      })
+      .filter((a): a is Appointment & { otherUser: User } => a !== null);
   }
 
   async getAppointment(id: number): Promise<Appointment | undefined> {
@@ -3759,6 +3659,110 @@ export class DatabaseStorage implements IStorage {
       .single();
     if (error || !data) throw new Error("Failed to upsert matching preferences");
     return mapMatchingPreferences(data);
+  }
+
+  // ---- Phase 4: Announcements ----
+
+  async getActiveAnnouncements(role?: string): Promise<Announcement[]> {
+    const now = new Date().toISOString();
+    let query = supabase
+      .from("announcements")
+      .select("*")
+      .lte("starts_at", now)
+      .or(`expires_at.is.null,expires_at.gt.${now}`)
+      .order("priority", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    const { data } = await query;
+    const rows = data ?? [];
+    if (!role) return rows.map(mapAnnouncement);
+    return rows
+      .filter((r: any) => !r.target_roles?.length || r.target_roles.includes(role))
+      .map(mapAnnouncement);
+  }
+
+  async createAnnouncement(
+    authorId: string,
+    data: {
+      title: string;
+      body: string;
+      targetRoles?: string[];
+      priority?: string;
+      startsAt?: string;
+      expiresAt?: string | null;
+    },
+  ): Promise<Announcement> {
+    const { data: row, error } = await supabaseAdmin
+      .from("announcements")
+      .insert({
+        author_id: authorId,
+        title: data.title,
+        body: data.body,
+        target_roles: data.targetRoles ?? [],
+        priority: data.priority ?? "info",
+        starts_at: data.startsAt ?? new Date().toISOString(),
+        expires_at: data.expiresAt ?? null,
+      })
+      .select("*")
+      .single();
+    if (error || !row) throw new Error("Failed to create announcement");
+    return mapAnnouncement(row);
+  }
+
+  // ---- Phase 4: Listener wellbeing aggregates ----
+
+  async getListenerWellbeingAggregates(): Promise<{
+    listenerId: string;
+    displayName: string | null;
+    checkInCount: number;
+    avgStress: number | null;
+    avgEmotionalLoad: number | null;
+    latestCheckIn: string | null;
+    suggestCooldown: boolean;
+  }[]> {
+    const { data: rows } = await supabaseAdmin
+      .from("listener_wellbeing_checkins")
+      .select("listener_id, stress_level, emotional_load, created_at")
+      .order("created_at", { ascending: false });
+
+    if (!rows || rows.length === 0) return [];
+
+    // Group by listener
+    const grouped = new Map<string, { stresses: number[]; loads: number[]; latest: string }>();
+    for (const row of rows as any[]) {
+      const id = String(row.listener_id);
+      if (!grouped.has(id)) grouped.set(id, { stresses: [], loads: [], latest: row.created_at });
+      const g = grouped.get(id)!;
+      if (row.stress_level !== null) g.stresses.push(Number(row.stress_level));
+      if (row.emotional_load !== null) g.loads.push(Number(row.emotional_load));
+      if (row.created_at > g.latest) g.latest = row.created_at;
+    }
+
+    const listenerIds = Array.from(grouped.keys());
+    const { data: profiles } = await supabaseAdmin
+      .from("profiles")
+      .select("id, display_name, first_name, last_name")
+      .in("id", listenerIds);
+    const profileMap = new Map<string, string | null>();
+    for (const p of profiles ?? []) {
+      const name = (p as any).display_name || [(p as any).first_name, (p as any).last_name].filter(Boolean).join(" ") || null;
+      profileMap.set(String((p as any).id), name);
+    }
+
+    return Array.from(grouped.entries()).map(([listenerId, g]) => {
+      const avgStress = g.stresses.length ? g.stresses.reduce((a, b) => a + b, 0) / g.stresses.length : null;
+      const avgEmotionalLoad = g.loads.length ? g.loads.reduce((a, b) => a + b, 0) / g.loads.length : null;
+      const recentHigh = g.stresses.slice(0, 3).filter((s) => s >= 4).length >= 2;
+      return {
+        listenerId,
+        displayName: profileMap.get(listenerId) ?? null,
+        checkInCount: Math.max(g.stresses.length, g.loads.length),
+        avgStress,
+        avgEmotionalLoad,
+        latestCheckIn: g.latest,
+        suggestCooldown: recentHigh,
+      };
+    });
   }
 
 }

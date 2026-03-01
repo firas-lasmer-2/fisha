@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { PageSkeleton } from "@/components/page-skeleton";
 import { EmptyState } from "@/components/empty-state";
 import { PageError } from "@/components/page-error";
+import { E2EErrorBanner } from "@/components/e2e-error-banner";
 import {
   decryptMessageContent,
   encryptMessageContent,
@@ -46,6 +47,7 @@ export default function MessagesPage() {
   const [selectedConv, setSelectedConv] = useState<number | null>(null);
   const [messageText, setMessageText] = useState("");
   const [conversationKey, setConversationKey] = useState<CryptoKey | null>(null);
+  const [keyLoadFailed, setKeyLoadFailed] = useState(false);
   const [decryptedMessages, setDecryptedMessages] = useState<Record<number, string>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const convListRef = useRef<HTMLDivElement>(null);
@@ -61,6 +63,7 @@ export default function MessagesPage() {
     (TherapyConversation & { otherUser: User })[]
   >({
     queryKey: ["/api/conversations"],
+    staleTime: 30_000, // conversations update frequently — revalidate after 30s
   });
 
   const convVirtualizer = useVirtualizer({
@@ -132,6 +135,7 @@ export default function MessagesPage() {
     async function ensureConversationKey() {
       if (!user || !selectedConvData) {
         setConversationKey(null);
+        setKeyLoadFailed(false);
         return;
       }
 
@@ -141,9 +145,18 @@ export default function MessagesPage() {
         : selectedConvData.therapistKeyEncrypted;
 
       if (userWrappedKey) {
-        const key = await unwrapConversationKey(user.id, userWrappedKey);
-        if (!cancelled) {
-          setConversationKey(key);
+        try {
+          const key = await unwrapConversationKey(user.id, userWrappedKey);
+          if (!cancelled) {
+            setConversationKey(key);
+            setKeyLoadFailed(false);
+          }
+        } catch {
+          // Private key missing from localStorage — prompt user to restore
+          if (!cancelled) {
+            setConversationKey(null);
+            setKeyLoadFailed(true);
+          }
         }
         return;
       }
@@ -151,6 +164,7 @@ export default function MessagesPage() {
       if (!user.publicKey || !selectedConvData.otherUser.publicKey) {
         if (!cancelled) {
           setConversationKey(null);
+          setKeyLoadFailed(false);
         }
         return;
       }
@@ -171,12 +185,14 @@ export default function MessagesPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
       if (!cancelled) {
         setConversationKey(generatedKey);
+        setKeyLoadFailed(false);
       }
     }
 
     ensureConversationKey().catch(() => {
       if (!cancelled) {
         setConversationKey(null);
+        setKeyLoadFailed(true);
       }
     });
 
@@ -343,7 +359,11 @@ export default function MessagesPage() {
                 </span>
               </div>
 
-              {!conversationKey && (
+              {keyLoadFailed && (
+                <E2EErrorBanner />
+              )}
+
+              {!keyLoadFailed && !conversationKey && (
                 <div className="p-3 border-b bg-muted/40 text-muted-foreground text-xs flex items-center gap-2">
                   <Lock className="h-3.5 w-3.5 shrink-0" />
                   <span>Messages are sent. End-to-end encryption will activate once both parties have set up their keys.</span>
