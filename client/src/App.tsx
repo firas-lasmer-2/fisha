@@ -1,4 +1,5 @@
 import { Switch, Route, useLocation } from "wouter";
+import { lazy, Suspense } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -9,58 +10,50 @@ import { AnimatePresence, motion } from "framer-motion";
 import { usePrefersReducedMotion } from "@/lib/motion";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { OfflineIndicator } from "@/components/offline-indicator";
-import LandingPage from "@/pages/landing";
-import AboutPage from "@/pages/about";
-import PrivacyPage from "@/pages/privacy";
-import TermsPage from "@/pages/terms";
-import ContactPage from "@/pages/contact";
-import DashboardPage from "@/pages/dashboard";
-import TherapistsPage from "@/pages/therapists";
-import MessagesPage from "@/pages/messages";
-import AppointmentsPage from "@/pages/appointments";
-import MoodPage from "@/pages/mood";
-import JournalPage from "@/pages/journal";
-import ResourcesPage from "@/pages/resources";
-import SelfCarePage from "@/pages/self-care";
-import GrowPage from "@/pages/grow";
-import SettingsPage from "@/pages/settings";
-import TherapistProfilePage from "@/pages/therapist-profile";
-import TherapistDashboardPage from "@/pages/therapist-dashboard";
-import LoginPage from "@/pages/login";
-import SignupPage from "@/pages/signup";
-import ForgotPasswordPage from "@/pages/forgot-password";
-import ResetPasswordPage from "@/pages/reset-password";
-import VerifyEmailPage from "@/pages/verify-email";
-import OnboardingPage from "@/pages/onboarding";
-import CrisisPage from "@/pages/crisis";
-import ListenPage from "@/pages/listen";
-import ListenerApplyPage from "@/pages/listener-apply";
-import ListenerTestPage from "@/pages/listener-test";
-import ListenerDashboardPage from "@/pages/listener-dashboard";
-import ListenerHallOfFamePage from "@/pages/listener-hall-of-fame";
-import AdminListenersPage from "@/pages/admin-listeners";
-import WelcomePage from "@/pages/welcome";
-import NotFound from "@/pages/not-found";
-import TherapistLandingPage from "@/pages/therapist-landing";
-import AdminDashboardPage from "@/pages/admin-dashboard";
-import ProgressPage from "@/pages/progress";
-import SupportPage from "@/pages/support";
-import PeerSupportPage from "@/pages/peer-support";
-import WorkflowHubPage from "@/pages/workflow-hub";
-
-function homeRouteForRole(role: string | null | undefined) {
-  if (role === "therapist") return "/therapist-dashboard";
-  if (role === "listener") return "/listener/dashboard";
-  return "/workflow";
-}
+import { CommandPalette } from "@/components/command-palette";
+import { useRouteFocus } from "@/hooks/use-route-focus";
+import { KeyboardHelpModal } from "@/components/keyboard-help-modal";
+import { useQuery } from "@tanstack/react-query";
+import { fetchNavigationResolution, postAuthRouteForUser } from "@/lib/navigation";
+const LandingPage = lazy(() => import("@/pages/landing"));
+const AboutPage = lazy(() => import("@/pages/about"));
+const PrivacyPage = lazy(() => import("@/pages/privacy"));
+const TermsPage = lazy(() => import("@/pages/terms"));
+const ContactPage = lazy(() => import("@/pages/contact"));
+const TherapistsPage = lazy(() => import("@/pages/therapists"));
+const MessagesPage = lazy(() => import("@/pages/messages"));
+const AppointmentsPage = lazy(() => import("@/pages/appointments"));
+const MoodPage = lazy(() => import("@/pages/mood"));
+const JournalPage = lazy(() => import("@/pages/journal"));
+const ResourcesPage = lazy(() => import("@/pages/resources"));
+const SelfCarePage = lazy(() => import("@/pages/self-care"));
+const GrowPage = lazy(() => import("@/pages/grow"));
+const SettingsPage = lazy(() => import("@/pages/settings"));
+const TherapistProfilePage = lazy(() => import("@/pages/therapist-profile"));
+const TherapistDashboardPage = lazy(() => import("@/pages/therapist-dashboard"));
+const LoginPage = lazy(() => import("@/pages/login"));
+const SignupPage = lazy(() => import("@/pages/signup"));
+const ForgotPasswordPage = lazy(() => import("@/pages/forgot-password"));
+const ResetPasswordPage = lazy(() => import("@/pages/reset-password"));
+const VerifyEmailPage = lazy(() => import("@/pages/verify-email"));
+const OnboardingPage = lazy(() => import("@/pages/onboarding"));
+const CrisisPage = lazy(() => import("@/pages/crisis"));
+const ListenerApplyPage = lazy(() => import("@/pages/listener-apply"));
+const ListenerTestPage = lazy(() => import("@/pages/listener-test"));
+const ListenerDashboardPage = lazy(() => import("@/pages/listener-dashboard"));
+const ListenerHallOfFamePage = lazy(() => import("@/pages/listener-hall-of-fame"));
+const AdminListenersPage = lazy(() => import("@/pages/admin-listeners"));
+const WelcomePage = lazy(() => import("@/pages/welcome"));
+const NotFound = lazy(() => import("@/pages/not-found"));
+const TherapistLandingPage = lazy(() => import("@/pages/therapist-landing"));
+const AdminDashboardPage = lazy(() => import("@/pages/admin-dashboard"));
+const ProgressPage = lazy(() => import("@/pages/progress"));
+const SupportPage = lazy(() => import("@/pages/support"));
+const PeerSupportPage = lazy(() => import("@/pages/peer-support"));
+const WorkflowHubPage = lazy(() => import("@/pages/workflow-hub"));
 
 function effectiveRole(user: { role?: string | null } | null | undefined) {
   return user?.role;
-}
-
-function shouldShowWelcome() {
-  if (typeof window === "undefined") return false;
-  return localStorage.getItem("shifa-show-welcome") === "1";
 }
 
 function AuthGuard({
@@ -109,14 +102,7 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (user) {
-    const role = effectiveRole(user);
-    const isClient = role === "client";
-    const target = isClient && !user.onboardingCompleted
-      ? "/onboarding"
-      : shouldShowWelcome() && isClient
-        ? "/welcome"
-      : homeRouteForRole(role);
-    navigate(target);
+    navigate(postAuthRouteForUser(user));
     return null;
   }
 
@@ -129,20 +115,30 @@ function DashboardRoute() {
 
   if (!user) return null;
 
-  const role = effectiveRole(user);
+  navigate(postAuthRouteForUser(user));
+  return null;
+}
 
-  if (role === "client" && shouldShowWelcome()) {
-    navigate("/welcome");
+function LegacyRedirectRoute({ path }: { path: string }) {
+  const { user } = useAuth();
+  const [, navigate] = useLocation();
+  const { data } = useQuery({
+    queryKey: ["/api/navigation/resolve", path, user?.role || "visitor"],
+    queryFn: () => fetchNavigationResolution(path, (user?.role as any) || "visitor"),
+  });
+
+  if (data?.status === "redirect" && data.targetPath) {
+    navigate(data.targetPath);
     return null;
   }
 
-  navigate(homeRouteForRole(role));
-  return null;
+  return <NotFound />;
 }
 
 function Router() {
   const [location] = useLocation();
   const reducedMotion = usePrefersReducedMotion();
+  useRouteFocus();
 
   return (
     <AnimatePresence mode="wait" initial={false}>
@@ -153,6 +149,11 @@ function Router() {
         exit={reducedMotion ? {} : { opacity: 0, y: -8 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
       >
+        <Suspense fallback={
+          <div className="min-h-screen flex items-center justify-center">
+            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          </div>
+        }>
         <Switch location={location}>
           <Route path="/" component={LandingPage} />
           <Route path="/about" component={AboutPage} />
@@ -180,7 +181,7 @@ function Router() {
             <AuthGuard allowIncompleteOnboarding><CrisisPage /></AuthGuard>
           </Route>
           <Route path="/listen">
-            <AuthGuard><ListenPage /></AuthGuard>
+            <AuthGuard><PeerSupportPage /></AuthGuard>
           </Route>
           <Route path="/peer-support">
             <AuthGuard><PeerSupportPage /></AuthGuard>
@@ -225,6 +226,18 @@ function Router() {
           <Route path="/dashboard">
             <AuthGuard><DashboardRoute /></AuthGuard>
           </Route>
+          <Route path="/home">
+            <LegacyRedirectRoute path="/home" />
+          </Route>
+          <Route path="/start">
+            <LegacyRedirectRoute path="/start" />
+          </Route>
+          <Route path="/listener">
+            <LegacyRedirectRoute path="/listener" />
+          </Route>
+          <Route path="/admin">
+            <LegacyRedirectRoute path="/admin" />
+          </Route>
           <Route path="/messages">
             <AuthGuard><MessagesPage /></AuthGuard>
           </Route>
@@ -239,6 +252,7 @@ function Router() {
           </Route>
           <Route component={NotFound} />
         </Switch>
+        </Suspense>
       </motion.div>
     </AnimatePresence>
   );
@@ -246,17 +260,19 @@ function Router() {
 
 function App() {
   return (
-    <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <I18nProvider>
+    <QueryClientProvider client={queryClient}>
+      <I18nProvider>
+        <ErrorBoundary>
           <TooltipProvider>
             <Toaster />
             <OfflineIndicator />
+            <CommandPalette />
+            <KeyboardHelpModal />
             <Router />
           </TooltipProvider>
-        </I18nProvider>
-      </QueryClientProvider>
-    </ErrorBoundary>
+        </ErrorBoundary>
+      </I18nProvider>
+    </QueryClientProvider>
   );
 }
 

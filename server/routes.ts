@@ -10,6 +10,7 @@ import { mapProfile, type User,
   onboardingRequestSchema, reviewRequestSchema, slotCreateRequestSchema,
   paymentInitiateRequestSchema, queueJoinRequestSchema, peerMessageRequestSchema,
   purchaseSubscriptionSchema, matchingPreferencesSchema,
+  updateFeatureInventoryItemSchema, localizationAuditRunSchema, updateLocalizationAuditSchema,
 } from "@shared/schema";
 import { authLimiter, webhookLimiter, paymentLimiter, bookingLimiter, displayNameLimiter } from "./middleware/rate-limit";
 import { QUALIFICATION_QUESTIONS, scoreAnswers } from "@shared/qualification-questions";
@@ -41,6 +42,7 @@ const LISTENER_HIGH_LOAD_COOLDOWN_MINUTES = 45;
 const PLATFORM_ROLES = ["client", "therapist", "listener", "moderator", "admin"] as const;
 
 type PlatformRole = (typeof PLATFORM_ROLES)[number];
+type JourneyRole = PlatformRole | "visitor";
 
 function normalizePlatformRole(value: unknown): PlatformRole {
   const role = String(value || "").trim();
@@ -48,6 +50,12 @@ function normalizePlatformRole(value: unknown): PlatformRole {
     return role as PlatformRole;
   }
   return "client";
+}
+
+function normalizeJourneyRole(value: unknown): JourneyRole {
+  const role = String(value || "").trim();
+  if (role === "visitor") return "visitor";
+  return normalizePlatformRole(role);
 }
 
 function listenerSeasonKeyForDate(date: Date): string {
@@ -590,6 +598,92 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/navigation/manifest", async (req, res) => {
+    try {
+      const role = normalizeJourneyRole(req.query.role || "visitor");
+      const surface = String(req.query.surface || "nav").trim() || "nav";
+      const routePath = typeof req.query.routePath === "string" ? req.query.routePath : undefined;
+      const items = await storage.listFeatureInventoryItems({
+        surface,
+        routePath,
+        role,
+        statuses: ["primary", "secondary", "experimental"],
+      });
+
+      const toEntry = (item: any) => ({
+        id: item.id,
+        featureKey: item.featureKey,
+        labelKey: item.labelKey,
+        summaryKey: item.summaryKey,
+        href: item.destinationPath || item.replacementRoute || item.routePath,
+        goalKey: item.goalKey,
+        status: item.status,
+      });
+
+      const inventoryVersion = items
+        .map((item) => item.updatedAt || item.createdAt)
+        .filter(Boolean)
+        .sort()
+        .at(-1) || new Date().toISOString();
+
+      res.json({
+        role,
+        surface,
+        primaryPaths: items.filter((item) => item.status === "primary").map(toEntry),
+        secondaryPaths: items.filter((item) => item.status !== "primary").map(toEntry),
+        inventoryVersion,
+      });
+    } catch {
+      res.status(500).json({ message: "Failed to load navigation manifest" });
+    }
+  });
+
+  app.get("/api/navigation/resolve", async (req, res) => {
+    try {
+      const path = String(req.query.path || "").trim();
+      if (!path) {
+        return res.status(400).json({ message: "Path is required" });
+      }
+
+      const role = normalizeJourneyRole(req.query.role || "visitor");
+      const redirectRule = await storage.getRedirectRuleForPath(path, role);
+      if (redirectRule) {
+        return res.json({
+          path,
+          status: "redirect",
+          targetPath: redirectRule.targetPath,
+          reason: redirectRule.reason,
+          messageKey: redirectRule.messageKey,
+        });
+      }
+
+      const [journeyPaths, inventoryItems] = await Promise.all([
+        storage.listJourneyPaths({ statuses: ["active"] }),
+        storage.listFeatureInventoryItems({ role, statuses: ["primary", "secondary", "experimental"] }),
+      ]);
+
+      if (journeyPaths.some((item) => item.destinationPath === path) || inventoryItems.some((item) => item.destinationPath === path)) {
+        return res.json({
+          path,
+          status: "direct",
+          targetPath: path,
+          reason: null,
+          messageKey: null,
+        });
+      }
+
+      return res.status(404).json({
+        path,
+        status: "missing",
+        targetPath: null,
+        reason: null,
+        messageKey: null,
+      });
+    } catch {
+      res.status(500).json({ message: "Failed to resolve navigation target" });
+    }
+  });
+
   app.get("/api/workflow/overview", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id as string;
@@ -597,10 +691,16 @@ export async function registerRoutes(
       const hydratedProfile = profile ?? fallbackProfile({ id: userId, email: req.user.email });
       const activeRole = normalizePlatformRole(hydratedProfile.role);
 
-      const [appointments, peerSessions, unreadCount] = await Promise.all([
+      const [appointments, peerSessions, unreadCount, workflowItems, homePaths] = await Promise.all([
         storage.getAppointments(userId),
         storage.getPeerSessionsByUser(userId),
         storage.getUnreadCount(userId),
+        storage.listFeatureInventoryItems({
+          surface: "workflow",
+          role: activeRole,
+          statuses: ["primary", "secondary", "experimental"],
+        }),
+        storage.listJourneyPaths({ role: activeRole, stage: "home", statuses: ["active"] }),
       ]);
 
       const upcomingAppointments = (appointments || []).filter((apt) => {
@@ -633,87 +733,119 @@ export async function registerRoutes(
         openPeerReports = (reports || []).length;
       }
 
-      const recommendations: Array<{ id: string; title: string; description: string; href: string }> = [];
+      const home = homePaths[0] || null;
+      const secondaryActions = workflowItems
+        .filter((item) => item.status !== "primary")
+        .map((item) => ({
+          id: item.featureKey,
+          labelKey: item.labelKey,
+          summaryKey: item.summaryKey,
+          href: item.destinationPath || item.replacementRoute || item.routePath,
+          priority: "secondary",
+        }));
+
+      const primaryActions: Array<{
+        id: string;
+        labelKey: string;
+        summaryKey: string | null;
+        href: string;
+        priority: "primary";
+      }> = [];
+
       if (activeRole === "client") {
         if (activePeerSessions > 0) {
-          recommendations.push({
+          primaryActions.push({
             id: "continue_peer_session",
-            title: "Continue active peer support",
-            description: "You already have an active chat session with a listener.",
+            labelKey: "workflow.client.active_peer.label",
+            summaryKey: "workflow.client.active_peer.summary",
             href: "/peer-support",
+            priority: "primary",
           });
         } else {
-          recommendations.push({
-            id: "choose_support_path",
-            title: "Choose support path",
-            description: "Use the guided triage to pick listener, therapist, or self-care.",
-            href: "/support",
+          const primaryItem = workflowItems.find((item) => item.status === "primary");
+          primaryActions.push({
+            id: primaryItem?.featureKey || "client-workflow-support",
+            labelKey: primaryItem?.labelKey || "workflow.client.primary.label",
+            summaryKey: primaryItem?.summaryKey || "workflow.client.primary.summary",
+            href: primaryItem?.destinationPath || "/support",
+            priority: "primary",
           });
         }
-        recommendations.push({
-          id: "review_appointments",
-          title: "Check upcoming appointments",
-          description: "Confirm schedule and prepare notes before your next session.",
-          href: "/appointments",
-        });
       } else if (activeRole === "listener") {
         if (activeCooldown) {
-          recommendations.push({
+          primaryActions.push({
             id: "listener_recovery",
-            title: "Complete wellbeing check-in",
-            description: "Cooldown is active. Submit your check-in to resume safely.",
+            labelKey: "workflow.listener.cooldown.label",
+            summaryKey: "workflow.listener.cooldown.summary",
             href: "/peer-support",
+            priority: "primary",
           });
         } else if (!listenerProfile || !["trial", "live"].includes(listenerProfile.activationStatus)) {
-          recommendations.push({
+          primaryActions.push({
             id: "listener_readiness",
-            title: "Complete listener readiness",
-            description: "Finish your listener profile and activation workflow.",
+            labelKey: "workflow.listener.readiness.label",
+            summaryKey: "workflow.listener.readiness.summary",
             href: "/listener/dashboard",
+            priority: "primary",
           });
         } else {
-          recommendations.push({
-            id: "go_online_listener",
-            title: "Go online for clients",
-            description: "Set availability and accept sessions from clients.",
-            href: "/listener/dashboard",
+          const primaryItem = workflowItems.find((item) => item.status === "primary");
+          primaryActions.push({
+            id: primaryItem?.featureKey || "listener-workflow-dashboard",
+            labelKey: primaryItem?.labelKey || "workflow.listener.primary.label",
+            summaryKey: primaryItem?.summaryKey || "workflow.listener.primary.summary",
+            href: primaryItem?.destinationPath || "/listener/dashboard",
+            priority: "primary",
           });
         }
-        recommendations.push({
-          id: "peer_support_workspace",
-          title: "Open peer support workspace",
-          description: "Browse, connect, and manage active peer sessions.",
-          href: "/peer-support",
-        });
-      } else if (activeRole === "therapist") {
-        recommendations.push({
-          id: "therapist_schedule",
-          title: "Manage therapist schedule",
-          description: "Review slots, appointments, and client messages.",
-          href: "/therapist-dashboard",
-        });
       } else if (activeRole === "moderator" || activeRole === "admin") {
         if (openPeerReports > 0 || pendingListenerApplications > 0) {
-          recommendations.push({
+          primaryActions.push({
             id: "moderation_queue",
-            title: "Review moderation queue",
-            description: "Resolve open reports and pending listener applications.",
+            labelKey: "workflow.moderator.primary.label",
+            summaryKey: "workflow.moderator.primary.summary",
             href: "/admin/listeners",
+            priority: "primary",
+          });
+        } else {
+          const primaryItem = workflowItems.find((item) => item.status === "primary");
+          primaryActions.push({
+            id: primaryItem?.featureKey || `${activeRole}-workflow-dashboard`,
+            labelKey: primaryItem?.labelKey || (activeRole === "admin" ? "workflow.admin.primary.label" : "workflow.moderator.primary.label"),
+            summaryKey: primaryItem?.summaryKey || (activeRole === "admin" ? "workflow.admin.primary.summary" : "workflow.moderator.primary.summary"),
+            href: primaryItem?.destinationPath || (activeRole === "admin" ? "/admin/dashboard" : "/admin/listeners"),
+            priority: "primary",
           });
         }
-        recommendations.push({
-          id: "admin_overview",
-          title: "Open admin dashboard",
-          description: "Track platform health, growth, and operations.",
-          href: "/admin/dashboard",
+      } else {
+        const primaryItem = workflowItems.find((item) => item.status === "primary");
+        primaryActions.push({
+          id: primaryItem?.featureKey || "therapist-workflow-dashboard",
+          labelKey: primaryItem?.labelKey || "workflow.therapist.primary.label",
+          summaryKey: primaryItem?.summaryKey || "workflow.therapist.primary.summary",
+          href: primaryItem?.destinationPath || "/therapist-dashboard",
+          priority: "primary",
         });
       }
+
+      const localizationAudits = await storage.listLocalizationAudits();
+      const localizationStatus = localizationAudits.some((audit) => audit.status === "blocked")
+        ? "blocked"
+        : localizationAudits.some((audit) => audit.status === "pending" || audit.status === "in_review")
+          ? "partial"
+          : "approved";
 
       res.json({
         user: {
           id: hydratedProfile.id,
           role: activeRole,
         },
+        home: home ? {
+          stage: home.stage,
+          destinationPath: home.destinationPath,
+          labelKey: home.labelKey,
+          summaryKey: home.summaryKey,
+        } : null,
         counts: {
           unreadMessages: unreadCount,
           upcomingAppointments,
@@ -731,10 +863,94 @@ export async function registerRoutes(
           pendingListenerApplications,
           openPeerReports,
         },
-        recommendations,
+        primaryActions,
+        secondaryActions,
+        localizationStatus,
       });
     } catch {
       res.status(500).json({ message: "Failed to build workflow overview" });
+    }
+  });
+
+  app.get("/api/admin/feature-inventory", isAuthenticated, requireRoles(["admin", "moderator"]), async (req, res) => {
+    try {
+      const status = typeof req.query.status === "string" ? req.query.status : undefined;
+      const surface = typeof req.query.surface === "string" ? req.query.surface : undefined;
+      const role = typeof req.query.role === "string" ? req.query.role : undefined;
+      const items = await storage.listFeatureInventoryItems({
+        surface,
+        role,
+        statuses: status ? [status] : undefined,
+      });
+
+      const totals = {
+        primary: items.filter((item) => item.status === "primary").length,
+        secondary: items.filter((item) => item.status === "secondary").length,
+        experimental: items.filter((item) => item.status === "experimental").length,
+        retired: items.filter((item) => item.status === "retired").length,
+      };
+
+      res.json({ items, totals });
+    } catch {
+      res.status(500).json({ message: "Failed to load feature inventory" });
+    }
+  });
+
+  app.patch("/api/admin/feature-inventory/:itemId", isAuthenticated, requireRoles(["admin", "moderator"]), validateBody(updateFeatureInventoryItemSchema), async (req: any, res) => {
+    try {
+      const updated = await storage.updateFeatureInventoryItem(req.params.itemId, {
+        ...req.body,
+        ownerUserId: req.body.ownerUserId || req.user.id,
+        lastReviewedAt: new Date().toISOString(),
+      });
+      if (!updated) {
+        return res.status(404).json({ message: "Feature inventory item not found" });
+      }
+      res.json(updated);
+    } catch (error: any) {
+      res.status(400).json({ message: error?.message || "Failed to update feature inventory item" });
+    }
+  });
+
+  app.get("/api/admin/localization-audits", isAuthenticated, requireRoles(["admin", "moderator"]), async (req, res) => {
+    try {
+      const route = typeof req.query.route === "string" ? req.query.route : undefined;
+      const language = typeof req.query.language === "string" ? req.query.language : undefined;
+      const status = typeof req.query.status === "string" ? req.query.status : undefined;
+      const audits = await storage.listLocalizationAudits({ route, language, status });
+      res.json({ audits });
+    } catch {
+      res.status(500).json({ message: "Failed to load localization audits" });
+    }
+  });
+
+  app.post("/api/admin/localization-audits/run", isAuthenticated, requireRoles(["admin", "moderator"]), validateBody(localizationAuditRunSchema), async (req: any, res) => {
+    try {
+      const audits = await storage.runLocalizationAudits(req.body.routes, req.body.languages);
+      res.status(202).json({
+        status: "queued",
+        queuedRoutes: req.body.routes.length,
+        queuedLanguages: req.body.languages.length,
+        audits,
+      });
+    } catch {
+      res.status(500).json({ message: "Failed to queue localization audits" });
+    }
+  });
+
+  app.patch("/api/admin/localization-audits/:id", isAuthenticated, requireRoles(["admin", "moderator"]), validateBody(updateLocalizationAuditSchema), async (req: any, res) => {
+    try {
+      const updated = await storage.updateLocalizationAudit(req.params.id, {
+        ...req.body,
+        reviewedByUserId: req.body.reviewedByUserId || req.user.id,
+        reviewedAt: new Date().toISOString(),
+      });
+      if (!updated) {
+        return res.status(404).json({ message: "Localization audit not found" });
+      }
+      res.json(updated);
+    } catch (error: any) {
+      res.status(400).json({ message: error?.message || "Failed to update localization audit" });
     }
   });
 
@@ -752,6 +968,7 @@ export async function registerRoutes(
           req.query.tier === "graduated_doctor" || req.query.tier === "premium_doctor"
             ? (req.query.tier as "graduated_doctor" | "premium_doctor")
             : undefined,
+        search: req.query.search as string | undefined,
       };
       const therapists = await storage.getTherapistProfiles(filters);
       res.json(therapists);

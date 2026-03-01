@@ -41,6 +41,7 @@ import { fadeUp, cardStagger, usePrefersReducedMotion, safeVariants } from "@/li
 import type { BrowsableListener, ListenerCooldown, PeerMessage, PeerSession, User } from "@shared/schema";
 import { Link } from "wouter";
 import { FeatureHint } from "@/components/feature-hint";
+import { StatusDot } from "@/components/status-dot";
 
 interface PeerSessionsResponse {
   sessions: (PeerSession & { otherUser: User })[];
@@ -242,10 +243,27 @@ export default function PeerSupportPage() {
       const res = await apiRequest("POST", `/api/peer/session/${selectedSessionId}/end`);
       return (await res.json()) as EndSessionPayload;
     },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ["/api/peer/sessions"] });
+      const previous = queryClient.getQueryData<PeerSessionsResponse>(["/api/peer/sessions"]);
+      if (selectedSessionId) {
+        queryClient.setQueryData<PeerSessionsResponse>(["/api/peer/sessions"], (old) => {
+          if (!old) return old;
+          return {
+            ...old,
+            sessions: old.sessions.filter((s) => s.id !== selectedSessionId),
+          };
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous !== undefined) {
+        queryClient.setQueryData(["/api/peer/sessions"], context.previous);
+      }
+    },
     onSuccess: (payload) => {
       setJustEndedSessionId(selectedSessionId);
-      queryClient.invalidateQueries({ queryKey: ["/api/peer/sessions"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/listeners/browse"] });
       if (user?.role === "listener" && payload?.cooldown) {
         setActiveCooldown(payload.cooldown);
         setCheckinRequired(true);
@@ -253,6 +271,10 @@ export default function PeerSupportPage() {
         queryClient.invalidateQueries({ queryKey: ["/api/listener/progress/details"] });
       }
       toast({ title: t("peer.session_ended") });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/peer/sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/listeners/browse"] });
     },
   });
 
@@ -371,7 +393,7 @@ export default function PeerSupportPage() {
           </div>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className={`h-2 w-2 rounded-full ${availableCount > 0 ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/30"}`} />
+          <StatusDot size="md" variant={availableCount > 0 ? "online" : "offline"} label={availableCount > 0 ? "listeners online" : "no listeners online"} />
           <span>
             {availableCount > 0
               ? `${availableCount} listener${availableCount === 1 ? "" : "s"} available now`
@@ -444,7 +466,7 @@ export default function PeerSupportPage() {
                 : "border-border text-muted-foreground hover:border-primary/40"
             }`}
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+            <StatusDot variant="available" label="available" />
             Available now
           </button>
 
@@ -583,15 +605,17 @@ export default function PeerSupportPage() {
                 )}
 
                 {/* CTA */}
-                <Button
-                  size="sm"
-                  className="w-full mt-auto"
-                  variant={listener.isAvailable ? "default" : "outline"}
-                  disabled={!listener.isAvailable || startDirectSessionMutation.isPending}
-                  onClick={() => setConfirmListener(listener)}
-                >
-                  {listener.isAvailable ? "Start conversation" : "Currently busy"}
-                </Button>
+                <FeatureHint id="peer-support-queue" content={t("hint.peer_support_queue")} side="top">
+                  <Button
+                    size="sm"
+                    className="w-full mt-auto"
+                    variant={listener.isAvailable ? "default" : "outline"}
+                    disabled={!listener.isAvailable || startDirectSessionMutation.isPending}
+                    onClick={() => setConfirmListener(listener)}
+                  >
+                    {listener.isAvailable ? "Start conversation" : "Currently busy"}
+                  </Button>
+                </FeatureHint>
               </motion.div>
             ))}
           </AnimatePresence>
@@ -653,7 +677,7 @@ export default function PeerSupportPage() {
               }`}
             >
               {s.otherUser.firstName || `Session #${s.id}`}
-              {s.status === "active" && <span className="ms-1 h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />}
+              {s.status === "active" && <StatusDot variant="online" label="active session" className="ms-1 inline-flex" />}
             </button>
           ))}
         </div>
@@ -832,7 +856,21 @@ export default function PeerSupportPage() {
   return (
     <AppLayout>
       <div className="max-w-4xl mx-auto p-4 sm:p-6">
-        <PageHeader title="Peer Support" />
+        <PageHeader
+          title={t("journey.option.peer.label")}
+          subtitle={t("journey.discover.peer.subtitle")}
+        />
+        <div className="mb-4 rounded-xl border bg-muted/30 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <p className="font-medium">{t("journey.discover.peer.note_title")}</p>
+            <p className="text-sm text-muted-foreground">{t("journey.discover.peer.note_body")}</p>
+          </div>
+          <Link href="/support">
+            <Button variant="outline" size="sm">
+              {t("journey.discover.back_to_support")}
+            </Button>
+          </Link>
+        </div>
         {/* Mobile tab strip */}
         <div className="sm:hidden flex gap-1 mb-4 bg-muted/50 p-1 rounded-lg">
           <button
@@ -841,7 +879,7 @@ export default function PeerSupportPage() {
               view === "browse" ? "bg-background shadow-sm" : "text-muted-foreground"
             }`}
           >
-            Browse
+            {t("peer.browse")}
           </button>
           <button
             onClick={() => setView("chat")}
@@ -849,9 +887,9 @@ export default function PeerSupportPage() {
               view === "chat" ? "bg-background shadow-sm" : "text-muted-foreground"
             }`}
           >
-            Chat
+            {t("peer.chat")}
             {sessions.some((s) => s.status === "active") && (
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              <StatusDot variant="online" label="active session" />
             )}
           </button>
         </div>

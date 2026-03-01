@@ -160,6 +160,95 @@ values
   (:'therapist3_id', now() + interval '6 days' + interval '10 hours',50, 60, 'open')
 on conflict do nothing;
 
+-- ── 12. Journey clarity governance ───────────────────────────
+insert into public.journey_paths (
+  key, role, stage, label_key, summary_key, destination_path,
+  audience_description, status, supports_guest, display_order
+)
+values
+  ('visitor-support-discovery', 'visitor', 'discovery', 'journey.support.label', 'journey.support.summary', '/support', 'Canonical public support decision surface', 'active', true, 1),
+  ('client-home', 'client', 'home', 'journey.workflow.client.label', 'journey.workflow.client.summary', '/workflow', 'Canonical signed-in home for clients', 'active', false, 1),
+  ('therapist-home', 'therapist', 'home', 'journey.workflow.therapist.label', 'journey.workflow.therapist.summary', '/therapist-dashboard', 'Canonical signed-in home for therapists', 'active', false, 1),
+  ('listener-home', 'listener', 'home', 'journey.workflow.listener.label', 'journey.workflow.listener.summary', '/listener/dashboard', 'Canonical signed-in home for listeners', 'active', false, 1),
+  ('moderator-home', 'moderator', 'home', 'journey.workflow.moderator.label', 'journey.workflow.moderator.summary', '/admin/listeners', 'Canonical signed-in home for moderators', 'active', false, 1),
+  ('admin-home', 'admin', 'home', 'journey.workflow.admin.label', 'journey.workflow.admin.summary', '/admin/dashboard', 'Canonical signed-in home for admins', 'active', false, 1)
+on conflict (key) do update
+set
+  role = excluded.role,
+  stage = excluded.stage,
+  label_key = excluded.label_key,
+  summary_key = excluded.summary_key,
+  destination_path = excluded.destination_path,
+  audience_description = excluded.audience_description,
+  status = excluded.status,
+  supports_guest = excluded.supports_guest,
+  display_order = excluded.display_order,
+  updated_at = now();
+
+insert into public.feature_inventory_items (
+  feature_key, surface, route_path, destination_path, goal_key, role_scope,
+  status, label_key, summary_key, journey_path_id, user_value_statement
+)
+values
+  ('guest-nav-support', 'nav', '/', '/support', 'choose-support', ARRAY['visitor'], 'primary', 'nav.support_hub', 'journey.nav.support.summary', (select id from public.journey_paths where key = 'visitor-support-discovery'), 'Give visitors one clear place to start.'),
+  ('guest-nav-therapists', 'nav', '/', '/therapists', 'browse-therapists', ARRAY['visitor'], 'secondary', 'nav.therapists', 'journey.nav.therapists.summary', null, 'Let visitors browse therapists without competing with the main start path.'),
+  ('guest-nav-resources', 'nav', '/', '/resources', 'browse-resources', ARRAY['visitor'], 'secondary', 'nav.resources', 'journey.nav.resources.summary', null, 'Provide self-serve learning without replacing the main support path.'),
+  ('support-peer', 'support', '/support', '/peer-support', 'peer-support', ARRAY['visitor', 'client'], 'primary', 'journey.option.peer.label', 'journey.option.peer.summary', (select id from public.journey_paths where key = 'visitor-support-discovery'), 'Offer immediate human support without an appointment.'),
+  ('support-therapist-graduated', 'support', '/support', '/therapists?tier=graduated_doctor', 'therapist-support-accessible', ARRAY['visitor', 'client'], 'primary', 'journey.option.graduated.label', 'journey.option.graduated.summary', (select id from public.journey_paths where key = 'visitor-support-discovery'), 'Offer structured therapy with accessible pricing.'),
+  ('support-therapist-premium', 'support', '/support', '/therapists?tier=premium_doctor', 'therapist-support-specialist', ARRAY['visitor', 'client'], 'primary', 'journey.option.premium.label', 'journey.option.premium.summary', (select id from public.journey_paths where key = 'visitor-support-discovery'), 'Offer specialist care for more complex needs.'),
+  ('support-self-care', 'support', '/support', '/self-care', 'self-care', ARRAY['visitor', 'client'], 'secondary', 'journey.option.selfcare.label', 'journey.option.selfcare.summary', (select id from public.journey_paths where key = 'visitor-support-discovery'), 'Provide a gentle self-guided starting point.'),
+  ('client-nav-support', 'nav', '/workflow', '/support', 'choose-support', ARRAY['client'], 'primary', 'nav.support_hub', 'journey.nav.support.summary', (select id from public.journey_paths where key = 'client-home'), 'Keep the main support path one tap away for clients.'),
+  ('client-nav-appointments', 'nav', '/workflow', '/appointments', 'appointments', ARRAY['client'], 'secondary', 'nav.appointments', 'journey.nav.appointments.summary', null, 'Help clients review and prepare for booked sessions.'),
+  ('client-nav-messages', 'nav', '/workflow', '/messages', 'messages', ARRAY['client'], 'secondary', 'nav.messages', 'journey.nav.messages.summary', null, 'Keep ongoing conversations easy to reach.'),
+  ('client-nav-progress', 'nav', '/workflow', '/progress', 'progress', ARRAY['client'], 'secondary', 'nav.progress', 'journey.nav.progress.summary', null, 'Let clients continue progress tracking without crowding the start path.'),
+  ('client-workflow-support', 'workflow', '/workflow', '/support', 'choose-support', ARRAY['client'], 'primary', 'workflow.client.primary.label', 'workflow.client.primary.summary', (select id from public.journey_paths where key = 'client-home'), 'Give clients one clear next step when they need support.'),
+  ('client-workflow-peer', 'workflow', '/workflow', '/peer-support', 'peer-support', ARRAY['client'], 'secondary', 'workflow.client.peer.label', 'workflow.client.peer.summary', null, 'Keep peer support visible as a secondary continuation option.'),
+  ('client-workflow-therapists', 'workflow', '/workflow', '/therapists', 'browse-therapists', ARRAY['client'], 'secondary', 'workflow.client.therapists.label', 'workflow.client.therapists.summary', null, 'Keep therapist discovery accessible without duplicating the start choice.'),
+  ('therapist-nav-dashboard', 'nav', '/therapist-dashboard', '/therapist-dashboard', 'therapist-home', ARRAY['therapist'], 'primary', 'nav.my_dashboard', 'journey.nav.therapist.summary', (select id from public.journey_paths where key = 'therapist-home'), 'Keep therapist operations anchored in one dashboard.'),
+  ('therapist-nav-appointments', 'nav', '/therapist-dashboard', '/appointments', 'appointments', ARRAY['therapist'], 'secondary', 'nav.appointments', 'journey.nav.appointments.summary', null, 'Expose session schedule as a secondary destination.'),
+  ('therapist-nav-messages', 'nav', '/therapist-dashboard', '/messages', 'messages', ARRAY['therapist'], 'secondary', 'nav.messages', 'journey.nav.messages.summary', null, 'Keep therapist follow-up communication close to home.'),
+  ('therapist-workflow-dashboard', 'workflow', '/therapist-dashboard', '/therapist-dashboard', 'therapist-home', ARRAY['therapist'], 'primary', 'workflow.therapist.primary.label', 'workflow.therapist.primary.summary', (select id from public.journey_paths where key = 'therapist-home'), 'Keep therapist profile, schedule, and session actions in one home.'),
+  ('listener-nav-dashboard', 'nav', '/listener/dashboard', '/listener/dashboard', 'listener-home', ARRAY['listener'], 'primary', 'nav.my_dashboard', 'journey.nav.listener.summary', (select id from public.journey_paths where key = 'listener-home'), 'Keep listener readiness and availability anchored in one place.'),
+  ('listener-nav-peer', 'nav', '/listener/dashboard', '/peer-support', 'peer-support-workspace', ARRAY['listener'], 'secondary', 'nav.peer_sessions', 'journey.nav.peer.summary', null, 'Keep the live peer workspace available without competing with the home surface.'),
+  ('listener-workflow-dashboard', 'workflow', '/listener/dashboard', '/listener/dashboard', 'listener-home', ARRAY['listener'], 'primary', 'workflow.listener.primary.label', 'workflow.listener.primary.summary', (select id from public.journey_paths where key = 'listener-home'), 'Keep listener activation, cooldown, and ranking in one home.'),
+  ('moderator-nav-moderation', 'nav', '/admin/listeners', '/admin/listeners', 'moderation-home', ARRAY['moderator'], 'primary', 'nav.moderation', 'journey.nav.moderation.summary', (select id from public.journey_paths where key = 'moderator-home'), 'Give moderators one clear moderation queue.'),
+  ('moderator-nav-messages', 'nav', '/admin/listeners', '/messages', 'messages', ARRAY['moderator'], 'secondary', 'nav.messages', 'journey.nav.messages.summary', null, 'Allow moderators to access conversations without crowding the queue.'),
+  ('moderator-workflow-queue', 'workflow', '/admin/listeners', '/admin/listeners', 'moderation-home', ARRAY['moderator'], 'primary', 'workflow.moderator.primary.label', 'workflow.moderator.primary.summary', (select id from public.journey_paths where key = 'moderator-home'), 'Keep moderation work focused in a single queue.'),
+  ('admin-nav-dashboard', 'nav', '/admin/dashboard', '/admin/dashboard', 'admin-home', ARRAY['admin'], 'primary', 'nav.admin_dashboard', 'journey.nav.admin.summary', (select id from public.journey_paths where key = 'admin-home'), 'Anchor admins in the platform operations dashboard.'),
+  ('admin-nav-moderation', 'nav', '/admin/dashboard', '/admin/listeners', 'moderation-home', ARRAY['admin'], 'secondary', 'nav.admin_listeners', 'journey.nav.moderation.summary', null, 'Expose moderation as a secondary admin surface.'),
+  ('admin-workflow-dashboard', 'workflow', '/admin/dashboard', '/admin/dashboard', 'admin-home', ARRAY['admin'], 'primary', 'workflow.admin.primary.label', 'workflow.admin.primary.summary', (select id from public.journey_paths where key = 'admin-home'), 'Keep admin operations overview in one place.')
+on conflict (feature_key) do update
+set
+  surface = excluded.surface,
+  route_path = excluded.route_path,
+  destination_path = excluded.destination_path,
+  goal_key = excluded.goal_key,
+  role_scope = excluded.role_scope,
+  status = excluded.status,
+  label_key = excluded.label_key,
+  summary_key = excluded.summary_key,
+  journey_path_id = excluded.journey_path_id,
+  user_value_statement = excluded.user_value_statement,
+  updated_at = now();
+
+insert into public.redirect_rules (
+  source_path, target_path, reason, message_key, role_scope, preserve_query, status
+)
+values
+  ('/home', '/workflow', 'renamed', 'journey.redirect.workflow', ARRAY['client'], true, 'active'),
+  ('/start', '/support', 'renamed', 'journey.redirect.support', ARRAY['visitor', 'client'], true, 'active'),
+  ('/listener', '/listener/dashboard', 'role-home-change', 'journey.redirect.listener', ARRAY['listener'], true, 'active'),
+  ('/admin', '/admin/dashboard', 'role-home-change', 'journey.redirect.admin', ARRAY['admin'], true, 'active')
+on conflict (source_path) do update
+set
+  target_path = excluded.target_path,
+  reason = excluded.reason,
+  message_key = excluded.message_key,
+  role_scope = excluded.role_scope,
+  preserve_query = excluded.preserve_query,
+  status = excluded.status,
+  updated_at = now();
+
 -- ── 5. Appointments ───────────────────────────────────────────
 insert into public.appointments (
   client_id, therapist_id, scheduled_at, duration_minutes,

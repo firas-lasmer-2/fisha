@@ -41,6 +41,8 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { MoodEntry, JournalEntry, Appointment } from "@shared/schema";
 import { PageHeader } from "@/components/page-header";
+import { motion } from "framer-motion";
+import { skeletonToContent, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 
 interface SessionHomework {
   id: number;
@@ -177,6 +179,7 @@ export default function ProgressPage() {
   const { t } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
+  const rm = usePrefersReducedMotion();
 
   const tr = (key: string, fallback: string) => {
     const val = t(key);
@@ -302,7 +305,12 @@ export default function ProgressPage() {
             {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28" />)}
           </div>
         ) : (
-          <div className="grid sm:grid-cols-2 gap-4">
+          <motion.div
+            className="grid sm:grid-cols-2 gap-4"
+            initial="loading"
+            animate="loaded"
+            variants={safeVariants(skeletonToContent, rm)}
+          >
             {/* Mood avg */}
             <Card>
               <CardContent className="p-4 space-y-2">
@@ -369,7 +377,7 @@ export default function ProgressPage() {
                 )}
               </CardContent>
             </Card>
-          </div>
+          </motion.div>
         )}
 
         {/* Mood Trend Chart */}

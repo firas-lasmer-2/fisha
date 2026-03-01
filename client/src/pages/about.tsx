@@ -1,9 +1,12 @@
 import { Link } from "wouter";
 import { Heart } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
+import { motion } from "framer-motion";
+import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 
 export default function AboutPage() {
   const { t } = useI18n();
+  const rm = usePrefersReducedMotion();
 
   const tr = (key: string, fallback: string) => {
     const value = t(key);
@@ -12,7 +15,12 @@ export default function AboutPage() {
 
   return (
     <main className="min-h-screen bg-background px-4 py-12">
-      <div className="mx-auto max-w-3xl">
+      <motion.div
+        className="mx-auto max-w-3xl"
+        initial="hidden"
+        animate="visible"
+        variants={safeVariants(fadeUp, rm)}
+      >
         <Link href="/" className="text-sm text-primary hover:underline" data-testid="link-about-home">
           {tr("common.back", "Back")}
         </Link>
@@ -36,8 +44,7 @@ export default function AboutPage() {
             )}
           </p>
         </div>
-      </div>
+      </motion.div>
     </main>
   );
 }
-

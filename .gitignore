@@ -1,6 +1,15 @@
 node_modules
 dist
+build
+coverage
 .DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+.env*
+.idea
+.vscode
 server/public
 vite.config.ts.*
 *.tar.gz

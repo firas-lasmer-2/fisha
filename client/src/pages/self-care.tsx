@@ -10,6 +10,7 @@ import { Wind, Hand, Sparkles, Timer, Play, Pause, RotateCcw, Check, ChevronRigh
 import { motion, AnimatePresence } from "framer-motion";
 import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import { PageHeader } from "@/components/page-header";
+import { Link } from "wouter";
 
 const affirmationKeys = [
   "selfcare.affirmation_1",
@@ -728,7 +729,10 @@ export default function SelfCarePage() {
   return (
     <AppLayout>
       <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
-        <PageHeader title={t("nav.self_care")} />
+        <PageHeader
+          title={t("selfcare.title")}
+          subtitle={t("journey.discover.selfcare.subtitle")}
+        />
         <motion.div
           initial={{ opacity: 0, y: 18 }}
           animate={reducedMotion ? { opacity: 1, y: 0, transition: { duration: 0 } } : { opacity: 1, y: 0 }}
@@ -762,6 +766,13 @@ export default function SelfCarePage() {
                 <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{tr("selfcare.tip", "Tip")}</p>
                 <p className="text-sm">{tr("selfcare.tip_line", "Done is better than perfect. Start with 2 minutes.")}</p>
               </div>
+            </div>
+            <div className="mt-4">
+              <Link href="/support">
+                <Button variant="outline" size="sm">
+                  {t("journey.discover.back_to_support")}
+                </Button>
+              </Link>
             </div>
           </div>
         </motion.div>

@@ -1,6 +1,11 @@
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
+import { useNavigationManifest } from "@/hooks/use-navigation-manifest";
 import { triggerHaptic } from "@/lib/haptics";
+import {
+  canonicalHomeRouteForRole,
+  normalizeNavigationPath,
+} from "@/lib/navigation";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "@/components/notification-bell";
@@ -8,16 +13,95 @@ import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { FeatureHint } from "@/components/feature-hint";
+import { CommandPaletteTrigger } from "@/components/command-palette";
+import { ContrastToggle } from "@/components/contrast-toggle";
+import type { LucideIcon } from "lucide-react";
 import {
   Heart, HeartHandshake, LayoutDashboard, Users, MessageCircle,
-  Calendar, CalendarDays, LogOut, UserCircle, AlertCircle,
+  CalendarDays, LogOut, UserCircle, AlertCircle,
   ShieldCheck, Settings, LifeBuoy, Trophy, Compass, TrendingUp,
 } from "lucide-react";
+import type { NavigationManifestEntry } from "@shared/schema";
 
-function homeHrefForRole(role: string | null | undefined): string {
-  if (role === "therapist") return "/therapist-dashboard";
-  if (role === "listener") return "/listener/dashboard";
-  return "/workflow";
+type DisplayNavItem = {
+  key: string;
+  href: string;
+  icon: LucideIcon;
+  label: string;
+  active: boolean;
+  badge: boolean;
+};
+
+function iconForEntry(entry: NavigationManifestEntry): LucideIcon {
+  const href = normalizeNavigationPath(entry.href);
+  if (href === "/support") return LifeBuoy;
+  if (href === "/workflow") return Compass;
+  if (href === "/appointments") return CalendarDays;
+  if (href === "/messages") return MessageCircle;
+  if (href === "/progress") return TrendingUp;
+  if (href === "/therapists") return Users;
+  if (href === "/listener/dashboard") return LayoutDashboard;
+  if (href === "/peer-support") return HeartHandshake;
+  if (href === "/hall-of-fame") return Trophy;
+  if (href === "/admin/listeners") return ShieldCheck;
+  if (href === "/admin/dashboard") return LayoutDashboard;
+  if (href === "/resources") return Compass;
+  return LayoutDashboard;
+}
+
+function isActivePath(currentPath: string, href: string): boolean {
+  const current = normalizeNavigationPath(currentPath);
+  const target = normalizeNavigationPath(href);
+  if (target === "/") return current === "/";
+  return current === target || current.startsWith(`${target}/`);
+}
+
+function fallbackEntriesForRole(role: string | null | undefined) {
+  if (role === "therapist") {
+    return [
+      { featureKey: "therapist-nav-dashboard", href: "/therapist-dashboard", labelKey: "nav.my_dashboard" },
+      { featureKey: "therapist-nav-appointments", href: "/appointments", labelKey: "nav.appointments" },
+      { featureKey: "therapist-nav-messages", href: "/messages", labelKey: "nav.messages" },
+    ];
+  }
+
+  if (role === "listener") {
+    return [
+      { featureKey: "listener-nav-dashboard", href: "/listener/dashboard", labelKey: "nav.my_dashboard" },
+      { featureKey: "listener-nav-peer", href: "/peer-support", labelKey: "nav.peer_sessions" },
+      { featureKey: "listener-nav-messages", href: "/messages", labelKey: "nav.messages" },
+    ];
+  }
+
+  if (role === "moderator") {
+    return [
+      { featureKey: "moderator-nav-moderation", href: "/admin/listeners", labelKey: "nav.moderation" },
+      { featureKey: "moderator-nav-messages", href: "/messages", labelKey: "nav.messages" },
+    ];
+  }
+
+  if (role === "admin") {
+    return [
+      { featureKey: "admin-nav-dashboard", href: "/admin/dashboard", labelKey: "nav.admin_dashboard" },
+      { featureKey: "admin-nav-moderation", href: "/admin/listeners", labelKey: "nav.admin_listeners" },
+      { featureKey: "admin-nav-messages", href: "/messages", labelKey: "nav.messages" },
+    ];
+  }
+
+  if (role === "client") {
+    return [
+      { featureKey: "client-nav-support", href: "/support", labelKey: "nav.support_hub" },
+      { featureKey: "client-nav-appointments", href: "/appointments", labelKey: "nav.appointments" },
+      { featureKey: "client-nav-messages", href: "/messages", labelKey: "nav.messages" },
+      { featureKey: "client-nav-progress", href: "/progress", labelKey: "nav.progress" },
+    ];
+  }
+
+  return [
+    { featureKey: "guest-nav-support", href: "/support", labelKey: "nav.support_hub" },
+    { featureKey: "guest-nav-therapists", href: "/therapists", labelKey: "nav.therapists" },
+    { featureKey: "guest-nav-resources", href: "/resources", labelKey: "nav.resources" },
+  ];
 }
 
 
@@ -26,77 +110,61 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const [location] = useLocation();
   const currentRole = user?.role || null;
+  const navRoutePath = user ? canonicalHomeRouteForRole(currentRole) : "/";
 
   const { data: unread } = useQuery<{ count: number }>({
     queryKey: ["/api/unread-count"],
     enabled: !!user,
   });
 
+  const { primaryPaths, secondaryPaths } = useNavigationManifest({
+    surface: "nav",
+    role: (currentRole as any) || "visitor",
+    routePath: navRoutePath,
+  });
+
+  const translateLabel = (key: string) => {
+    const value = t(key);
+    return value === key ? key : value;
+  };
   const tr = (key: string, fallback: string) => {
     const value = t(key);
     return value === key ? fallback : value;
   };
 
-  const desktopNavItems =
-    currentRole === "therapist"
-      ? [
-          { href: "/therapist-dashboard", icon: LayoutDashboard, label: tr("nav.my_dashboard", "My Dashboard") },
-          { href: "/appointments", icon: Calendar, label: t("nav.appointments") },
-          { href: "/messages", icon: MessageCircle, label: t("nav.messages") },
-        ]
-      : currentRole === "listener"
-        ? [
-            { href: "/listener/dashboard", icon: LayoutDashboard, label: tr("nav.my_dashboard", "My Dashboard") },
-            { href: "/peer-support", icon: HeartHandshake, label: tr("nav.peer_sessions", "Peer Sessions") },
-            { href: "/hall-of-fame", icon: Trophy, label: tr("nav.hall_of_fame", "Hall of Fame") },
-            { href: "/messages", icon: MessageCircle, label: t("nav.messages") },
-          ]
-        : currentRole === "moderator" || currentRole === "admin"
-          ? [
-              { href: "/admin/listeners", icon: ShieldCheck, label: tr("nav.admin_listeners", "Listener Moderation") },
-              { href: "/admin/dashboard", icon: LayoutDashboard, label: tr("nav.admin_dashboard", "Admin Dashboard") },
-              { href: "/messages", icon: MessageCircle, label: t("nav.messages") },
-            ]
-          : [
-              { href: "/support", icon: LifeBuoy, label: tr("nav.support_hub", "Find Support") },
-              { href: "/therapists", icon: Users, label: t("nav.therapists") },
-              { href: "/appointments", icon: Calendar, label: t("nav.appointments") },
-              { href: "/messages", icon: MessageCircle, label: t("nav.messages") },
-              { href: "/progress", icon: TrendingUp, label: tr("nav.progress", "Progress") },
-            ];
+  const manifestEntries = [...primaryPaths, ...secondaryPaths];
+  const rawNavItems = (manifestEntries.length > 0
+    ? manifestEntries
+    : fallbackEntriesForRole(currentRole).map((entry) => ({
+        ...entry,
+        id: entry.featureKey,
+        summaryKey: null,
+        goalKey: entry.featureKey,
+        status: "primary",
+      })))
+    .map((entry) => ({
+      key: entry.featureKey,
+      href: entry.href,
+      icon: iconForEntry(entry as NavigationManifestEntry),
+      label: translateLabel(entry.labelKey),
+      active: isActivePath(location, entry.href),
+      badge: entry.href === "/messages" && (unread?.count ?? 0) > 0,
+    }));
 
-  const bottomNavItems =
-    currentRole === "therapist"
-      ? [
-          { key: "home", href: "/therapist-dashboard", icon: LayoutDashboard, label: tr("nav.my_dashboard", "Dashboard"), active: location.startsWith("/therapist-dashboard"), badge: false },
-          { key: "appointments", href: "/appointments", icon: CalendarDays, label: t("nav.appointments"), active: location.startsWith("/appointments"), badge: false },
-          { key: "messages", href: "/messages", icon: MessageCircle, label: t("nav.messages"), active: location.startsWith("/messages"), badge: (unread?.count ?? 0) > 0 },
-          { key: "therapists", href: "/therapists", icon: Users, label: t("nav.therapists"), active: location.startsWith("/therapists") || location.startsWith("/therapist/"), badge: false },
-          { key: "profile", href: "/settings", icon: UserCircle, label: t("nav.profile"), active: location.startsWith("/settings"), badge: false },
-        ]
-      : currentRole === "listener"
-        ? [
-            { key: "home", href: "/listener/dashboard", icon: LayoutDashboard, label: tr("nav.my_dashboard", "Dashboard"), active: location.startsWith("/listener/dashboard"), badge: false },
-            { key: "sessions", href: "/peer-support", icon: HeartHandshake, label: tr("nav.peer_sessions", "Sessions"), active: location.startsWith("/peer-support"), badge: false },
-            { key: "fame", href: "/hall-of-fame", icon: Trophy, label: tr("nav.hall_of_fame", "Ranking"), active: location.startsWith("/hall-of-fame"), badge: false },
-            { key: "messages", href: "/messages", icon: MessageCircle, label: t("nav.messages"), active: location.startsWith("/messages"), badge: (unread?.count ?? 0) > 0 },
-            { key: "profile", href: "/settings", icon: UserCircle, label: t("nav.profile"), active: location.startsWith("/settings"), badge: false },
-          ]
-        : currentRole === "moderator" || currentRole === "admin"
-          ? [
-              { key: "moderation", href: "/admin/listeners", icon: ShieldCheck, label: tr("nav.moderation", "Moderation"), active: location.startsWith("/admin/listeners"), badge: false },
-              { key: "admin", href: "/admin/dashboard", icon: LayoutDashboard, label: tr("nav.admin", "Admin"), active: location.startsWith("/admin/dashboard"), badge: false },
-              { key: "messages", href: "/messages", icon: MessageCircle, label: t("nav.messages"), active: location.startsWith("/messages"), badge: (unread?.count ?? 0) > 0 },
-              { key: "fame", href: "/hall-of-fame", icon: Trophy, label: tr("nav.hall_of_fame", "Hall of Fame"), active: location.startsWith("/hall-of-fame"), badge: false },
-              { key: "profile", href: "/settings", icon: UserCircle, label: t("nav.profile"), active: location.startsWith("/settings"), badge: false },
-            ]
-          : [
-              { key: "home", href: "/workflow", icon: Compass, label: t("nav.home"), active: location === "/workflow" || location === "/dashboard", badge: false },
-              { key: "support", href: "/support", icon: LifeBuoy, label: tr("nav.find_support", "Support"), active: location === "/support", badge: false },
-              { key: "messages", href: "/messages", icon: MessageCircle, label: t("nav.messages"), active: location.startsWith("/messages"), badge: (unread?.count ?? 0) > 0 },
-              { key: "appointments", href: "/appointments", icon: CalendarDays, label: t("nav.appointments"), active: location.startsWith("/appointments"), badge: false },
-              { key: "profile", href: "/settings", icon: UserCircle, label: t("nav.profile"), active: location.startsWith("/settings"), badge: false },
-            ];
+  const desktopNavItems = rawNavItems;
+  const bottomNavItems: DisplayNavItem[] = user
+    ? [
+        ...rawNavItems.slice(0, 4),
+        {
+          key: "settings",
+          href: "/settings",
+          icon: UserCircle,
+          label: translateLabel("nav.profile"),
+          active: isActivePath(location, "/settings"),
+          badge: false,
+        },
+      ].slice(0, 5)
+    : rawNavItems.slice(0, 4);
 
   return (
     <div className="min-h-screen bg-background">
@@ -110,7 +178,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
       <header className="fixed top-0 left-0 right-0 z-50 glass-effect border-b h-14" data-testid="app-header">
         <div className="max-w-7xl mx-auto px-4 h-full flex items-center justify-between">
-          <Link href={user ? homeHrefForRole(currentRole) : "/"} className="flex items-center gap-2" data-testid="link-app-home">
+          <Link
+            href={user ? canonicalHomeRouteForRole(currentRole) : "/"}
+            className="flex items-center gap-2"
+            data-testid="link-app-home"
+          >
             <div className="w-8 h-8 rounded-lg gradient-calm flex items-center justify-center">
               <Heart className="h-4 w-4 text-white" />
             </div>
@@ -121,10 +193,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             {desktopNavItems.map((item) => (
               <Link key={item.href} href={item.href}>
                 <Button
-                  variant={location === item.href ? "secondary" : "ghost"}
+                  variant={item.active ? "secondary" : "ghost"}
                   size="sm"
                   className="gap-1.5 text-xs"
-                  data-testid={`nav-link-${item.href.slice(1)}`}
+                  data-testid={`nav-link-${item.key}`}
                 >
                   <item.icon className="h-3.5 w-3.5" />
                   {item.label}
@@ -134,7 +206,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="flex items-center gap-1.5">
+            <CommandPaletteTrigger />
             <ThemeToggle />
+            <ContrastToggle />
             <LanguageSwitcher variant="ghost" />
             {user && <NotificationBell />}
             {user && (
@@ -177,7 +251,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         aria-label={tr("a11y.main_nav", "Main navigation")}
         data-testid="bottom-nav"
       >
-        <div className="grid grid-cols-5 gap-1 px-2 py-1">
+        <div
+          className="grid gap-1 px-2 py-1"
+          style={{ gridTemplateColumns: `repeat(${Math.max(bottomNavItems.length, 1)}, minmax(0, 1fr))` }}
+        >
           {bottomNavItems.map((item) => (
             <Link key={item.key} href={item.href}>
               <button

@@ -1,4 +1,6 @@
 import { useI18n } from "@/lib/i18n";
+import { motion } from "framer-motion";
+import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import { AppLayout } from "@/components/app-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,6 +19,7 @@ import { FeatureHint } from "@/components/feature-hint";
 
 export default function JournalPage() {
   const { t } = useI18n();
+  const rm = usePrefersReducedMotion();
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -84,7 +87,12 @@ export default function JournalPage() {
 
   return (
     <AppLayout>
-      <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
+      <motion.div
+        className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6"
+        initial="hidden"
+        animate="visible"
+        variants={safeVariants(fadeUp, rm)}
+      >
         <PageHeader
           title={t("nav.journal")}
           testId="text-journal-title"
@@ -219,7 +227,7 @@ export default function JournalPage() {
             description={t("journal.start_writing")}
           />
         )}
-      </div>
+      </motion.div>
     </AppLayout>
   );
 }

@@ -61,11 +61,35 @@ export default function MoodPage() {
       });
       return res.json();
     },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ["/api/mood"] });
+      const previous = queryClient.getQueryData<MoodEntry[]>(["/api/mood"]);
+      if (selectedMood !== null) {
+        const optimistic: MoodEntry = {
+          id: -Date.now(),
+          userId: user?.id ?? "",
+          moodScore: selectedMood,
+          notes: notes || null,
+          emotions: selectedEmotions.length > 0 ? selectedEmotions : null,
+          triggers: null,
+          createdAt: new Date().toISOString(),
+        };
+        queryClient.setQueryData<MoodEntry[]>(["/api/mood"], [optimistic, ...(previous ?? [])]);
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous !== undefined) {
+        queryClient.setQueryData(["/api/mood"], context.previous);
+      }
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/mood"] });
       setSelectedMood(null);
       setNotes("");
       setSelectedEmotions([]);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/mood"] });
     },
   });
 

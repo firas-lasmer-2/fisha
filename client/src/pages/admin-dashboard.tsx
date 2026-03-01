@@ -1,10 +1,14 @@
 import { useState, useMemo } from "react";
+import { motion } from "framer-motion";
+import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AppLayout } from "@/components/app-layout";
 import { EmptyState } from "@/components/empty-state";
 import { PageError } from "@/components/page-error";
 import { DashboardSidebarLayout } from "@/components/dashboard-sidebar-layout";
 import type { DashboardNavItem } from "@/components/dashboard-sidebar-layout";
+import { FeatureInventoryPanel } from "@/components/admin/feature-inventory-panel";
+import { LocalizationAuditPanel } from "@/components/admin/localization-audit-panel";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,6 +36,8 @@ import {
   GraduationCap,
   ArrowUpCircle,
   Download,
+  Languages,
+  Sparkles,
 } from "lucide-react";
 import {
   LineChart,
@@ -77,6 +83,7 @@ export default function AdminDashboardPage() {
   const { t } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
+  const rm = usePrefersReducedMotion();
   const [reviewNotes, setReviewNotes] = useState<Record<number, string>>({});
   const [userSearch, setUserSearch] = useState("");
   const [userPage, setUserPage] = useState(1);
@@ -278,6 +285,8 @@ export default function AdminDashboardPage() {
     const items: DashboardNavItem[] = [
       { id: "overview", label: t("admin.overview"), icon: LayoutDashboard },
       { id: "verifications", label: t("admin.verifications_tab"), icon: ShieldCheck, badge: pendingVerifications.length },
+      { id: "feature-inventory", label: t("admin.feature_inventory_tab"), icon: Sparkles },
+      { id: "localization-audits", label: t("admin.localization_tab"), icon: Languages },
     ];
     if (user?.role === "admin") {
       items.push(
@@ -306,7 +315,12 @@ export default function AdminDashboardPage() {
         title={t("admin.dashboard_title")}
         subtitle={t("admin.dashboard_subtitle")}
       >
-        <div className="space-y-6">
+        <motion.div
+          className="space-y-6"
+          initial="hidden"
+          animate="visible"
+          variants={safeVariants(fadeUp, rm)}
+        >
 
         {/* Overview — Analytics row */}
         {activeSection === "overview" && (
@@ -435,6 +449,14 @@ export default function AdminDashboardPage() {
               ))
             )}
           </div>
+        )}
+
+        {activeSection === "feature-inventory" && (
+          <FeatureInventoryPanel />
+        )}
+
+        {activeSection === "localization-audits" && (
+          <LocalizationAuditPanel />
         )}
 
         {/* Users Section */}
@@ -874,7 +896,7 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
-        </div>
+        </motion.div>
       </DashboardSidebarLayout>
     </AppLayout>
   );

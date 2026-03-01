@@ -8,6 +8,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { MessageCircle, Send, ArrowLeft, ArrowRight, ShieldAlert, Lock, Users } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { supabase } from "@/lib/supabase";
 import { PageSkeleton } from "@/components/page-skeleton";
 import { EmptyState } from "@/components/empty-state";
@@ -47,6 +48,7 @@ export default function MessagesPage() {
   const [conversationKey, setConversationKey] = useState<CryptoKey | null>(null);
   const [decryptedMessages, setDecryptedMessages] = useState<Record<number, string>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const convListRef = useRef<HTMLDivElement>(null);
 
   const urlParams = new URLSearchParams(window.location.search);
   const convParam = urlParams.get("conv");
@@ -59,6 +61,13 @@ export default function MessagesPage() {
     (TherapyConversation & { otherUser: User })[]
   >({
     queryKey: ["/api/conversations"],
+  });
+
+  const convVirtualizer = useVirtualizer({
+    count: conversations?.length ?? 0,
+    getScrollElement: () => convListRef.current,
+    estimateSize: () => 64,
+    overscan: 4,
   });
 
   // Auto-select or create conversation when ?therapist=<userId> param is present
@@ -258,47 +267,65 @@ export default function MessagesPage() {
           <div className="p-4 border-b">
             <h2 className="font-semibold" data-testid="text-messages-title">{t("nav.messages")}</h2>
           </div>
-          <ScrollArea className="flex-1">
-            {convsLoading ? (
-              <div className="p-3">
-                <PageSkeleton variant="list" count={3} />
-              </div>
-            ) : conversations && conversations.length > 0 ? (
-              <div className="space-y-0.5 p-1">
-                {conversations.map((conv) => (
-                  <button
-                    key={conv.id}
-                    onClick={() => setSelectedConv(conv.id)}
-                    className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-start ${
-                      selectedConv === conv.id ? "bg-accent" : "hover:bg-muted/50"
-                    }`}
-                    data-testid={`conversation-item-${conv.id}`}
-                  >
-                    <div className="w-10 h-10 rounded-full gradient-calm flex items-center justify-center text-white text-sm font-bold shrink-0">
-                      {(conv.otherUser.firstName?.[0] || "?").toUpperCase()}
+          {convsLoading ? (
+            <div className="p-3 flex-1">
+              <PageSkeleton variant="list" count={3} />
+            </div>
+          ) : conversations && conversations.length > 0 ? (
+            <div ref={convListRef} className="flex-1 overflow-y-auto">
+              <div
+                style={{ height: `${convVirtualizer.getTotalSize()}px`, position: "relative" }}
+                className="p-1"
+              >
+                {convVirtualizer.getVirtualItems().map((virtualItem) => {
+                  const conv = conversations[virtualItem.index];
+                  return (
+                    <div
+                      key={virtualItem.key}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        height: `${virtualItem.size}px`,
+                        transform: `translateY(${virtualItem.start}px)`,
+                        padding: "2px 0",
+                      }}
+                    >
+                      <button
+                        onClick={() => setSelectedConv(conv.id)}
+                        className={`w-full h-full flex items-center gap-3 px-3 rounded-lg transition-colors text-start ${
+                          selectedConv === conv.id ? "bg-accent" : "hover:bg-muted/50"
+                        }`}
+                        data-testid={`conversation-item-${conv.id}`}
+                      >
+                        <div className="w-10 h-10 rounded-full gradient-calm flex items-center justify-center text-white text-sm font-bold shrink-0">
+                          {(conv.otherUser.firstName?.[0] || "?").toUpperCase()}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-sm truncate">
+                            {conv.otherUser.firstName} {conv.otherUser.lastName}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {conv.lastMessageAt ? new Date(conv.lastMessageAt).toLocaleDateString() : ""}
+                          </div>
+                        </div>
+                      </button>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium text-sm truncate">
-                        {conv.otherUser.firstName} {conv.otherUser.lastName}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {conv.lastMessageAt ? new Date(conv.lastMessageAt).toLocaleDateString() : ""}
-                      </div>
-                    </div>
-                  </button>
-                ))}
+                  );
+                })}
               </div>
-            ) : (
-              <div className="p-3">
-                <EmptyState
-                  icon={Lock}
-                  title="Your messages are private"
-                  description="Every conversation is end-to-end encrypted — only you and your therapist can read them."
-                  action={{ label: "Find a therapist", href: "/therapists" }}
-                />
-              </div>
-            )}
-          </ScrollArea>
+            </div>
+          ) : (
+            <div className="p-3 flex-1">
+              <EmptyState
+                icon={Lock}
+                title="Your messages are private"
+                description="Every conversation is end-to-end encrypted — only you and your therapist can read them."
+                action={{ label: "Find a therapist", href: "/therapists" }}
+              />
+            </div>
+          )}
         </div>
 
         <div className={`${selectedConv ? "flex" : "hidden md:flex"} flex-col flex-1`}>

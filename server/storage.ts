@@ -61,7 +61,21 @@ import {
   UserSubscription,
   MatchingPreferences,
   Notification,
+  JourneyPath,
+  FeatureInventoryItem,
+  RedirectRule,
+  LocalizationAudit,
+  InsertJourneyPath,
+  InsertFeatureInventoryItem,
+  UpdateFeatureInventoryItem,
+  InsertRedirectRule,
+  InsertLocalizationAudit,
+  UpdateLocalizationAudit,
   mapNotification,
+  mapJourneyPath,
+  mapFeatureInventoryItem,
+  mapRedirectRule,
+  mapLocalizationAudit,
   toSnakeCase,
 } from "@shared/schema";
 
@@ -237,6 +251,7 @@ export interface IStorage {
     maxPrice?: number;
     gender?: string;
     tier?: TherapistTier;
+    search?: string;
   }): Promise<(TherapistProfile & { user: User })[]>;
   createTherapistProfile(profile: InsertTherapistProfile): Promise<TherapistProfile>;
   updateTherapistProfile(userId: string, data: Partial<InsertTherapistProfile>): Promise<TherapistProfile | undefined>;
@@ -341,6 +356,31 @@ export interface IStorage {
   getNotifications(userId: string, limit?: number, offset?: number): Promise<Notification[]>;
   markNotificationRead(id: string): Promise<void>;
   getUnreadNotificationCount(userId: string): Promise<number>;
+
+  listJourneyPaths(filters?: {
+    role?: string;
+    stage?: string;
+    statuses?: string[];
+    supportsGuest?: boolean;
+  }): Promise<JourneyPath[]>;
+  upsertJourneyPath(data: InsertJourneyPath): Promise<JourneyPath>;
+  listFeatureInventoryItems(filters?: {
+    surface?: string;
+    routePath?: string;
+    role?: string;
+    statuses?: string[];
+  }): Promise<FeatureInventoryItem[]>;
+  updateFeatureInventoryItem(id: string, data: UpdateFeatureInventoryItem): Promise<FeatureInventoryItem | undefined>;
+  getRedirectRuleForPath(path: string, role?: string): Promise<RedirectRule | undefined>;
+  upsertRedirectRule(data: InsertRedirectRule): Promise<RedirectRule>;
+  listLocalizationAudits(filters?: {
+    route?: string;
+    language?: string;
+    status?: string;
+  }): Promise<LocalizationAudit[]>;
+  upsertLocalizationAudit(data: InsertLocalizationAudit): Promise<LocalizationAudit>;
+  updateLocalizationAudit(id: string, data: UpdateLocalizationAudit): Promise<LocalizationAudit | undefined>;
+  runLocalizationAudits(routes: string[], languages: string[]): Promise<LocalizationAudit[]>;
 
   createCrisisReport(data: InsertCrisisReport): Promise<CrisisReport>;
   updateCrisisReport(id: number, data: Partial<CrisisReport>): Promise<CrisisReport | undefined>;
@@ -604,10 +644,16 @@ export class DatabaseStorage implements IStorage {
     maxPrice?: number;
     gender?: string;
     tier?: TherapistTier;
+    search?: string;
   }): Promise<(TherapistProfile & { user: User })[]> {
-    const { data: profileRows, error } = await supabase
-      .from("therapist_profiles")
-      .select("*");
+    let baseQuery = supabase.from("therapist_profiles").select("*");
+
+    // Full-text search via generated tsvector column (migration 033)
+    if (filters?.search && filters.search.trim().length > 0) {
+      baseQuery = baseQuery.textSearch("search_vector", filters.search.trim(), { type: "websearch" });
+    }
+
+    const { data: profileRows, error } = await baseQuery;
     if (error || !profileRows) return [];
 
     // Fetch all related users
@@ -1420,6 +1466,169 @@ export class DatabaseStorage implements IStorage {
       .eq("user_id", userId)
       .eq("read", false);
     return error ? 0 : (count ?? 0);
+  }
+
+  async listJourneyPaths(filters?: {
+    role?: string;
+    stage?: string;
+    statuses?: string[];
+    supportsGuest?: boolean;
+  }): Promise<JourneyPath[]> {
+    let query = supabase
+      .from("journey_paths")
+      .select("*")
+      .order("display_order", { ascending: true })
+      .order("destination_path", { ascending: true });
+
+    if (filters?.role) query = query.eq("role", filters.role);
+    if (filters?.stage) query = query.eq("stage", filters.stage);
+    if (typeof filters?.supportsGuest === "boolean") query = query.eq("supports_guest", filters.supportsGuest);
+    if (filters?.statuses?.length) query = query.in("status", filters.statuses);
+
+    const { data, error } = await query;
+    if (error || !data) return [];
+    return data.map(mapJourneyPath);
+  }
+
+  async upsertJourneyPath(data: InsertJourneyPath): Promise<JourneyPath> {
+    const row = toSnakeCase(data as Record<string, any>);
+    row.updated_at = new Date().toISOString();
+    const { data: result, error } = await supabase
+      .from("journey_paths")
+      .upsert(row, { onConflict: "key" })
+      .select("*")
+      .single();
+    if (error) throw error;
+    return mapJourneyPath(result);
+  }
+
+  async listFeatureInventoryItems(filters?: {
+    surface?: string;
+    routePath?: string;
+    role?: string;
+    statuses?: string[];
+  }): Promise<FeatureInventoryItem[]> {
+    let query = supabase
+      .from("feature_inventory_items")
+      .select("*")
+      .order("status", { ascending: true })
+      .order("feature_key", { ascending: true });
+
+    if (filters?.surface) query = query.eq("surface", filters.surface);
+    if (filters?.routePath) query = query.eq("route_path", filters.routePath);
+    if (filters?.statuses?.length) query = query.in("status", filters.statuses);
+
+    const { data, error } = await query;
+    if (error || !data) return [];
+
+    const mapped = data.map(mapFeatureInventoryItem);
+    if (!filters?.role) return mapped;
+    return mapped.filter((item) => item.roleScope.length === 0 || item.roleScope.includes(filters.role as any));
+  }
+
+  async updateFeatureInventoryItem(id: string, data: UpdateFeatureInventoryItem): Promise<FeatureInventoryItem | undefined> {
+    const row = toSnakeCase(data as Record<string, any>);
+    row.updated_at = new Date().toISOString();
+    const { data: result, error } = await supabase
+      .from("feature_inventory_items")
+      .update(row)
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error || !result) return undefined;
+    return mapFeatureInventoryItem(result);
+  }
+
+  async getRedirectRuleForPath(path: string, role?: string): Promise<RedirectRule | undefined> {
+    const { data, error } = await supabase
+      .from("redirect_rules")
+      .select("*")
+      .eq("source_path", path)
+      .in("status", ["active", "scheduled"])
+      .limit(1);
+    if (error || !data || data.length === 0) return undefined;
+
+    const rule = mapRedirectRule(data[0]);
+    if (rule.status !== "active") return undefined;
+    if (!role || rule.roleScope.length === 0 || rule.roleScope.includes(role as any)) {
+      return rule;
+    }
+    return undefined;
+  }
+
+  async upsertRedirectRule(data: InsertRedirectRule): Promise<RedirectRule> {
+    const row = toSnakeCase(data as Record<string, any>);
+    row.updated_at = new Date().toISOString();
+    const { data: result, error } = await supabase
+      .from("redirect_rules")
+      .upsert(row, { onConflict: "source_path" })
+      .select("*")
+      .single();
+    if (error) throw error;
+    return mapRedirectRule(result);
+  }
+
+  async listLocalizationAudits(filters?: {
+    route?: string;
+    language?: string;
+    status?: string;
+  }): Promise<LocalizationAudit[]> {
+    let query = supabase
+      .from("localization_audits")
+      .select("*")
+      .order("route_path", { ascending: true })
+      .order("language", { ascending: true });
+
+    if (filters?.route) query = query.eq("route_path", filters.route);
+    if (filters?.language) query = query.eq("language", filters.language);
+    if (filters?.status) query = query.eq("status", filters.status);
+
+    const { data, error } = await query;
+    if (error || !data) return [];
+    return data.map(mapLocalizationAudit);
+  }
+
+  async upsertLocalizationAudit(data: InsertLocalizationAudit): Promise<LocalizationAudit> {
+    const row = toSnakeCase(data as Record<string, any>);
+    row.updated_at = new Date().toISOString();
+    const { data: result, error } = await supabase
+      .from("localization_audits")
+      .upsert(row, { onConflict: "route_path,language" })
+      .select("*")
+      .single();
+    if (error) throw error;
+    return mapLocalizationAudit(result);
+  }
+
+  async updateLocalizationAudit(id: string, data: UpdateLocalizationAudit): Promise<LocalizationAudit | undefined> {
+    const row = toSnakeCase(data as Record<string, any>);
+    row.updated_at = new Date().toISOString();
+    const { data: result, error } = await supabase
+      .from("localization_audits")
+      .update(row)
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error || !result) return undefined;
+    return mapLocalizationAudit(result);
+  }
+
+  async runLocalizationAudits(routes: string[], languages: string[]): Promise<LocalizationAudit[]> {
+    const results: LocalizationAudit[] = [];
+    for (const routePath of routes) {
+      for (const language of languages) {
+        const audit = await this.upsertLocalizationAudit({
+          routePath,
+          language: language as any,
+          status: "pending",
+          untranslatedCount: 0,
+          mixedCopyCount: 0,
+          fallbackCopyCount: 0,
+        });
+        results.push(audit);
+      }
+    }
+    return results;
   }
 
   // ---- Crisis Reports (MVP) ----

@@ -14,6 +14,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "rec
 import { Calendar, TrendingUp, ArrowRight, ArrowLeft, MessageCircle, GraduationCap, Star, HeartHandshake, SmilePlus, Plus } from "lucide-react";
 import type { Appointment, MoodEntry, User } from "@shared/schema";
 import { FeatureHint } from "@/components/feature-hint";
+import { FeatureTour } from "@/components/feature-tour";
 import { PageSkeleton } from "@/components/page-skeleton";
 import { PageError } from "@/components/page-error";
 
@@ -147,6 +148,7 @@ export default function DashboardPage() {
 
   return (
     <AppLayout>
+      <FeatureTour role="client" />
       <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-6">
         {appointmentsLoading && moodsLoading ? (
           <PageSkeleton variant="dashboard" />

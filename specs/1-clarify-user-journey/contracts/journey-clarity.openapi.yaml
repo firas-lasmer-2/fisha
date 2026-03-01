@@ -1,0 +1,551 @@
+openapi: 3.1.0
+info:
+  title: Shifa Journey Clarity API
+  version: 0.1.0
+  description: >
+    Planning contract for the clear-user-journey feature. This contract formalizes
+    canonical navigation, role-home guidance, feature inventory review, redirect
+    resolution, and localization readiness.
+servers:
+  - url: https://example.com
+paths:
+  /api/navigation/manifest:
+    get:
+      summary: Get canonical navigation and primary paths for a role and language
+      parameters:
+        - in: query
+          name: role
+          schema:
+            $ref: '#/components/schemas/Role'
+        - in: query
+          name: language
+          schema:
+            $ref: '#/components/schemas/SupportedLanguage'
+      responses:
+        '200':
+          description: Canonical route manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NavigationManifestResponse'
+  /api/navigation/resolve:
+    get:
+      summary: Resolve an outdated, merged, or retired route to its canonical destination
+      parameters:
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: role
+          schema:
+            $ref: '#/components/schemas/Role'
+      responses:
+        '200':
+          description: Resolved route information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NavigationResolution'
+        '404':
+          description: No active rule or canonical route found
+  /api/workflow/overview:
+    get:
+      summary: Get canonical home and next actions for the authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Role-aware home overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowOverviewResponse'
+        '401':
+          description: Unauthorized
+  /api/admin/feature-inventory:
+    get:
+      summary: List audited feature entries and their governance status
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema:
+            $ref: '#/components/schemas/FeatureStatus'
+        - in: query
+          name: surface
+          schema:
+            $ref: '#/components/schemas/FeatureSurface'
+        - in: query
+          name: role
+          schema:
+            $ref: '#/components/schemas/Role'
+      responses:
+        '200':
+          description: Feature inventory results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatureInventoryListResponse'
+        '403':
+          description: Forbidden
+  /api/admin/feature-inventory/{itemId}:
+    patch:
+      summary: Update the governance status of a feature entry
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: itemId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeatureInventoryUpdateRequest'
+      responses:
+        '200':
+          description: Updated inventory item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatureInventoryItem'
+        '403':
+          description: Forbidden
+        '404':
+          description: Item not found
+  /api/admin/localization-audits:
+    get:
+      summary: List localization audit status for audited routes
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: route
+          schema:
+            type: string
+        - in: query
+          name: language
+          schema:
+            $ref: '#/components/schemas/SupportedLanguage'
+        - in: query
+          name: status
+          schema:
+            $ref: '#/components/schemas/LocalizationAuditStatus'
+      responses:
+        '200':
+          description: Localization audit results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocalizationAuditListResponse'
+        '403':
+          description: Forbidden
+  /api/admin/localization-audits/run:
+    post:
+      summary: Run or schedule a localization audit for selected routes and languages
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocalizationAuditRunRequest'
+      responses:
+        '202':
+          description: Audit run accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocalizationAuditRunResponse'
+        '403':
+          description: Forbidden
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Role:
+      type: string
+      enum:
+        - visitor
+        - client
+        - therapist
+        - listener
+        - moderator
+        - admin
+    SupportedLanguage:
+      type: string
+      enum:
+        - ar
+        - fr
+    JourneyStage:
+      type: string
+      enum:
+        - discovery
+        - onboarding
+        - home
+        - continuation
+    FeatureStatus:
+      type: string
+      enum:
+        - primary
+        - secondary
+        - experimental
+        - retired
+    FeatureSurface:
+      type: string
+      enum:
+        - landing
+        - support
+        - welcome
+        - workflow
+        - dashboard
+        - nav
+        - settings
+        - other
+    RedirectReason:
+      type: string
+      enum:
+        - retired
+        - merged
+        - renamed
+        - role-home-change
+    LocalizationAuditStatus:
+      type: string
+      enum:
+        - pending
+        - in_review
+        - approved
+        - blocked
+    ManifestEntry:
+      type: object
+      required:
+        - id
+        - role
+        - stage
+        - label
+        - summary
+        - href
+        - status
+      properties:
+        id:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+        stage:
+          $ref: '#/components/schemas/JourneyStage'
+        label:
+          type: string
+        summary:
+          type: string
+        href:
+          type: string
+        status:
+          type: string
+          enum:
+            - active
+            - secondary
+            - retired
+        supportsGuest:
+          type: boolean
+    NavigationManifestResponse:
+      type: object
+      required:
+        - role
+        - language
+        - primaryPaths
+        - secondaryPaths
+      properties:
+        role:
+          $ref: '#/components/schemas/Role'
+        language:
+          $ref: '#/components/schemas/SupportedLanguage'
+        primaryPaths:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManifestEntry'
+        secondaryPaths:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManifestEntry'
+        inventoryVersion:
+          type: string
+    NavigationResolution:
+      type: object
+      required:
+        - path
+        - status
+      properties:
+        path:
+          type: string
+        status:
+          type: string
+          enum:
+            - direct
+            - redirect
+            - retired
+            - missing
+        targetPath:
+          type: string
+        reason:
+          $ref: '#/components/schemas/RedirectReason'
+        message:
+          type: string
+    WorkflowAction:
+      type: object
+      required:
+        - id
+        - title
+        - description
+        - href
+        - priority
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        href:
+          type: string
+        priority:
+          type: string
+          enum:
+            - primary
+            - secondary
+    WorkflowOverviewResponse:
+      type: object
+      required:
+        - user
+        - home
+        - counts
+        - primaryActions
+        - secondaryActions
+      properties:
+        user:
+          type: object
+          required:
+            - id
+            - role
+          properties:
+            id:
+              type: string
+            role:
+              $ref: '#/components/schemas/Role'
+        home:
+          type: object
+          required:
+            - stage
+            - destinationPath
+            - label
+          properties:
+            stage:
+              $ref: '#/components/schemas/JourneyStage'
+            destinationPath:
+              type: string
+            label:
+              type: string
+            summary:
+              type: string
+        counts:
+          type: object
+          required:
+            - unreadMessages
+            - upcomingAppointments
+            - activePeerSessions
+            - completedPeerSessions
+          properties:
+            unreadMessages:
+              type: integer
+            upcomingAppointments:
+              type: integer
+            activePeerSessions:
+              type: integer
+            completedPeerSessions:
+              type: integer
+        primaryActions:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowAction'
+        secondaryActions:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowAction'
+        localizationStatus:
+          type: string
+          enum:
+            - approved
+            - partial
+            - blocked
+    FeatureInventoryItem:
+      type: object
+      required:
+        - id
+        - featureKey
+        - surface
+        - routePath
+        - goalKey
+        - roleScope
+        - status
+        - userValueStatement
+      properties:
+        id:
+          type: string
+          format: uuid
+        featureKey:
+          type: string
+        surface:
+          $ref: '#/components/schemas/FeatureSurface'
+        routePath:
+          type: string
+        goalKey:
+          type: string
+        roleScope:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+        status:
+          $ref: '#/components/schemas/FeatureStatus'
+        journeyPathId:
+          type: string
+          format: uuid
+        replacementRoute:
+          type: string
+        duplicateOfItemId:
+          type: string
+          format: uuid
+        ownerUserId:
+          type: string
+          format: uuid
+        userValueStatement:
+          type: string
+        reviewNotes:
+          type: string
+        lastReviewedAt:
+          type: string
+          format: date-time
+    FeatureInventoryListResponse:
+      type: object
+      required:
+        - items
+        - totals
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureInventoryItem'
+        totals:
+          type: object
+          required:
+            - primary
+            - secondary
+            - experimental
+            - retired
+          properties:
+            primary:
+              type: integer
+            secondary:
+              type: integer
+            experimental:
+              type: integer
+            retired:
+              type: integer
+    FeatureInventoryUpdateRequest:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/FeatureStatus'
+        journeyPathId:
+          type: string
+          format: uuid
+        replacementRoute:
+          type: string
+        ownerUserId:
+          type: string
+          format: uuid
+        userValueStatement:
+          type: string
+        reviewNotes:
+          type: string
+    LocalizationAudit:
+      type: object
+      required:
+        - id
+        - routePath
+        - language
+        - status
+        - untranslatedCount
+        - mixedCopyCount
+        - fallbackCopyCount
+      properties:
+        id:
+          type: string
+          format: uuid
+        routePath:
+          type: string
+        language:
+          $ref: '#/components/schemas/SupportedLanguage'
+        status:
+          $ref: '#/components/schemas/LocalizationAuditStatus'
+        untranslatedCount:
+          type: integer
+        mixedCopyCount:
+          type: integer
+        fallbackCopyCount:
+          type: integer
+        reviewedByUserId:
+          type: string
+          format: uuid
+        reviewedAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+    LocalizationAuditListResponse:
+      type: object
+      required:
+        - audits
+      properties:
+        audits:
+          type: array
+          items:
+            $ref: '#/components/schemas/LocalizationAudit'
+    LocalizationAuditRunRequest:
+      type: object
+      required:
+        - routes
+        - languages
+      properties:
+        routes:
+          type: array
+          items:
+            type: string
+        languages:
+          type: array
+          items:
+            $ref: '#/components/schemas/SupportedLanguage'
+    LocalizationAuditRunResponse:
+      type: object
+      required:
+        - status
+        - queuedRoutes
+        - queuedLanguages
+      properties:
+        status:
+          type: string
+          enum:
+            - queued
+        queuedRoutes:
+          type: integer
+        queuedLanguages:
+          type: integer

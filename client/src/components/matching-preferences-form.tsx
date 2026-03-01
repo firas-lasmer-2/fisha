@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, Save, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { MatchingPreferences } from "@shared/schema";
+import { useI18n } from "@/lib/i18n";
+import { FeatureHint } from "@/components/feature-hint";
 
 const SPECIALIZATIONS = [
   "Anxiety", "Depression", "Trauma", "Relationships",
@@ -34,6 +36,7 @@ const GENDERS: { value: string; label: string }[] = [
 ];
 
 export function MatchingPreferencesForm() {
+  const { t } = useI18n();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -175,20 +178,22 @@ export function MatchingPreferencesForm() {
         </div>
       </div>
 
-      <Button
-        onClick={() => saveMutation.mutate()}
-        disabled={saveMutation.isPending}
-        className="w-full"
-      >
-        {saveMutation.isPending ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <>
-            <Save className="h-4 w-4 mr-2" />
-            Save preferences
-          </>
-        )}
-      </Button>
+      <FeatureHint id="matching-preferences" content={t("hint.matching_preferences")} side="top">
+        <Button
+          onClick={() => saveMutation.mutate()}
+          disabled={saveMutation.isPending}
+          className="w-full"
+        >
+          {saveMutation.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <>
+              <Save className="h-4 w-4 mr-2" />
+              Save preferences
+            </>
+          )}
+        </Button>
+      </FeatureHint>
     </div>
   );
 }

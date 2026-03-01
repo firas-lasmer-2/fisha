@@ -1,3 +1,5 @@
+import { motion } from "framer-motion";
+import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import { useI18n } from "@/lib/i18n";
 import { AppLayout } from "@/components/app-layout";
 import { PageHeader } from "@/components/page-header";
@@ -249,6 +251,7 @@ export default function AppointmentsPage() {
   const { t } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
+  const rm = usePrefersReducedMotion();
   const [location] = useLocation();
   const [now, setNow] = useState(() => Date.now());
   // Cancel dialog state
@@ -394,7 +397,12 @@ export default function AppointmentsPage() {
 
   return (
     <AppLayout>
-      <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
+      <motion.div
+        className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6"
+        initial="hidden"
+        animate="visible"
+        variants={safeVariants(fadeUp, rm)}
+      >
         <PageHeader title={t("nav.appointments")} />
 
         {isLoading ? (
@@ -544,7 +552,7 @@ export default function AppointmentsPage() {
             description="Your upcoming appointments will appear here."
           />
         )}
-      </div>
+      </motion.div>
 
       {/* Cancel confirmation dialog */}
       <Dialog open={cancelDialogApt !== null} onOpenChange={(open) => { if (!open) { setCancelDialogApt(null); setCancelReason(""); } }}>

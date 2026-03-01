@@ -226,12 +226,15 @@ export default function OnboardingPage() {
         <div className="relative">
           <AtSign className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
+            id="onboarding-display-name"
             className="ps-9 pe-9"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value.replace(/\s/g, ""))}
             placeholder={tr("onboarding.display_name_placeholder", "e.g. calm_soul or أمل")}
             maxLength={30}
             data-testid="input-display-name-onboarding"
+            aria-describedby={displayName && displayNameAvailable === false ? "onboarding-display-name-error" : undefined}
+            aria-invalid={displayName && displayNameAvailable === false ? true : undefined}
           />
           <div className="absolute end-3 top-1/2 -translate-y-1/2">
             {displayNameChecking && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
@@ -244,7 +247,7 @@ export default function OnboardingPage() {
           </div>
         </div>
         {displayName && displayNameAvailable === false && (
-          <p className="text-xs text-destructive">
+          <p id="onboarding-display-name-error" className="text-xs text-destructive" role="alert">
             {DISPLAY_NAME_REGEX.test(displayName)
               ? tr("onboarding.display_name_taken", "This name is already taken. Try another.")
               : tr("onboarding.display_name_invalid", "3–30 characters: letters, numbers, Arabic, or underscores only.")}

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { motion } from "framer-motion";
+import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import { AppLayout } from "@/components/app-layout";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
@@ -21,6 +23,7 @@ interface ListenerApplicationPayload {
 export default function ListenerApplyPage() {
   const { t } = useI18n();
   const { toast } = useToast();
+  const rm = usePrefersReducedMotion();
   const [displayAlias, setDisplayAlias] = useState("");
   const [timezone, setTimezone] = useState("Africa/Tunis");
   const [languages, setLanguages] = useState("ar, fr");
@@ -73,7 +76,12 @@ export default function ListenerApplyPage() {
 
   return (
     <AppLayout>
-      <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-4">
+      <motion.div
+        className="max-w-3xl mx-auto p-4 sm:p-6 space-y-4"
+        initial="hidden"
+        animate="visible"
+        variants={safeVariants(fadeUp, rm)}
+      >
         <Card>
           <CardHeader className="pb-3">
             <CardTitle>{t("listener.become_title")}</CardTitle>
@@ -197,7 +205,7 @@ export default function ListenerApplyPage() {
             )}
           </CardContent>
         </Card>
-      </div>
+      </motion.div>
     </AppLayout>
   );
 }

@@ -17,6 +17,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { CreditCard, Loader2, PackageCheck, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { SubscriptionPlan } from "@shared/schema";
+import { useI18n } from "@/lib/i18n";
+import { FeatureHint } from "@/components/feature-hint";
 
 interface SubscriptionDialogProps {
   open: boolean;
@@ -32,6 +34,7 @@ export function SubscriptionDialog({
   therapistId,
   onPurchased,
 }: SubscriptionDialogProps) {
+  const { t } = useI18n();
   const { toast } = useToast();
   const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"flouci" | "konnect">("flouci");
@@ -68,7 +71,9 @@ export function SubscriptionDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <PackageCheck className="h-5 w-5 text-primary" />
+            <FeatureHint id="subscription-plan" content={t("hint.subscription_plan")} side="right">
+              <PackageCheck className="h-5 w-5 text-primary" />
+            </FeatureHint>
             Choose a subscription plan
           </DialogTitle>
           <DialogDescription>

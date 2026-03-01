@@ -236,6 +236,211 @@ export function mapNotification(row: any): Notification {
   };
 }
 
+export const journeyRoleValues = ["visitor", "client", "therapist", "listener", "moderator", "admin"] as const;
+export const journeyStageValues = ["discovery", "onboarding", "home", "continuation"] as const;
+export const journeyStatusValues = ["draft", "active", "retired"] as const;
+export const featureSurfaceValues = ["landing", "support", "welcome", "workflow", "dashboard", "nav", "settings", "other"] as const;
+export const featureStatusValues = ["primary", "secondary", "experimental", "retired"] as const;
+export const redirectReasonValues = ["retired", "merged", "renamed", "role-home-change"] as const;
+export const redirectStatusValues = ["scheduled", "active", "disabled"] as const;
+export const localizationAuditStatusValues = ["pending", "in_review", "approved", "blocked"] as const;
+export const supportedEndUserLanguages = ["ar", "fr"] as const;
+
+export type JourneyRole = (typeof journeyRoleValues)[number];
+export type JourneyStage = (typeof journeyStageValues)[number];
+export type JourneyStatus = (typeof journeyStatusValues)[number];
+export type FeatureSurface = (typeof featureSurfaceValues)[number];
+export type FeatureStatus = (typeof featureStatusValues)[number];
+export type RedirectReason = (typeof redirectReasonValues)[number];
+export type RedirectStatus = (typeof redirectStatusValues)[number];
+export type SupportedEndUserLanguage = (typeof supportedEndUserLanguages)[number];
+export type LocalizationAuditStatus = (typeof localizationAuditStatusValues)[number];
+
+export interface JourneyPath {
+  id: string;
+  key: string;
+  role: JourneyRole;
+  stage: JourneyStage;
+  labelKey: string;
+  summaryKey: string | null;
+  destinationPath: string;
+  audienceDescription: string;
+  status: JourneyStatus;
+  supportsGuest: boolean;
+  displayOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FeatureInventoryItem {
+  id: string;
+  featureKey: string;
+  surface: FeatureSurface;
+  routePath: string;
+  destinationPath: string | null;
+  goalKey: string;
+  roleScope: JourneyRole[];
+  status: FeatureStatus;
+  labelKey: string;
+  summaryKey: string | null;
+  journeyPathId: string | null;
+  replacementRoute: string | null;
+  duplicateOfItemId: string | null;
+  ownerUserId: string | null;
+  userValueStatement: string;
+  reviewNotes: string | null;
+  lastReviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RedirectRule {
+  id: string;
+  sourcePath: string;
+  targetPath: string;
+  reason: RedirectReason;
+  messageKey: string | null;
+  roleScope: JourneyRole[];
+  preserveQuery: boolean;
+  status: RedirectStatus;
+  startsAt: string | null;
+  endsAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LocalizationAudit {
+  id: string;
+  routePath: string;
+  language: SupportedEndUserLanguage;
+  status: LocalizationAuditStatus;
+  untranslatedCount: number;
+  mixedCopyCount: number;
+  fallbackCopyCount: number;
+  reviewedByUserId: string | null;
+  reviewedAt: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NavigationManifestEntry {
+  id: string;
+  featureKey: string;
+  labelKey: string;
+  summaryKey: string | null;
+  href: string;
+  goalKey: string;
+  status: FeatureStatus;
+}
+
+export interface NavigationManifestResponse {
+  role: JourneyRole;
+  surface: FeatureSurface;
+  primaryPaths: NavigationManifestEntry[];
+  secondaryPaths: NavigationManifestEntry[];
+  inventoryVersion: string;
+}
+
+export interface NavigationResolution {
+  path: string;
+  status: "direct" | "redirect" | "retired" | "missing";
+  targetPath: string | null;
+  reason: RedirectReason | null;
+  messageKey: string | null;
+}
+
+export interface WorkflowHome {
+  stage: JourneyStage;
+  destinationPath: string;
+  labelKey: string;
+  summaryKey: string | null;
+}
+
+export interface WorkflowAction {
+  id: string;
+  labelKey: string;
+  summaryKey: string | null;
+  href: string;
+  priority: "primary" | "secondary";
+}
+
+export function mapJourneyPath(row: any): JourneyPath {
+  return {
+    id: row.id,
+    key: row.key,
+    role: row.role,
+    stage: row.stage,
+    labelKey: row.label_key,
+    summaryKey: row.summary_key ?? null,
+    destinationPath: row.destination_path,
+    audienceDescription: row.audience_description,
+    status: row.status,
+    supportsGuest: row.supports_guest ?? false,
+    displayOrder: row.display_order ?? 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapFeatureInventoryItem(row: any): FeatureInventoryItem {
+  return {
+    id: row.id,
+    featureKey: row.feature_key,
+    surface: row.surface,
+    routePath: row.route_path,
+    destinationPath: row.destination_path ?? null,
+    goalKey: row.goal_key,
+    roleScope: row.role_scope ?? [],
+    status: row.status,
+    labelKey: row.label_key,
+    summaryKey: row.summary_key ?? null,
+    journeyPathId: row.journey_path_id ?? null,
+    replacementRoute: row.replacement_route ?? null,
+    duplicateOfItemId: row.duplicate_of_item_id ?? null,
+    ownerUserId: row.owner_user_id ?? null,
+    userValueStatement: row.user_value_statement,
+    reviewNotes: row.review_notes ?? null,
+    lastReviewedAt: row.last_reviewed_at ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapRedirectRule(row: any): RedirectRule {
+  return {
+    id: row.id,
+    sourcePath: row.source_path,
+    targetPath: row.target_path,
+    reason: row.reason,
+    messageKey: row.message_key ?? null,
+    roleScope: row.role_scope ?? [],
+    preserveQuery: row.preserve_query ?? true,
+    status: row.status,
+    startsAt: row.starts_at ?? null,
+    endsAt: row.ends_at ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapLocalizationAudit(row: any): LocalizationAudit {
+  return {
+    id: row.id,
+    routePath: row.route_path,
+    language: row.language,
+    status: row.status,
+    untranslatedCount: row.untranslated_count ?? 0,
+    mixedCopyCount: row.mixed_copy_count ?? 0,
+    fallbackCopyCount: row.fallback_copy_count ?? 0,
+    reviewedByUserId: row.reviewed_by_user_id ?? null,
+    reviewedAt: row.reviewed_at ?? null,
+    notes: row.notes ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 export interface ListenerProfile {
   userId: string;
   displayAlias: string | null;
@@ -432,6 +637,71 @@ export interface PeerReport {
 }
 
 // ---- Zod insert schemas for API validation ----
+
+export const insertJourneyPathSchema = z.object({
+  key: z.string().min(1),
+  role: z.enum(journeyRoleValues),
+  stage: z.enum(journeyStageValues),
+  labelKey: z.string().min(1),
+  summaryKey: z.string().optional().nullable(),
+  destinationPath: z.string().min(1),
+  audienceDescription: z.string().min(1),
+  status: z.enum(journeyStatusValues).default("draft"),
+  supportsGuest: z.boolean().default(false),
+  displayOrder: z.number().int().default(0),
+});
+
+export const insertFeatureInventoryItemSchema = z.object({
+  featureKey: z.string().min(1),
+  surface: z.enum(featureSurfaceValues),
+  routePath: z.string().min(1),
+  destinationPath: z.string().min(1).optional().nullable(),
+  goalKey: z.string().min(1),
+  roleScope: z.array(z.enum(journeyRoleValues)).default([]),
+  status: z.enum(featureStatusValues).default("secondary"),
+  labelKey: z.string().min(1),
+  summaryKey: z.string().optional().nullable(),
+  journeyPathId: z.string().uuid().optional().nullable(),
+  replacementRoute: z.string().optional().nullable(),
+  duplicateOfItemId: z.string().uuid().optional().nullable(),
+  ownerUserId: z.string().uuid().optional().nullable(),
+  userValueStatement: z.string().min(1),
+  reviewNotes: z.string().optional().nullable(),
+  lastReviewedAt: z.string().optional().nullable(),
+});
+
+export const updateFeatureInventoryItemSchema = insertFeatureInventoryItemSchema.partial();
+
+export const insertRedirectRuleSchema = z.object({
+  sourcePath: z.string().min(1),
+  targetPath: z.string().min(1),
+  reason: z.enum(redirectReasonValues),
+  messageKey: z.string().optional().nullable(),
+  roleScope: z.array(z.enum(journeyRoleValues)).default([]),
+  preserveQuery: z.boolean().default(true),
+  status: z.enum(redirectStatusValues).default("scheduled"),
+  startsAt: z.string().optional().nullable(),
+  endsAt: z.string().optional().nullable(),
+});
+
+export const insertLocalizationAuditSchema = z.object({
+  routePath: z.string().min(1),
+  language: z.enum(supportedEndUserLanguages),
+  status: z.enum(localizationAuditStatusValues).default("pending"),
+  untranslatedCount: z.number().int().nonnegative().default(0),
+  mixedCopyCount: z.number().int().nonnegative().default(0),
+  fallbackCopyCount: z.number().int().nonnegative().default(0),
+  reviewedByUserId: z.string().uuid().optional().nullable(),
+  reviewedAt: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+});
+
+export const updateLocalizationAuditSchema = insertLocalizationAuditSchema.partial();
+
+export const localizationAuditRunSchema = z.object({
+  routes: z.array(z.string().min(1)).min(1),
+  languages: z.array(z.enum(supportedEndUserLanguages)).min(1),
+});
 
 export const insertUserSchema = z.object({
   email: z.string().email().optional().nullable(),
@@ -767,6 +1037,13 @@ export function mapTherapistVerification(row: any): TherapistVerification {
 
 // ---- Insert types ----
 
+export type InsertJourneyPath = z.infer<typeof insertJourneyPathSchema>;
+export type InsertFeatureInventoryItem = z.infer<typeof insertFeatureInventoryItemSchema>;
+export type UpdateFeatureInventoryItem = z.infer<typeof updateFeatureInventoryItemSchema>;
+export type InsertRedirectRule = z.infer<typeof insertRedirectRuleSchema>;
+export type InsertLocalizationAudit = z.infer<typeof insertLocalizationAuditSchema>;
+export type UpdateLocalizationAudit = z.infer<typeof updateLocalizationAuditSchema>;
+export type RunLocalizationAuditRequest = z.infer<typeof localizationAuditRunSchema>;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type InsertTherapistProfile = z.infer<typeof insertTherapistProfileSchema>;
 export type InsertAppointment = z.infer<typeof insertAppointmentSchema>;

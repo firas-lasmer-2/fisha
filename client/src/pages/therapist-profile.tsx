@@ -354,7 +354,7 @@ export default function TherapistProfilePage() {
               <div className="flex flex-col sm:flex-row items-start gap-5">
                 <Avatar className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl">
                   {profile.user.profileImageUrl && (
-                    <AvatarImage src={profile.user.profileImageUrl} alt={fullName} />
+                    <AvatarImage src={profile.user.profileImageUrl} alt={fullName} loading="lazy" />
                   )}
                   <AvatarFallback className="rounded-xl gradient-calm text-white text-2xl font-bold">
                     {(profile.user.firstName?.[0] || "?").toUpperCase()}

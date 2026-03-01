@@ -1,23 +1,28 @@
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
+import { motion } from "framer-motion";
+import { Compass, Heart, HeartHandshake, Users, Wind } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/hooks/use-auth";
 import { useI18n } from "@/lib/i18n";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Heart, HeartHandshake, Sparkles, Users, Wind } from "lucide-react";
-import { motion } from "framer-motion";
-import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
-import type { OnboardingResponse, TherapistProfile, User } from "@shared/schema";
+import {
+  canonicalHomeRouteForRole,
+  clearStoredWelcomeContinuation,
+  getStoredWelcomePath,
+  shouldShowWelcomeContinuation,
+} from "@/lib/navigation";
+import { fadeUp, safeVariants, usePrefersReducedMotion } from "@/lib/motion";
 
-function homeRouteForRole(role: string | null | undefined) {
-  if (!role) return "/workflow";
-  return "/workflow";
-}
+type StarterPath = "peer" | "therapist" | "wellness" | "support";
 
-type TherapistRow = TherapistProfile & { user: User };
-type StarterPath = "peer" | "therapist" | "wellness";
+const starterMeta = {
+  peer: { icon: HeartHandshake, href: "/peer-support", labelKey: "welcome.path.peer.label", bodyKey: "welcome.path.peer.body" },
+  therapist: { icon: Users, href: "/therapists", labelKey: "welcome.path.therapist.label", bodyKey: "welcome.path.therapist.body" },
+  wellness: { icon: Wind, href: "/self-care", labelKey: "welcome.path.wellness.label", bodyKey: "welcome.path.wellness.body" },
+  support: { icon: Compass, href: "/support", labelKey: "welcome.path.support.label", bodyKey: "welcome.path.support.body" },
+} as const;
 
 export default function WelcomePage() {
   const { user } = useAuth();
@@ -25,132 +30,98 @@ export default function WelcomePage() {
   const [, navigate] = useLocation();
   const rm = usePrefersReducedMotion();
   const safeFadeUp = safeVariants(fadeUp, rm);
-  const role = user?.role;
 
-  const tr = (key: string, fallback: string) => {
+  const translate = (key: string) => {
     const value = t(key);
-    return value === key ? fallback : value;
+    return value === key ? key : value;
   };
 
-  if (role && role !== "client") {
-    navigate(homeRouteForRole(role));
+  const role = user?.role;
+  if (!user || role !== "client") {
+    navigate(canonicalHomeRouteForRole(role));
     return null;
   }
 
-  const starterPath = useMemo<StarterPath>(() => {
-    if (typeof window === "undefined") return "peer";
-    const value = localStorage.getItem("shifa-welcome-path");
-    if (value === "therapist" || value === "wellness" || value === "peer") return value;
-    return "peer";
-  }, []);
+  if (!shouldShowWelcomeContinuation(user)) {
+    navigate(canonicalHomeRouteForRole(role));
+    return null;
+  }
 
-  const { data: onboarding } = useQuery<OnboardingResponse | null>({
-    queryKey: ["/api/onboarding"],
-  });
+  const starterPath = useMemo<StarterPath>(() => getStoredWelcomePath() || "support", []);
+  const highlightedPath = starterMeta[starterPath];
+  const HighlightIcon = highlightedPath.icon;
 
-  const therapistUrl = useMemo(() => {
-    const params = new URLSearchParams();
-    if (onboarding?.primaryConcerns?.[0]) {
-      params.set("specialization", onboarding.primaryConcerns[0]);
-    }
-    if (onboarding?.preferredLanguage) {
-      params.set("language", onboarding.preferredLanguage);
-    }
-    const qs = params.toString();
-    return qs ? `/api/therapists?${qs}` : "/api/therapists";
-  }, [onboarding?.primaryConcerns, onboarding?.preferredLanguage]);
+  const continueJourney = () => {
+    clearStoredWelcomeContinuation();
+    navigate(highlightedPath.href);
+  };
 
-  const { data: therapists = [] } = useQuery<TherapistRow[]>({
-    queryKey: [therapistUrl],
-    enabled: Boolean(onboarding),
-  });
-
-  const recommendedTherapist = therapists[0];
-
-  const continuePath = () => {
-    localStorage.removeItem("shifa-show-welcome");
-    if (starterPath === "therapist") {
-      navigate("/therapists");
-      return;
-    }
-    if (starterPath === "wellness") {
-      navigate("/self-care");
-      return;
-    }
-    navigate("/peer-support");
+  const skipToHome = () => {
+    clearStoredWelcomeContinuation();
+    navigate(canonicalHomeRouteForRole(role));
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-b from-background to-muted/30">
       <motion.div
-        custom={0} initial="hidden" animate="visible" variants={safeFadeUp}
-        className="w-full max-w-2xl space-y-4"
+        custom={0}
+        initial="hidden"
+        animate="visible"
+        variants={safeFadeUp}
+        className="w-full max-w-3xl space-y-4"
       >
         <Card>
           <CardHeader className="text-center space-y-3">
             <div className="w-14 h-14 rounded-2xl gradient-calm flex items-center justify-center mx-auto">
               <Heart className="h-7 w-7 text-white" />
             </div>
-            <CardTitle>
-              {tr("welcome.title", "Welcome to your support space")}
-            </CardTitle>
+            <Badge variant="secondary" className="mx-auto">
+              {translate("welcome.badge")}
+            </Badge>
+            <CardTitle>{translate("welcome.title")}</CardTitle>
             <p className="text-sm text-muted-foreground">
-              {tr("welcome.subtitle", "You are not alone. We prepared a gentle starting point for you.")}
+              {translate("welcome.subtitle")}
             </p>
-            {user?.firstName && (
-              <Badge variant="secondary" className="mx-auto">
-                {tr("welcome.hello", "Hello")} {user.firstName}
-              </Badge>
-            )}
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Button variant="outline" className="justify-start gap-2" onClick={() => navigate("/peer-support")}>
-                <HeartHandshake className="h-4 w-4" />
-                {tr("welcome.peer", "Browse our listeners")}
-              </Button>
-              <Button variant="outline" className="justify-start gap-2" onClick={() => navigate("/therapists")}>
-                <Users className="h-4 w-4" />
-                {tr("welcome.therapist", "Browse therapists")}
-              </Button>
-              <Button variant="outline" className="justify-start gap-2" onClick={() => navigate("/self-care")}>
-                <Wind className="h-4 w-4" />
-                {tr("welcome.wellness", "Open wellness tools")}
-              </Button>
+          <CardContent className="space-y-5">
+            <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 flex items-start gap-3">
+              <div className="w-11 h-11 rounded-xl bg-background/80 flex items-center justify-center shrink-0">
+                <HighlightIcon className="h-5 w-5 text-primary" />
+              </div>
+              <div className="space-y-1">
+                <p className="font-medium">{translate(highlightedPath.labelKey)}</p>
+                <p className="text-sm text-muted-foreground">{translate(highlightedPath.bodyKey)}</p>
+              </div>
             </div>
 
-            {recommendedTherapist ? (
-              <Card className="border-primary/30">
-                <CardContent className="p-4 space-y-2">
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    {tr("welcome.recommendation", "Recommended for your first step")}
-                  </p>
-                  <p className="text-sm font-semibold">
-                    {recommendedTherapist.user.firstName} {recommendedTherapist.user.lastName}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {(recommendedTherapist.specializations || []).slice(0, 2).map((spec) => t(`specialization.${spec}`)).join(" • ")}
-                  </p>
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-muted-foreground">
-                      {recommendedTherapist.rateDinar ?? "--"} {t("common.dinar")}
-                    </p>
-                    <Button size="sm" onClick={() => navigate(`/therapist/${recommendedTherapist.userId}`)}>
-                      {t("therapist.book")}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : (
-              <p className="text-sm text-muted-foreground text-center">
-                {tr("welcome.no_recommendation", "We will refine recommendations as you use Shifa.")}
-              </p>
-            )}
+            <div className="grid gap-3 md:grid-cols-3">
+              {(Object.entries(starterMeta) as Array<[StarterPath, typeof starterMeta[StarterPath]]>).map(([key, option]) => {
+                const OptionIcon = option.icon;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => navigate(option.href)}
+                    className="rounded-2xl border bg-card p-4 text-left hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center mb-3">
+                      <OptionIcon className="h-5 w-5 text-primary" />
+                    </div>
+                    <p className="font-medium">{translate(option.labelKey)}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{translate(option.bodyKey)}</p>
+                  </button>
+                );
+              })}
+            </div>
 
-            <Button className="w-full" onClick={continuePath} data-testid="button-welcome-continue">
-              {tr("welcome.continue", "Continue")}
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button className="flex-1" onClick={continueJourney} data-testid="button-welcome-continue">
+                {translate("welcome.continue")}
+              </Button>
+              <Button variant="outline" className="flex-1" onClick={skipToHome}>
+                {translate("welcome.skip")}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </motion.div>

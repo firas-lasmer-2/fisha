@@ -154,7 +154,7 @@ export default function TherapistLandingPage() {
             className="flex flex-col sm:flex-row items-center sm:items-start gap-6"
           >
             <Avatar className="h-24 w-24 sm:h-32 sm:w-32 shrink-0 ring-4 ring-white shadow-lg">
-              <AvatarImage src={user?.profileImageUrl || ""} alt={therapistName} />
+              <AvatarImage src={user?.profileImageUrl || ""} alt={therapistName} loading="lazy" />
               <AvatarFallback className="text-2xl font-bold" style={{ background: accentColor + "33" }}>
                 {therapistName.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)}
               </AvatarFallback>

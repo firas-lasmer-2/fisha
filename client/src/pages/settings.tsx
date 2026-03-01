@@ -1,4 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
+import { motion } from "framer-motion";
+import { fadeUp, successPop, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AppLayout } from "@/components/app-layout";
@@ -12,8 +14,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { getAccessToken } from "@/lib/supabase";
-import { Calendar, CreditCard, Receipt, UserCircle, Wallet, AtSign, Check, X, Loader2, KeyRound, ShieldCheck, Download } from "lucide-react";
+import { Calendar, CreditCard, Receipt, UserCircle, Wallet, AtSign, Check, X, Loader2, KeyRound, ShieldCheck, Download, Accessibility } from "lucide-react";
+import { useFontSize } from "@/hooks/use-font-size";
+import { useHighContrast } from "@/components/contrast-toggle";
 import type { PaymentTransaction } from "@shared/schema";
+import { FeatureHint } from "@/components/feature-hint";
+import { resetTour } from "@/components/feature-tour";
 import { wrapPrivateKeyWithPassword, unwrapPrivateKeyWithPassword } from "@/lib/e2e";
 import { PageHeader } from "@/components/page-header";
 import { PageSkeleton } from "@/components/page-skeleton";
@@ -71,6 +77,9 @@ export default function SettingsPage() {
   };
 
   const isClient = user?.role === "client";
+  const rm = usePrefersReducedMotion();
+  const { fontSize, setFontSize } = useFontSize();
+  const { enabled: highContrast, toggle: toggleContrast } = useHighContrast();
 
   const [displayNameInput, setDisplayNameInput] = useState(user?.displayName || "");
   const { available, checking } = useDisplayNameCheck(displayNameInput, user?.displayName);
@@ -176,7 +185,12 @@ export default function SettingsPage() {
 
   return (
     <AppLayout>
-      <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-4">
+      <motion.div
+        className="max-w-5xl mx-auto p-4 sm:p-6 space-y-4"
+        initial="hidden"
+        animate="visible"
+        variants={safeVariants(fadeUp, rm)}
+      >
         <PageHeader
           title={tr("settings.title", "Profile & settings")}
           subtitle={tr("settings.subtitle", "Manage your account and billing details in one place.")}
@@ -225,6 +239,17 @@ export default function SettingsPage() {
                     tr("settings.save_name", "Save name")
                   )}
                 </Button>
+                {saveProfileName.isSuccess && (
+                  <motion.p
+                    className="flex items-center gap-1 text-xs text-green-600 font-medium"
+                    initial="hidden"
+                    animate="visible"
+                    variants={safeVariants(successPop, rm)}
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                    {tr("settings.name_saved", "Name updated")}
+                  </motion.p>
+                )}
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">{tr("settings.email", "Email")}</p>
@@ -255,7 +280,9 @@ export default function SettingsPage() {
           <Card data-testid="card-settings-display-name">
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
-                <AtSign className="h-4 w-4 text-primary" />
+                <FeatureHint id="display-name" content={t("hint.display_name")} side="right">
+                  <AtSign className="h-4 w-4 text-primary" />
+                </FeatureHint>
                 {tr("settings.display_name", "Display Name")}
               </CardTitle>
             </CardHeader>
@@ -268,11 +295,14 @@ export default function SettingsPage() {
               </p>
               <div className="relative">
                 <Input
+                  id="settings-display-name"
                   value={displayNameInput}
                   onChange={(e) => setDisplayNameInput(e.target.value)}
                   placeholder={tr("settings.display_name_placeholder", "e.g. نجمة_الأمل")}
                   maxLength={30}
                   className="pr-8"
+                  aria-describedby={!checking && available === false && displayNameInput.length >= 3 ? "settings-display-name-error" : undefined}
+                  aria-invalid={!checking && available === false && displayNameInput.length >= 3 ? true : undefined}
                 />
                 <div className="absolute right-2 top-1/2 -translate-y-1/2">
                   {checking && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
@@ -285,7 +315,7 @@ export default function SettingsPage() {
                 </div>
               </div>
               {!checking && available === false && displayNameInput.length >= 3 && (
-                <p className="text-xs text-destructive">
+                <p id="settings-display-name-error" className="text-xs text-destructive" role="alert">
                   {tr("settings.display_name_taken", "This name is already taken or contains invalid characters.")}
                 </p>
               )}
@@ -306,6 +336,17 @@ export default function SettingsPage() {
                   tr("settings.save_display_name", "Save display name")
                 )}
               </Button>
+              {saveDisplayName.isSuccess && (
+                <motion.p
+                  className="flex items-center gap-1 text-xs text-green-600 font-medium"
+                  initial="hidden"
+                  animate="visible"
+                  variants={safeVariants(successPop, rm)}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  {tr("settings.display_name_saved", "Display name saved")}
+                </motion.p>
+              )}
               {user?.displayName && (
                 <p className="text-xs text-muted-foreground">
                   {tr("settings.current_display_name", "Current")}: <strong>{user.displayName}</strong>
@@ -399,7 +440,9 @@ export default function SettingsPage() {
         <Card data-testid="card-settings-key-backup">
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
-              <KeyRound className="h-4 w-4 text-primary" />
+              <FeatureHint id="e2e-encryption" content={t("hint.e2e_encryption")} side="right">
+                <KeyRound className="h-4 w-4 text-primary" />
+              </FeatureHint>
               Encryption Key Backup
             </CardTitle>
           </CardHeader>
@@ -510,7 +553,78 @@ export default function SettingsPage() {
             </Button>
           </CardContent>
         </Card>
-      </div>
+
+        {/* Accessibility */}
+        <Card data-testid="card-settings-accessibility">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Accessibility className="h-4 w-4 text-primary" />
+              {tr("settings.accessibility", "Accessibility")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Font size */}
+            <div className="space-y-1.5">
+              <p className="text-xs text-muted-foreground">{tr("settings.font_size", "Text size")}</p>
+              <div className="flex items-center gap-2">
+                {(["sm", "md", "lg"] as const).map((size) => (
+                  <Button
+                    key={size}
+                    variant={fontSize === size ? "default" : "outline"}
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => setFontSize(size)}
+                    aria-pressed={fontSize === size}
+                  >
+                    {size === "sm" ? "A−" : size === "md" ? "A" : "A+"}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* High contrast */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">{tr("settings.high_contrast", "High contrast")}</p>
+                <p className="text-xs text-muted-foreground">{tr("settings.high_contrast_hint", "Increases color contrast for readability")}</p>
+              </div>
+              <Button
+                variant={highContrast ? "default" : "outline"}
+                size="sm"
+                onClick={toggleContrast}
+                aria-pressed={highContrast}
+              >
+                {highContrast ? tr("settings.on", "On") : tr("settings.off", "Off")}
+              </Button>
+            </div>
+
+            {/* Keyboard shortcuts hint */}
+            <p className="text-xs text-muted-foreground border-t pt-3">
+              {tr("settings.keyboard_hint", "Press")} <kbd className="px-1.5 py-0.5 rounded border bg-muted font-mono text-xs">?</kbd> {tr("settings.keyboard_hint2", "at any time to view keyboard shortcuts")}
+            </p>
+
+            {/* Replay onboarding tour */}
+            {(user?.role === "client" || user?.role === "therapist") && (
+              <div className="flex items-center justify-between border-t pt-3">
+                <div>
+                  <p className="text-sm font-medium">{tr("settings.replay_tour", "Replay tour")}</p>
+                  <p className="text-xs text-muted-foreground">{tr("settings.replay_tour_hint", "Show the getting-started walkthrough again")}</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    resetTour(user.role as "client" | "therapist");
+                    window.location.reload();
+                  }}
+                >
+                  {tr("settings.replay", "Replay")}
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
     </AppLayout>
   );
 }

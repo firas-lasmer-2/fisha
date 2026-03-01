@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useI18n } from "@/lib/i18n";
+import { FeatureHint } from "@/components/feature-hint";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { motion, AnimatePresence } from "framer-motion";
 import { fadeUp } from "@/lib/motion";
@@ -377,16 +378,17 @@ export function SlotCalendar({
           return (
             <div key={di} className="flex flex-col gap-1">
               {/* Day header button */}
-              <button
-                onClick={() => !isPastDay && openPlanner(d)}
-                className={`rounded-lg border p-2 text-center transition-all select-none ${
-                  isPlannerOpen
-                    ? "border-primary bg-primary/10 shadow-sm"
-                    : isPastDay
-                    ? "border-muted/30 bg-muted/20 opacity-40 cursor-not-allowed"
-                    : "border-border hover:border-primary/60 hover:bg-primary/5 cursor-pointer"
-                }`}
-              >
+              <FeatureHint id="slot-calendar" content={t("hint.slot_calendar")} side="bottom" delayMs={1500}>
+                <button
+                  onClick={() => !isPastDay && openPlanner(d)}
+                  className={`rounded-lg border p-2 text-center transition-all select-none ${
+                    isPlannerOpen
+                      ? "border-primary bg-primary/10 shadow-sm"
+                      : isPastDay
+                      ? "border-muted/30 bg-muted/20 opacity-40 cursor-not-allowed"
+                      : "border-border hover:border-primary/60 hover:bg-primary/5 cursor-pointer"
+                  }`}
+                >
                 <p className={`text-[11px] font-medium ${isToday ? "text-primary" : "text-muted-foreground"}`}>
                   {DAY_NAMES_FR[di]}
                 </p>
@@ -410,7 +412,8 @@ export function SlotCalendar({
                     <Plus className="h-2.5 w-2.5 text-muted-foreground/40" />
                   )}
                 </div>
-              </button>
+                </button>
+              </FeatureHint>
 
               {/* Copy button when day has open slots */}
               {openCount > 0 && !isPastDay && (

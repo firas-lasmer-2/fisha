@@ -1,3 +1,5 @@
+import { motion } from "framer-motion";
+import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import { AppLayout } from "@/components/app-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -20,6 +22,7 @@ const paths = [
 
 export default function GrowPage() {
   const { t } = useI18n();
+  const rm = usePrefersReducedMotion();
   const tr = (key: string, fallback: string) => {
     const value = t(key);
     return value === key ? fallback : value;
@@ -51,7 +54,12 @@ export default function GrowPage() {
 
   return (
     <AppLayout>
-      <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-4">
+      <motion.div
+        className="max-w-4xl mx-auto p-4 sm:p-6 space-y-4"
+        initial="hidden"
+        animate="visible"
+        variants={safeVariants(fadeUp, rm)}
+      >
         <PageHeader
           title={tr("grow.page_title", "Growth Paths")}
           subtitle={t("growth.subtitle")}
@@ -99,7 +107,7 @@ export default function GrowPage() {
             );
           })}
         </div>
-      </div>
+      </motion.div>
     </AppLayout>
   );
 }

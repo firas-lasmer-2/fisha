@@ -1,4 +1,6 @@
 import { useI18n } from "@/lib/i18n";
+import { FeatureHint } from "@/components/feature-hint";
+import { FeatureTour } from "@/components/feature-tour";
 import { useAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/components/app-layout";
 import { EmptyState } from "@/components/empty-state";
@@ -246,18 +248,41 @@ export default function TherapistDashboardPage() {
         acceptingNewClients,
       });
     },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ["/api/therapist/dashboard"] });
+      const previous = queryClient.getQueryData<DashboardData>(["/api/therapist/dashboard"]);
+      queryClient.setQueryData<DashboardData>(["/api/therapist/dashboard"], (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          profile: {
+            ...old.profile,
+            headline,
+            aboutMe,
+            approach,
+            acceptingNewClients,
+          },
+        };
+      });
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous !== undefined) {
+        queryClient.setQueryData(["/api/therapist/dashboard"], context.previous);
+      }
+      toast({
+        title: t("common.error"),
+        variant: "destructive",
+      });
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/therapist/dashboard"] });
       toast({
         title: t("profile.save_changes"),
         description: t("therapist_dash.changes_saved"),
       });
     },
-    onError: () => {
-      toast({
-        title: t("common.error"),
-        variant: "destructive",
-      });
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/therapist/dashboard"] });
     },
   });
 
@@ -398,6 +423,7 @@ export default function TherapistDashboardPage() {
 
   return (
     <AppLayout>
+      <FeatureTour role="therapist" />
       <DashboardSidebarLayout
         groups={navGroups}
         activeId={activeSection}
@@ -1191,7 +1217,9 @@ export default function TherapistDashboardPage() {
             <Card>
               <CardHeader className="pb-4">
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5" />
+                  <FeatureHint id="verification-upload" content={t("hint.verification_upload")} side="right">
+                    <ShieldCheck className="h-5 w-5" />
+                  </FeatureHint>
                   {t("therapist_dash.verification_tab")}
                 </CardTitle>
                 <p className="text-sm text-muted-foreground">

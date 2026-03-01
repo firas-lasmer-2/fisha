@@ -178,7 +178,7 @@ export function LandingPageBuilder({ sections, onChange, profileData }: LandingP
     } else if (type === "banner") {
       newSection = { type: "banner", enabled: true, imageUrl: "", altText: "" };
     } else {
-      newSection = { type: type as LandingSection["type"], enabled: true };
+      newSection = { type: type as LandingSection["type"], enabled: true } as LandingSection;
     }
     onChange([...sections, newSection]);
     setExpandedIndex(sections.length);
@@ -282,7 +282,9 @@ export function LandingPageBuilder({ sections, onChange, profileData }: LandingP
                 </div>
 
                 {emptyWarning && (
-                  <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" title={emptyWarning} />
+                  <span title={emptyWarning}>
+                    <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                  </span>
                 )}
 
                 <Badge variant={section.enabled ? "default" : "outline"} className="text-xs">

@@ -17,17 +17,175 @@ import {
   Calendar,
   X,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, memo } from "react";
 import { useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useOnlineTherapists } from "@/hooks/use-online-therapists";
 import { motion } from "framer-motion";
-import { chipEnter, cardStagger, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
+import type { Variants } from "framer-motion";
+import { chipEnter, cardStagger, skeletonToContent, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import type { TherapistProfile, User } from "@shared/schema";
 import { FeatureHint } from "@/components/feature-hint";
 import { EmptyState } from "@/components/empty-state";
+import { StatusDot } from "@/components/status-dot";
 import { PageError } from "@/components/page-error";
+
+interface TherapistCardProps {
+  tp: TherapistProfile & { user: User; hasOpenSlots?: boolean | null };
+  index: number;
+  isOnline: boolean;
+  specializations: Array<{ value: string; label: string }>;
+  cardVariants: Variants;
+  onMessage: (userId: string) => void;
+}
+
+const TherapistCard = memo(function TherapistCard({
+  tp,
+  index,
+  isOnline,
+  specializations,
+  cardVariants,
+  onMessage,
+}: TherapistCardProps) {
+  const { t } = useI18n();
+  const tr = (key: string, fallback: string) => {
+    const v = t(key);
+    return v === key ? fallback : v;
+  };
+
+  return (
+    <motion.div custom={index} variants={cardVariants} initial="hidden" animate="visible">
+      <div
+        className="rounded-xl border bg-card hover:shadow-md hover:border-primary/30 transition-all h-full flex flex-col"
+        data-testid={`card-therapist-${tp.userId}`}
+      >
+        {/* Card top */}
+        <div className="p-4 flex items-start gap-3">
+          <Link href={`/therapist/${tp.userId}`}>
+            <Avatar className="h-14 w-14 rounded-xl cursor-pointer shrink-0">
+              {tp.user.profileImageUrl && (
+                <AvatarImage src={tp.user.profileImageUrl} alt={`${tp.user.firstName || ""} ${tp.user.lastName || ""}`} loading="lazy" />
+              )}
+              <AvatarFallback className="rounded-xl gradient-calm text-white text-xl font-bold">
+                {(tp.user.firstName?.[0] || "?").toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+          </Link>
+
+          <div className="min-w-0 flex-1 space-y-1">
+            <Link href={`/therapist/${tp.userId}`}>
+              <h3
+                className="font-semibold hover:text-primary transition-colors cursor-pointer leading-tight"
+                data-testid={`text-therapist-name-${tp.userId}`}
+              >
+                {tp.user.firstName} {tp.user.lastName}
+              </h3>
+            </Link>
+
+            <div className="flex items-center flex-wrap gap-1">
+              {tp.verified && (
+                <span className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle className="h-3.5 w-3.5 fill-emerald-500/20" />
+                  <span className="text-[10px] font-medium">{tr("therapist.verified_badge", "Verified")}</span>
+                </span>
+              )}
+              <FeatureHint id="tier-badge" content={t("hint.tier_badge")} side="top" delayMs={2000}>
+                <span>
+                  {tp.tier === "premium_doctor" ? (
+                    <Badge className="text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-400/50 px-1.5">
+                      ✦ {t("tier.premium_doctor_therapist")}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] px-1.5">
+                      {t("tier.graduated_doctor_therapist")}
+                    </Badge>
+                  )}
+                </span>
+              </FeatureHint>
+              {isOnline && (
+                <Badge variant="secondary" className="text-[10px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-1.5">
+                  ● Online
+                </Badge>
+              )}
+            </div>
+
+            <p className="text-xs text-muted-foreground line-clamp-1 leading-snug">
+              {tp.headline || tr("therapist.simple_headline", "Warm, culturally-aware support")}
+            </p>
+
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+              <span className="font-medium text-foreground">{(tp.rating || 0).toFixed(1)}</span>
+              <span>({tp.reviewCount || 0})</span>
+              {tp.yearsExperience ? <span>· {tp.yearsExperience}y exp</span> : null}
+            </div>
+          </div>
+        </div>
+
+        {/* Specializations */}
+        <div className="px-4 pb-3 flex flex-wrap gap-1.5">
+          {(tp.specializations || []).slice(0, 3).map((specializationKey) => (
+            <Badge
+              key={specializationKey}
+              variant="secondary"
+              className="text-[11px] px-2 py-0.5"
+              data-testid={`badge-spec-${tp.userId}-${specializationKey}`}
+            >
+              {specializations.find((item) => item.value === specializationKey)?.label || specializationKey}
+            </Badge>
+          ))}
+        </div>
+
+        {/* Availability */}
+        <div className="px-4 pb-3">
+          {tp.hasOpenSlots === true ? (
+            <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+              <StatusDot variant="available" label="available" />
+              {tr("therapist.accepting_clients", "Accepting new clients")}
+            </span>
+          ) : tp.hasOpenSlots === false ? (
+            <span className="text-xs text-muted-foreground flex items-center gap-1">
+              <StatusDot variant="offline" label="fully booked" />
+              {tr("therapist.fully_booked", "Fully booked")}
+            </span>
+          ) : null}
+        </div>
+
+        {/* Footer */}
+        <div className="mt-auto border-t px-4 py-3 flex items-center justify-between gap-2 bg-muted/20 rounded-b-xl">
+          <div className="text-xs space-y-0.5" data-testid={`text-rate-${tp.userId}`}>
+            <div className="flex items-center gap-1 text-primary font-medium">
+              <MessageCircle className="h-3 w-3" />
+              {tr("therapist.free_to_message", "Free to message")}
+            </div>
+            <div className="flex items-center gap-1 text-muted-foreground">
+              <Video className="h-3 w-3" />
+              {tp.rateDinar} {t("common.dinar")} / session
+            </div>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <Button
+              size="icon"
+              variant="outline"
+              className="h-8 w-8"
+              onClick={() => onMessage(tp.userId)}
+              data-testid={`button-message-${tp.userId}`}
+            >
+              <MessageCircle className="h-4 w-4" />
+            </Button>
+            <Link href={`/therapist/${tp.userId}#slots`}>
+              <Button size="sm" className="h-8" data-testid={`button-book-${tp.userId}`}>
+                <Calendar className="h-3.5 w-3.5 me-1.5" />
+                {t("therapist.book")}
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+});
 
 export default function TherapistsPage() {
   const { t, isRTL } = useI18n();
@@ -46,6 +204,14 @@ export default function TherapistsPage() {
   const getParam = (key: string) =>
     typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get(key) ?? "") : "";
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => setDebouncedSearch(value), 350);
+  };
   const [specialization, setSpecialization] = useState<string>(() => getParam("specialization"));
   const [language, setLanguage] = useState<string>(() => getParam("language"));
   const [gender, setGender] = useState<string>(() => getParam("gender"));
@@ -77,6 +243,8 @@ export default function TherapistsPage() {
   if (language && language !== "all") queryStr.set("language", language);
   if (gender && gender !== "all") queryStr.set("gender", gender);
   if (tier && tier !== "all") queryStr.set("tier", tier);
+  if (debouncedSearch.trim().length >= 2)
+    queryStr.set("search", debouncedSearch.trim());
 
   const queryStrString = queryStr.toString();
   const therapistsUrl = queryStrString
@@ -164,6 +332,8 @@ export default function TherapistsPage() {
       if (budget === "80-120" && (rate < 80 || rate > 120)) return false;
       if (budget === "120+" && rate <= 120) return false;
     }
+    // When FTS is active (debouncedSearch >= 2), server already filtered — skip client name filter
+    if (debouncedSearch.trim().length >= 2) return true;
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     const name =
@@ -182,15 +352,22 @@ export default function TherapistsPage() {
       <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-5">
 
         {/* ── Hero ── */}
-        <PageHeader title={t("nav.therapists")} />
-        <div className="space-y-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold" data-testid="text-therapists-title">
-              {t("therapist.find")}
-            </h1>
-            <p className="text-muted-foreground text-sm mt-1">{t("therapist.find_subtitle")}</p>
+        <PageHeader
+          title={t("therapist.find")}
+          subtitle={t("journey.discover.therapists.subtitle")}
+        />
+        <div className="rounded-xl border bg-muted/30 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <p className="font-medium">{t("journey.discover.therapists.note_title")}</p>
+            <p className="text-sm text-muted-foreground">{t("journey.discover.therapists.note_body")}</p>
           </div>
-
+          <Link href="/support">
+            <Button variant="outline" size="sm">
+              {t("journey.discover.back_to_support")}
+            </Button>
+          </Link>
+        </div>
+        <div className="space-y-4">
           {/* Search */}
           <FeatureHint id="ai-match" content={t("hint.ai_match")} side="bottom" delayMs={1500}>
             <div className="relative">
@@ -199,10 +376,16 @@ export default function TherapistsPage() {
                 type="search"
                 placeholder={t("therapist.search_placeholder")}
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="ps-10 h-11 text-base"
+                onChange={(e) => handleSearchChange(e.target.value)}
+                className="ps-10 pe-20 h-11 text-base"
                 data-testid="input-search-therapists"
               />
+              <kbd
+                className="pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 hidden sm:inline-flex h-6 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground"
+                aria-label="Press Ctrl+K to open search palette"
+              >
+                ⌘K
+              </kbd>
             </div>
           </FeatureHint>
         </div>
@@ -221,10 +404,7 @@ export default function TherapistsPage() {
                   : "bg-muted/40 border-transparent hover:border-border text-muted-foreground"
               }`}
             >
-              <span className="relative flex h-1.5 w-1.5 shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
-              </span>
+              <StatusDot variant="online" label="online" />
               {t("therapist.online_now")}
             </button>
 
@@ -354,144 +534,24 @@ export default function TherapistsPage() {
             ))}
           </div>
         ) : filteredTherapists && filteredTherapists.length > 0 ? (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <motion.div
+            className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4"
+            initial="loading"
+            animate="loaded"
+            variants={safeVariants(skeletonToContent, rm)}
+          >
             {filteredTherapists.map((tp, index) => (
-              <motion.div
+              <TherapistCard
                 key={tp.id}
-                custom={index}
-                variants={safeCardStagger}
-                initial="hidden"
-                animate="visible"
-              >
-                <div
-                  className="rounded-xl border bg-card hover:shadow-md hover:border-primary/30 transition-all h-full flex flex-col"
-                  data-testid={`card-therapist-${tp.userId}`}
-                >
-                  {/* Card top */}
-                  <div className="p-4 flex items-start gap-3">
-                    <Link href={`/therapist/${tp.userId}`}>
-                      <Avatar className="h-14 w-14 rounded-xl cursor-pointer shrink-0">
-                        {tp.user.profileImageUrl && (
-                          <AvatarImage src={tp.user.profileImageUrl} alt={`${tp.user.firstName || ""} ${tp.user.lastName || ""}`} />
-                        )}
-                        <AvatarFallback className="rounded-xl gradient-calm text-white text-xl font-bold">
-                          {(tp.user.firstName?.[0] || "?").toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                    </Link>
-
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <Link href={`/therapist/${tp.userId}`}>
-                        <h3
-                          className="font-semibold hover:text-primary transition-colors cursor-pointer leading-tight"
-                          data-testid={`text-therapist-name-${tp.userId}`}
-                        >
-                          {tp.user.firstName} {tp.user.lastName}
-                        </h3>
-                      </Link>
-
-                      {/* Badges row */}
-                      <div className="flex items-center flex-wrap gap-1">
-                        {tp.verified && (
-                          <span className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
-                            <CheckCircle className="h-3.5 w-3.5 fill-emerald-500/20" />
-                            <span className="text-[10px] font-medium">{tr("therapist.verified_badge", "Verified")}</span>
-                          </span>
-                        )}
-                        {tp.tier === "premium_doctor" ? (
-                          <Badge className="text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-400/50 px-1.5">
-                            ✦ {t("tier.premium_doctor_therapist")}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-[10px] px-1.5">
-                            {t("tier.graduated_doctor_therapist")}
-                          </Badge>
-                        )}
-                        {onlineTherapists.has(tp.userId) && (
-                          <Badge variant="secondary" className="text-[10px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-1.5">
-                            ● Online
-                          </Badge>
-                        )}
-                      </div>
-
-                      {/* Headline */}
-                      <p className="text-xs text-muted-foreground line-clamp-1 leading-snug">
-                        {tp.headline || tr("therapist.simple_headline", "Warm, culturally-aware support")}
-                      </p>
-
-                      {/* Rating + reviews */}
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                        <span className="font-medium text-foreground">{(tp.rating || 0).toFixed(1)}</span>
-                        <span>({tp.reviewCount || 0})</span>
-                        {tp.yearsExperience ? <span>· {tp.yearsExperience}y exp</span> : null}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Specializations */}
-                  <div className="px-4 pb-3 flex flex-wrap gap-1.5">
-                    {(tp.specializations || []).slice(0, 3).map((specializationKey) => (
-                      <Badge
-                        key={specializationKey}
-                        variant="secondary"
-                        className="text-[11px] px-2 py-0.5"
-                        data-testid={`badge-spec-${tp.userId}-${specializationKey}`}
-                      >
-                        {specializations.find((item) => item.value === specializationKey)?.label || specializationKey}
-                      </Badge>
-                    ))}
-                  </div>
-
-                  {/* Availability */}
-                  <div className="px-4 pb-3">
-                    {tp.hasOpenSlots === true ? (
-                      <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        {tr("therapist.accepting_clients", "Accepting new clients")}
-                      </span>
-                    ) : tp.hasOpenSlots === false ? (
-                      <span className="text-xs text-muted-foreground flex items-center gap-1">
-                        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
-                        {tr("therapist.fully_booked", "Fully booked")}
-                      </span>
-                    ) : null}
-                  </div>
-
-                  {/* Footer */}
-                  <div className="mt-auto border-t px-4 py-3 flex items-center justify-between gap-2 bg-muted/20 rounded-b-xl">
-                    <div className="text-xs space-y-0.5" data-testid={`text-rate-${tp.userId}`}>
-                      <div className="flex items-center gap-1 text-primary font-medium">
-                        <MessageCircle className="h-3 w-3" />
-                        {tr("therapist.free_to_message", "Free to message")}
-                      </div>
-                      <div className="flex items-center gap-1 text-muted-foreground">
-                        <Video className="h-3 w-3" />
-                        {tp.rateDinar} {t("common.dinar")} / session
-                      </div>
-                    </div>
-                    <div className="flex gap-2 shrink-0">
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        className="h-8 w-8"
-                        onClick={() => handleStartConversation(tp.userId)}
-                        data-testid={`button-message-${tp.userId}`}
-                      >
-                        <MessageCircle className="h-4 w-4" />
-                      </Button>
-                      <Link href={`/therapist/${tp.userId}#slots`}>
-                        <Button size="sm" className="h-8" data-testid={`button-book-${tp.userId}`}>
-                          <Calendar className="h-3.5 w-3.5 me-1.5" />
-                          {t("therapist.book")}
-                        </Button>
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
+                tp={tp}
+                index={index}
+                isOnline={onlineTherapists.has(tp.userId)}
+                specializations={specializations}
+                cardVariants={safeCardStagger}
+                onMessage={handleStartConversation}
+              />
             ))}
-          </div>
+          </motion.div>
         ) : (
           <motion.div
             initial={{ opacity: 0 }}

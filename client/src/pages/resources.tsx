@@ -1,4 +1,6 @@
 import { useI18n } from "@/lib/i18n";
+import { motion } from "framer-motion";
+import { fadeUp, skeletonToContent, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
 import { AppLayout } from "@/components/app-layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +17,7 @@ import { PageHeader } from "@/components/page-header";
 
 export default function ResourcesPage() {
   const { t, isRTL, language } = useI18n();
+  const rm = usePrefersReducedMotion();
   const [category, setCategory] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
@@ -45,7 +48,12 @@ export default function ResourcesPage() {
 
   return (
     <AppLayout>
-      <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
+      <motion.div
+        className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6"
+        initial="hidden"
+        animate="visible"
+        variants={safeVariants(fadeUp, rm)}
+      >
         <PageHeader title={t("nav.resources")} testId="text-resources-title" />
 
         <div className="relative">
@@ -54,9 +62,15 @@ export default function ResourcesPage() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t("common.search")}
-            className="ps-9"
+            className="ps-9 pe-16"
             data-testid="input-search-resources"
           />
+          <kbd
+            className="pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 hidden sm:inline-flex h-6 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground"
+            aria-label="Press Ctrl+K to open search palette"
+          >
+            ⌘K
+          </kbd>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -84,7 +98,12 @@ export default function ResourcesPage() {
         {isLoading ? (
           <PageSkeleton variant="grid" count={6} />
         ) : resourceList && resourceList.length > 0 ? (
-          <div className="grid sm:grid-cols-2 gap-4">
+          <motion.div
+            className="grid sm:grid-cols-2 gap-4"
+            initial="loading"
+            animate="loaded"
+            variants={safeVariants(skeletonToContent, rm)}
+          >
             {resourceList.filter((resource) => {
               if (!searchQuery.trim()) return true;
               const title = getTitle(resource).toLowerCase();
@@ -113,7 +132,7 @@ export default function ResourcesPage() {
                 </CardContent>
               </Card>
             ))}
-          </div>
+          </motion.div>
         ) : (
           <EmptyState
             icon={Library}
@@ -121,7 +140,7 @@ export default function ResourcesPage() {
             description={t("resources.no_resources_desc") !== "resources.no_resources_desc" ? t("resources.no_resources_desc") : undefined}
           />
         )}
-      </div>
+      </motion.div>
 
       <Sheet open={!!selectedResource} onOpenChange={(open) => { if (!open) setSelectedResource(null); }}>
         <SheetContent side="bottom" className="max-h-[80vh] overflow-y-auto rounded-t-2xl">

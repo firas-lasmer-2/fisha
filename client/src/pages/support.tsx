@@ -1,430 +1,238 @@
-import { AppLayout } from "@/components/app-layout";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Link } from "wouter";
+import { useMemo } from "react";
 import { motion } from "framer-motion";
-import { fadeUp, usePrefersReducedMotion, safeVariants } from "@/lib/motion";
-import { useMemo, useState } from "react";
-import { Check, ArrowLeft, ArrowRight, AlertTriangle, Compass } from "lucide-react";
-import { useAuth } from "@/hooks/use-auth";
-import { useI18n } from "@/lib/i18n";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Compass,
+  GraduationCap,
+  HeartHandshake,
+  ShieldCheck,
+  Sparkles,
+  Star,
+  Wind,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import type { NavigationManifestEntry } from "@shared/schema";
+import { AppLayout } from "@/components/app-layout";
+import { PageError } from "@/components/page-error";
 import { PageHeader } from "@/components/page-header";
+import { PageSkeleton } from "@/components/page-skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/hooks/use-auth";
+import { useNavigationManifest } from "@/hooks/use-navigation-manifest";
+import { useI18n } from "@/lib/i18n";
+import { fadeUp, safeVariants, usePrefersReducedMotion } from "@/lib/motion";
 
-type SupportPath = {
-  id: string;
-  emoji: string;
-  label: string;
-  subtitle: string;
-  price: string;
-  priceDesc: string;
-  priceBadgeClass: string;
-  cardClass: string;
-  features: string[];
-  bestFor: string;
-  ctaLabel: string;
-  ctaHref: string;
-  ctaClass: string;
-  requiresAuth: boolean;
+type SupportCardMeta = {
+  icon: LucideIcon;
+  badgeKey: string;
+  ctaKey: string;
+  toneClass: string;
 };
 
-const paths: SupportPath[] = [
-  {
-    id: "peer",
-    emoji: "💬",
-    label: "Peer Support",
-    subtitle: "Talk to a trained volunteer — right now",
-    price: "Free",
-    priceDesc: "always",
-    priceBadgeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-0",
-    cardClass: "border-primary/25 bg-primary/5",
-    features: [
-      "Immediate — no waiting",
-      "Anonymous, no real name shown",
-      "No appointment needed",
-      "Trained & verified volunteers",
-      "Private & end-to-end encrypted",
-    ],
-    bestFor: "Venting, loneliness, or when you just need someone to listen right now.",
-    ctaLabel: "Start a session",
-    ctaHref: "/peer-support",
-    ctaClass: "",
-    requiresAuth: true,
+const supportCardMeta: Record<string, SupportCardMeta> = {
+  "support-peer": {
+    icon: HeartHandshake,
+    badgeKey: "support.badge.peer",
+    ctaKey: "support.cta.peer",
+    toneClass: "border-primary/25 bg-primary/5",
   },
-  {
-    id: "graduated",
-    emoji: "🎓",
-    label: "Graduated Therapist",
-    subtitle: "Licensed professional, accessible rate",
-    price: "20 TND",
-    priceDesc: "per session",
-    priceBadgeClass: "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-0",
-    cardClass: "border-border",
-    features: [
-      "Licensed & nationally certified",
-      "Book a video appointment",
-      "Structured therapy sessions",
-      "Anxiety, depression, stress focus",
-      "Progress tracked over time",
-    ],
-    bestFor: "Consistent support for anxiety, mild depression, or life stress.",
-    ctaLabel: "Browse therapists",
-    ctaHref: "/therapists?tier=graduated_doctor",
-    ctaClass: "",
-    requiresAuth: false,
+  "support-therapist-graduated": {
+    icon: GraduationCap,
+    badgeKey: "support.badge.structured",
+    ctaKey: "support.cta.graduated",
+    toneClass: "border-sky-500/25 bg-sky-500/5",
   },
-  {
-    id: "premium",
-    emoji: "⭐",
-    label: "Premium Therapist",
-    subtitle: "Senior specialist with deep expertise",
-    price: "80 – 120 TND",
-    priceDesc: "per session",
-    priceBadgeClass: "bg-amber-400/20 text-amber-700 dark:text-amber-400 border-0",
-    cardClass: "border-amber-400/40 bg-amber-500/5",
-    features: [
-      "7+ years clinical experience",
-      "Advanced specializations",
-      "Full personalised treatment plan",
-      "In-person & video sessions",
-      "Complex & long-term cases",
-    ],
-    bestFor: "Trauma, chronic illness, relationship crises, or deep-rooted issues.",
-    ctaLabel: "Browse specialists",
-    ctaHref: "/therapists?tier=premium_doctor",
-    ctaClass: "bg-amber-500 hover:bg-amber-600 text-white border-0",
-    requiresAuth: false,
+  "support-therapist-premium": {
+    icon: Star,
+    badgeKey: "support.badge.specialist",
+    ctaKey: "support.cta.premium",
+    toneClass: "border-amber-500/25 bg-amber-500/5",
   },
-];
-
-const faqs = [
-  {
-    q: "Not sure which to pick?",
-    a: "Start with Peer Support — it's free and immediate. You can always move to a therapist once you've had time to think.",
+  "support-self-care": {
+    icon: Wind,
+    badgeKey: "support.badge.gentle",
+    ctaKey: "support.cta.selfcare",
+    toneClass: "border-emerald-500/25 bg-emerald-500/5",
   },
-  {
-    q: "Are listeners therapists?",
-    a: "No. Listeners are trained volunteers, not clinicians. For diagnosis or structured treatment, choose a Graduated or Premium Therapist.",
-  },
-  {
-    q: "Graduated vs. Premium?",
-    a: "Both are licensed professionals. Premium therapists have more experience and are better suited for complex or long-term situations.",
-  },
-];
-
-type TriageUrgency = "crisis_now" | "today" | "this_week" | null;
-type TriagePreference = "peer" | "therapist" | "both" | "selfcare" | null;
-type TriagePriority = "free_fast" | "structured" | "specialist" | null;
-
-type TriageRecommendation = {
-  title: string;
-  reason: string;
-  ctaHref: string;
-  ctaLabel: string;
-  requiresAuth?: boolean;
-  badge?: string;
 };
+
+function resolveSupportHref(entry: NavigationManifestEntry, isAuthenticated: boolean) {
+  if (entry.featureKey === "support-peer" && !isAuthenticated) {
+    return "/login";
+  }
+  return entry.href;
+}
 
 export default function SupportPage() {
   const { user } = useAuth();
-  const { isRTL } = useI18n();
-  const Arrow = isRTL ? ArrowLeft : ArrowRight;
+  const { t, isRTL } = useI18n();
   const rm = usePrefersReducedMotion();
   const safeFadeUp = safeVariants(fadeUp, rm);
+  const Arrow = isRTL ? ArrowLeft : ArrowRight;
 
-  const [urgency, setUrgency] = useState<TriageUrgency>(null);
-  const [preference, setPreference] = useState<TriagePreference>(null);
-  const [priority, setPriority] = useState<TriagePriority>(null);
+  const { data, isLoading, isError, error, refetch } = useNavigationManifest({
+    surface: "support",
+    role: user ? "client" : "visitor",
+    routePath: "/support",
+  });
 
-  const recommendation = useMemo<TriageRecommendation | null>(() => {
-    if (!urgency || !preference || !priority) return null;
+  const translate = (key: string | null | undefined) => {
+    if (!key) return "";
+    const value = t(key);
+    return value === key ? key : value;
+  };
 
-    if (urgency === "crisis_now") {
-      return {
-        title: "Emergency support first",
-        reason: "Your answers suggest urgent risk. Start with crisis support immediately.",
-        ctaHref: "/crisis",
-        ctaLabel: "Open crisis support",
-        badge: "Urgent",
-      };
-    }
+  const primaryCards = useMemo(() => data?.primaryPaths || [], [data?.primaryPaths]);
+  const secondaryCards = useMemo(() => data?.secondaryPaths || [], [data?.secondaryPaths]);
 
-    if (preference === "selfcare") {
-      return {
-        title: "Start with self-care tools",
-        reason: "A low-pressure step can help you regulate before speaking to someone.",
-        ctaHref: "/self-care",
-        ctaLabel: "Open self-care",
-        badge: "Gentle start",
-      };
-    }
+  if (isLoading) {
+    return (
+      <AppLayout>
+        <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
+          <PageSkeleton variant="grid" count={4} />
+        </div>
+      </AppLayout>
+    );
+  }
 
-    if (preference === "peer" || priority === "free_fast") {
-      return {
-        title: "Peer listener is your best first step",
-        reason: "You prioritized immediate, free, human support.",
-        ctaHref: "/peer-support",
-        ctaLabel: user ? "Start peer session" : "Sign in to start peer session",
-        requiresAuth: true,
-        badge: "Fastest",
-      };
-    }
-
-    if (priority === "specialist") {
-      return {
-        title: "Premium therapist is recommended",
-        reason: "You asked for deeper specialist care.",
-        ctaHref: "/therapists?tier=premium_doctor",
-        ctaLabel: "Browse premium therapists",
-        badge: "Specialist",
-      };
-    }
-
-    if (preference === "both") {
-      return {
-        title: "Hybrid path: peer now, therapist next",
-        reason: "Start with a free listener now, then book structured clinical care.",
-        ctaHref: "/peer-support",
-        ctaLabel: user ? "Start with peer support" : "Sign in to start",
-        requiresAuth: true,
-        badge: "Hybrid",
-      };
-    }
-
-    return {
-      title: "Graduated therapist is recommended",
-      reason: "You want structured support with accessible pricing.",
-      ctaHref: "/therapists?tier=graduated_doctor",
-      ctaLabel: "Browse graduated therapists",
-      badge: "Structured care",
-    };
-  }, [urgency, preference, priority, user]);
+  if (isError || !data) {
+    return (
+      <AppLayout>
+        <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
+          <PageError error={error as Error} resetFn={refetch} />
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>
-      <div className="max-w-5xl mx-auto px-4 py-6 sm:py-10 space-y-10">
-
-        {/* ── Header ── */}
+      <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8 space-y-6">
         <PageHeader
-          title="How can we help you today?"
-          subtitle="Choose the level of support that fits where you are right now. There is no wrong answer."
+          title={translate("support.page.title")}
+          subtitle={translate("support.page.subtitle")}
+          icon={Compass}
         />
 
-        <motion.div
-          custom={1} initial="hidden" animate="visible" variants={safeFadeUp}
-          className="rounded-2xl border bg-card/70 p-5 space-y-5"
-          data-testid="card-support-triage"
-        >
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div>
-              <p className="text-sm font-semibold flex items-center gap-2">
-                <Compass className="h-4 w-4 text-primary" />
-                Guided support triage
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                3 quick answers to recommend the best path for this moment.
-              </p>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setUrgency(null);
-                setPreference(null);
-                setPriority(null);
-              }}
-            >
-              Reset
-            </Button>
-          </div>
-
-          <div className="space-y-3">
-            <p className="text-sm font-medium">1. How urgent is your situation?</p>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { value: "crisis_now", label: "Crisis now" },
-                { value: "today", label: "Need to talk today" },
-                { value: "this_week", label: "Can plan this week" },
-              ].map((item) => (
-                <button
-                  key={item.value}
-                  onClick={() => setUrgency(item.value as TriageUrgency)}
-                  className={`px-4 py-2.5 rounded-full border text-sm min-h-[44px] ${
-                    urgency === item.value ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <p className="text-sm font-medium">2. What kind of support feels right?</p>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { value: "peer", label: "Volunteer listener" },
-                { value: "therapist", label: "Licensed therapist" },
-                { value: "both", label: "Both paths" },
-                { value: "selfcare", label: "Self-guided tools first" },
-              ].map((item) => (
-                <button
-                  key={item.value}
-                  onClick={() => setPreference(item.value as TriagePreference)}
-                  className={`px-4 py-2.5 rounded-full border text-sm min-h-[44px] ${
-                    preference === item.value ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <p className="text-sm font-medium">3. What matters most right now?</p>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { value: "free_fast", label: "Free + immediate" },
-                { value: "structured", label: "Structured therapy" },
-                { value: "specialist", label: "Deep specialist expertise" },
-              ].map((item) => (
-                <button
-                  key={item.value}
-                  onClick={() => setPriority(item.value as TriagePriority)}
-                  className={`px-4 py-2.5 rounded-full border text-sm min-h-[44px] ${
-                    priority === item.value ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {recommendation && (
-            <div className="rounded-xl border bg-muted/40 p-4 space-y-2">
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="text-sm font-semibold">{recommendation.title}</p>
-                {recommendation.badge && (
-                  <Badge variant="secondary">{recommendation.badge}</Badge>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">{recommendation.reason}</p>
-              {recommendation.ctaHref === "/crisis" && (
-                <p className="text-xs text-destructive flex items-center gap-1">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  If you are in immediate danger, contact local emergency services now.
+        <motion.div initial="hidden" animate="visible" variants={safeFadeUp}>
+          <Card className="border-destructive/20 bg-destructive/5">
+            <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1">
+                <p className="font-medium flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-destructive" />
+                  {translate("support.crisis.title")}
                 </p>
-              )}
-              {recommendation.requiresAuth && !user ? (
-                <Link href="/login">
-                  <Button size="sm" className="gap-1.5">
-                    {recommendation.ctaLabel}
-                    <Arrow className="h-3.5 w-3.5" />
-                  </Button>
-                </Link>
-              ) : (
-                <Link href={recommendation.ctaHref}>
-                  <Button size="sm" className="gap-1.5" data-testid="btn-support-recommendation">
-                    {recommendation.ctaLabel}
-                    <Arrow className="h-3.5 w-3.5" />
-                  </Button>
-                </Link>
-              )}
-            </div>
-          )}
+                <p className="text-sm text-muted-foreground">{translate("support.crisis.body")}</p>
+              </div>
+              <Link href={user ? "/crisis" : "/login"}>
+                <Button variant="destructive" className="gap-2">
+                  {translate("support.crisis.cta")}
+                  <Arrow className="h-4 w-4" />
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
         </motion.div>
 
-        {/* ── Three path cards ── */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {paths.map((path, i) => (
-            <motion.div
-              key={path.id}
-              custom={i + 2} initial="hidden" animate="visible" variants={safeFadeUp}
-              data-testid={`card-support-${path.id}`}
-              className={`flex flex-col rounded-2xl border-2 p-5 space-y-4 ${path.cardClass}`}
-            >
-              {/* Card header */}
-              <div className="space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <span className="text-4xl">{path.emoji}</span>
-                  <Badge className={`text-xs shrink-0 ${path.priceBadgeClass}`}>
-                    {path.price}
-                    <span className="opacity-60 ms-1 text-[10px]">{path.priceDesc}</span>
-                  </Badge>
+        <div className="grid gap-4 lg:grid-cols-3">
+          {primaryCards.map((entry) => {
+            const meta = supportCardMeta[entry.featureKey];
+            const Icon = meta?.icon || Compass;
+            return (
+              <motion.div key={entry.id} initial="hidden" animate="visible" variants={safeFadeUp}>
+                <Card className={`h-full ${meta?.toneClass || ""}`}>
+                  <CardHeader className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-background/70 flex items-center justify-center">
+                        <Icon className="h-6 w-6 text-primary" />
+                      </div>
+                      {meta?.badgeKey && (
+                        <Badge variant="secondary">{translate(meta.badgeKey)}</Badge>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <CardTitle className="text-xl">{translate(entry.labelKey)}</CardTitle>
+                      <p className="text-sm text-muted-foreground">{translate(entry.summaryKey)}</p>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="rounded-xl bg-background/70 p-3 text-sm text-muted-foreground">
+                      {translate(`support.goal.${entry.featureKey}`)}
+                    </div>
+                    <Link href={resolveSupportHref(entry, Boolean(user))}>
+                      <Button className="w-full gap-2">
+                        {translate(meta?.ctaKey || "support.cta.default")}
+                        <Arrow className="h-4 w-4" />
+                      </Button>
+                    </Link>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            );
+          })}
+        </div>
+
+        {secondaryCards.length > 0 && (
+          <motion.div initial="hidden" animate="visible" variants={safeFadeUp}>
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-primary" />
+                  <CardTitle>{translate("support.secondary.title")}</CardTitle>
                 </div>
-                <div>
-                  <h2 className="text-lg font-bold leading-tight">{path.label}</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">{path.subtitle}</p>
-                </div>
-              </div>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2">
+                {secondaryCards.map((entry) => {
+                  const meta = supportCardMeta[entry.featureKey];
+                  const Icon = meta?.icon || Compass;
+                  return (
+                    <Link key={entry.id} href={resolveSupportHref(entry, Boolean(user))}>
+                      <button
+                        type="button"
+                        className="w-full rounded-2xl border bg-card p-4 text-left hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                        data-testid={`support-secondary-${entry.featureKey}`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                            <Icon className="h-5 w-5 text-primary" />
+                          </div>
+                          <div className="space-y-1">
+                            <p className="font-medium">{translate(entry.labelKey)}</p>
+                            <p className="text-sm text-muted-foreground">{translate(entry.summaryKey)}</p>
+                          </div>
+                        </div>
+                      </button>
+                    </Link>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
 
-              {/* Feature list */}
-              <ul className="space-y-2 flex-1">
-                {path.features.map((feature) => (
-                  <li key={feature} className="flex items-start gap-2 text-sm">
-                    <Check className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-                    <span>{feature}</span>
-                  </li>
-                ))}
-              </ul>
-
-              {/* Best for */}
-              <div className="rounded-xl bg-muted/60 px-3 py-2.5">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-                  Best for
-                </p>
-                <p className="text-xs leading-relaxed">{path.bestFor}</p>
-              </div>
-
-              {/* CTA */}
-              {path.requiresAuth && !user ? (
-                <Link href="/login">
-                  <Button size="sm" className="w-full gap-1.5">
-                    Sign in to start
-                    <Arrow className="h-3.5 w-3.5" />
-                  </Button>
-                </Link>
-              ) : (
-                <Link href={path.ctaHref}>
-                  <Button
-                    size="sm"
-                    className={`w-full gap-1.5 ${path.ctaClass}`}
-                    data-testid={`btn-support-${path.id}`}
-                  >
-                    {path.ctaLabel}
-                    <Arrow className="h-3.5 w-3.5" />
-                  </Button>
-                </Link>
-              )}
+        <div className="grid gap-4 md:grid-cols-3">
+          {[
+            { key: "support.note.peer", icon: HeartHandshake },
+            { key: "support.note.therapist", icon: ShieldCheck },
+            { key: "support.note.language", icon: Sparkles },
+          ].map((item) => (
+            <motion.div key={item.key} initial="hidden" animate="visible" variants={safeFadeUp}>
+              <Card>
+                <CardContent className="p-4 space-y-3">
+                  <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                    <item.icon className="h-5 w-5 text-primary" />
+                  </div>
+                  <p className="text-sm text-muted-foreground">{translate(item.key)}</p>
+                </CardContent>
+              </Card>
             </motion.div>
           ))}
         </div>
-
-        {/* ── FAQ row ── */}
-        <motion.div
-          custom={5} initial="hidden" animate="visible" variants={safeFadeUp}
-          className="rounded-2xl border bg-card/60 p-5 grid sm:grid-cols-3 gap-5"
-        >
-          {faqs.map((faq) => (
-            <div key={faq.q} className="space-y-1">
-              <p className="text-sm font-semibold">{faq.q}</p>
-              <p className="text-xs text-muted-foreground leading-relaxed">{faq.a}</p>
-            </div>
-          ))}
-        </motion.div>
-
-        {/* ── Crisis footer ── */}
-        <motion.p
-          custom={6} initial="hidden" animate="visible" variants={safeFadeUp}
-          className="text-center text-xs text-muted-foreground"
-        >
-          In immediate danger or crisis?{" "}
-          <Link href="/crisis" className="underline underline-offset-2 text-destructive hover:text-destructive/80">
-            Get emergency support
-          </Link>
-        </motion.p>
-
       </div>
     </AppLayout>
   );

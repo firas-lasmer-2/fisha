@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
+import { canonicalHomeRouteForRole, canonicalPublicStartRoute } from "@/lib/navigation";
 import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { scrollReveal, staggerContainer, fadeUp, usePrefersReducedMotion, safeVariants, safeScrollReveal } from "@/lib/motion";
@@ -26,6 +27,7 @@ export default function LandingPage() {
   const safeReveal = safeScrollReveal(rm);
   const Arrow = isRTL ? ArrowLeft : ArrowRight;
   const currentYear = new Date().getFullYear();
+  const signedInHome = canonicalHomeRouteForRole(user?.role);
 
   const quizCards = [
     { key: "anxiety", icon: Brain, label: t("onboarding.feeling_anxious"), spec: "anxiety" },
@@ -35,12 +37,8 @@ export default function LandingPage() {
   ];
 
   const handleQuizClick = (spec: string) => {
-    if (user) {
-      navigate(spec ? `/therapists?specialization=${spec}` : "/therapists");
-    } else {
-      // Guests go to self-care (breathing exercise) — no login wall for exploration
-      navigate("/self-care");
-    }
+    void spec;
+    navigate(canonicalPublicStartRoute());
   };
 
   return (
@@ -56,6 +54,9 @@ export default function LandingPage() {
             </Link>
 
             <div className="hidden md:flex items-center gap-6">
+              <Link href="/support" className="text-sm text-muted-foreground hover-elevate rounded-md px-3 py-1.5" data-testid="link-nav-support">
+                {t("nav.support_hub") === "nav.support_hub" ? t("nav.support") : t("nav.support_hub")}
+              </Link>
               <Link href="/therapists" className="text-sm text-muted-foreground hover-elevate rounded-md px-3 py-1.5" data-testid="link-nav-therapists">
                 {t("nav.therapists")}
               </Link>
@@ -72,7 +73,7 @@ export default function LandingPage() {
               <LanguageSwitcher variant="ghost" />
               {!isLoading && (
                 user ? (
-                  <Link href="/dashboard">
+                  <Link href={signedInHome}>
                     <Button size="sm" data-testid="button-dashboard">{t("nav.dashboard")}</Button>
                   </Link>
                 ) : (
@@ -121,15 +122,15 @@ export default function LandingPage() {
           </motion.p>
 
           <motion.div variants={safeFadeUp} className="flex flex-col sm:flex-row gap-4 justify-center">
-            <a href={user ? "/dashboard" : "/login"}>
+            <a href={user ? signedInHome : canonicalPublicStartRoute()}>
               <Button size="lg" className="text-base gap-2 w-full sm:w-auto" data-testid="button-hero-cta">
                 {t("landing.hero.cta")}
                 <Arrow className="h-4 w-4" />
               </Button>
             </a>
-            <Link href="/therapists">
+            <Link href="/support">
               <Button variant="outline" size="lg" className="text-base w-full sm:w-auto" data-testid="button-hero-secondary">
-                {t("landing.hero.secondary")}
+                {t("landing.hero.secondary_support")}
               </Button>
             </Link>
           </motion.div>
@@ -407,9 +408,9 @@ export default function LandingPage() {
               <Moon className="h-10 w-10 mx-auto mb-6 opacity-80" />
               <h2 className="text-2xl sm:text-3xl font-bold mb-4">{t("landing.cta.title")}</h2>
               <p className="text-white/80 mb-8 max-w-lg mx-auto">{t("landing.cta.desc")}</p>
-              <a href={user ? "/dashboard" : "/login"}>
+              <a href={user ? signedInHome : canonicalPublicStartRoute()}>
                 <Button size="lg" variant="secondary" className="text-primary font-semibold" data-testid="button-cta-signup">
-                  {t("landing.cta.button")}
+                  {t("landing.cta.button_support")}
                   <Arrow className="h-4 w-4 ms-2" />
                 </Button>
               </a>
